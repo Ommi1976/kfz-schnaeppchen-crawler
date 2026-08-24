@@ -34,15 +34,14 @@ jobs:
           path: "./kfz_schnaeppchen"
 
   build:
-    name: Add-on-Image bauen (${{ matrix.arch }})
+    name: Add-on-Image bauen (amd64)
     runs-on: ubuntu-latest
     needs: [python, addon-lint]
-    strategy:
-      matrix:
-        arch: [amd64, aarch64]
     steps:
       - uses: actions/checkout@v4
-      - name: Testbuild (ohne Push)
-        uses: home-assistant/builder@master
-        with:
-          args: --test --${{ matrix.arch }} --target /data/kfz_schnaeppchen
+      - name: Docker-Image bauen (validiert das Dockerfile)
+        run: |
+          docker build \
+            --build-arg BUILD_FROM=ghcr.io/home-assistant/amd64-base-python:3.13-alpine3.20 \
+            -t kfz-schnaeppchen:ci \
+            kfz_schnaeppchen
