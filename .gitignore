@@ -1,0 +1,8 @@
+# Standalone-Laufzeitdateien (nicht das Add-on-Manifest config.yaml!)
+kfz_schnaeppchen/crawler.yaml
+**/seen.sqlite
+**/opts_test.json
+__pycache__/
+*.pyc
+.venv/
+venv/

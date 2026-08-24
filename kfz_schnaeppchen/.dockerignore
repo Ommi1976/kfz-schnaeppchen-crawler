@@ -1,0 +1,9 @@
+crawler.yaml
+crawler.example.yaml
+**/seen.sqlite
+opts_test.json
+__pycache__/
+*.pyc
+.venv/
+venv/
+run.py

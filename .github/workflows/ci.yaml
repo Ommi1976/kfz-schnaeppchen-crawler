@@ -1,0 +1,51 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  python:
+    name: Python-Kompilierung & Import
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Abhängigkeiten installieren
+        run: pip install -r kfz_schnaeppchen/requirements.txt
+      - name: Kompilieren
+        run: python -m compileall -q kfz_schnaeppchen/kfz_crawler
+      - name: Import-Test
+        working-directory: kfz_schnaeppchen
+        run: python -c "import kfz_crawler.main, kfz_crawler.ha_run; from kfz_crawler.portals import REGISTRY; print(list(REGISTRY))"
+
+  addon-lint:
+    name: Home-Assistant Add-on Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Add-on-Konfiguration prüfen
+        uses: frenck/action-addon-linter@v2
+        with:
+          path: "./kfz_schnaeppchen"
+
+  build:
+    name: Add-on-Image bauen (${{ matrix.arch }})
+    runs-on: ubuntu-latest
+    needs: [python, addon-lint]
+    strategy:
+      matrix:
+        arch: [amd64, aarch64]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Testbuild (ohne Push)
+        uses: home-assistant/builder@master
+        with:
+          args: |
+            --test \
+            --${{ matrix.arch }} \
+            --target kfz_schnaeppchen

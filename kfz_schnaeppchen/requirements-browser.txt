@@ -1,0 +1,9 @@
+# Optionales Browser-Backend (#1) für JS-lastige / bot-geschützte Portale.
+# Installation:
+#   pip install -r requirements-browser.txt
+#   playwright install chromium
+#
+# Hinweis: umgeht die 403-Blocks von AutoUncle/heycar, NICHT die von mobile.de
+# (DataDome erkennt Headless-Chromium). heycar liefert unter hey.car aktuell
+# britische Inhalte und ist für den deutschen Markt nicht nutzbar.
+playwright>=1.44

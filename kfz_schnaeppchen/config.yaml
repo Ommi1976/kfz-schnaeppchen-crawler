@@ -1,0 +1,88 @@
+name: KFZ Schnäppchen Crawler
+version: "0.1.0"
+slug: kfz_schnaeppchen
+description: Findet Auto-Schnäppchen über die größten deutschen Fahrzeugportale und meldet Treffer an Home Assistant.
+url: https://github.com/Ommi1976/kfz-schnaeppchen-crawler
+arch:
+  - aarch64
+  - amd64
+  - armv7
+init: false
+hassio_api: true
+homeassistant_api: true
+map:
+  - share:rw
+options:
+  interval_minutes: 30
+  deal_threshold: 15
+  min_comparables: 5
+  request_delay: 2.5
+  max_pages: 2
+  proxy: ""
+  suspicious_discount: 60
+  verify_details: false
+  use_browser: false
+  portals:
+    - autoscout24
+    - kleinanzeigen
+  searches:
+    - name: VW Golf 7 Diesel Automatik
+      make: volkswagen
+      model: golf
+      year_from: 2015
+      year_to: 2020
+      price_from: 5000
+      price_to: 15000
+      mileage_to: 150000
+      fuel: diesel
+      transmission: automatik
+      power_from: 110
+      seller: haendler
+    - name: E-Auto bis 25k mit Reichweite
+      fuel: elektro
+      price_to: 25000
+      year_from: 2019
+      mileage_to: 100000
+      ev_range_from: 300
+      battery_from_kwh: 40
+  notify_persistent: true
+  notify_service: ""
+  telegram_enabled: false
+  telegram_bot_token: ""
+  telegram_chat_id: ""
+schema:
+  interval_minutes: int(5,1440)
+  deal_threshold: int(1,90)
+  min_comparables: int(1,50)
+  request_delay: float(0.5,30)
+  max_pages: int(1,10)
+  proxy: str?
+  suspicious_discount: int(10,95)
+  verify_details: bool
+  use_browser: bool
+  portals:
+    - list(autoscout24|kleinanzeigen|autouncle|mobile_de|heycar)
+  searches:
+    - name: str
+      make: str?
+      model: str?
+      year_from: int?
+      year_to: int?
+      price_from: int?
+      price_to: int?
+      mileage_from: int?
+      mileage_to: int?
+      fuel: list(|benzin|diesel|elektro|hybrid|lpg|cng)?
+      transmission: list(|schaltgetriebe|automatik)?
+      body_type: list(|limousine|kombi|suv|cabrio|coupe|van|kleinwagen)?
+      power_from: int?
+      power_to: int?
+      seller: list(|haendler|privat)?
+      doors: list(|2/3|4/5)?
+      ev_range_from: int?
+      battery_from_kwh: float?
+  notify_persistent: bool
+  notify_service: str?
+  telegram_enabled: bool
+  telegram_bot_token: str?
+  telegram_chat_id: password?

@@ -1,0 +1,105 @@
+# KFZ Schnäppchen Crawler – Beispielkonfiguration (Standalone-Betrieb)
+# Kopiere diese Datei nach  crawler.yaml  und passe sie an.
+# (Nur für den Standalone-Lauf via  python run.py  – im Home-Assistant-Add-on
+#  werden diese Einstellungen stattdessen in der Add-on-Oberfläche gepflegt.)
+
+# --- Allgemeine Einstellungen ---
+settings:
+  # Ab wie viel Prozent UNTER dem errechneten Marktpreis (Median)
+  # gilt ein Inserat als Schnäppchen? 0.15 = 15 % günstiger.
+  deal_threshold: 0.15
+
+  # Mindestanzahl vergleichbarer Inserate, damit ein Marktpreis
+  # überhaupt als verlässlich gilt (sonst kein Deal-Alarm).
+  min_comparables: 5
+
+  # Wartezeit (Sekunden) zwischen einzelnen HTTP-Anfragen,
+  # um Portale nicht zu überlasten und Blocks zu vermeiden.
+  request_delay: 2.5
+
+  # Wie viele Ergebnisseiten pro Portal & Suche maximal geladen werden.
+  max_pages: 2
+
+  # Datenbank-Datei für bereits gesehene Inserate (Duplikat-Filter).
+  db_path: seen.sqlite
+
+  # Optionaler Proxy (leer = keiner). Für Tor z. B. socks5h://127.0.0.1:9050
+  # Hinweis: löst KEINE Bot-Blocks (mobile.de/AutoUncle), nur gegen IP-Limits.
+  proxy: ""
+
+  # Ab welchem Rabatt ein Inserat als "zu gut um wahr" (verdächtig) gilt und
+  # NICHT gemeldet wird. 0.6 = 60 % unter erwartetem Preis.
+  suspicious_discount: 0.6
+
+  # #4: Kleinanzeigen-Detailseiten nachladen, um Kraftstoff/Getriebe/Leistung
+  # strukturiert zu prüfen (genauer, aber mehr Requests). true/false.
+  verify_details: false
+
+  # #1: Playwright-Browser für geblockte Portale (mobile.de/AutoUncle/heycar)
+  # nutzen. Erfordert:  pip install playwright && playwright install chromium
+  use_browser: false
+
+# --- Welche Portale aktiv sind ---
+portals:
+  autoscout24: true
+  kleinanzeigen: true
+  mobile_de: true
+  heycar: true
+  autouncle: true
+
+# --- Deine Suchen ---
+# Beliebig viele. Jede Suche wird auf allen aktiven Portalen ausgeführt.
+# Alle Felder außer "name" sind optional. Verfügbare Filter:
+#   make, model
+#   year_from / year_to           Erstzulassung
+#   price_from / price_to         Preis (€)
+#   mileage_from / mileage_to     Kilometerstand
+#   fuel        benzin | diesel | elektro | hybrid | lpg | cng
+#   transmission  schaltgetriebe | automatik
+#   body_type   limousine | kombi | suv | cabrio | coupe | van | kleinwagen
+#   power_from / power_to         Leistung in PS
+#   seller      haendler | privat
+#   doors       "2/3" | "4/5"
+#   -- E-Auto-spezifisch --
+#   ev_range_from                 Mindest-Reichweite (km)
+#   battery_from_kwh              Mindest-Batteriekapazität (kWh)
+searches:
+  - name: "VW Golf 7 Diesel Automatik"
+    make: "volkswagen"
+    model: "golf"
+    year_from: 2015
+    year_to: 2020
+    price_from: 5000
+    price_to: 15000
+    mileage_to: 150000
+    fuel: "diesel"
+    transmission: "automatik"
+    power_from: 110         # ab 110 PS
+    seller: "haendler"
+
+  - name: "BMW 3er Kombi"
+    make: "bmw"
+    model: "320"
+    year_from: 2016
+    price_to: 22000
+    mileage_to: 130000
+    body_type: "kombi"
+
+  - name: "E-Auto Schnäppchen"
+    fuel: "elektro"
+    price_to: 25000
+    year_from: 2019
+    mileage_to: 100000
+    ev_range_from: 300      # mind. 300 km Reichweite
+    battery_from_kwh: 40    # mind. 40 kWh Akku
+
+# --- Benachrichtigungen ---
+notify:
+  console: true          # Ausgabe im Terminal (immer sinnvoll)
+  telegram:
+    enabled: false
+    bot_token: ""        # von @BotFather
+    chat_id: ""          # deine Chat-ID
+  home_assistant:        # wirkt nur innerhalb des HA-Add-ons (SUPERVISOR_TOKEN)
+    persistent: false    # persistente Benachrichtigung in HA erzeugen
+    notify_service: ""   # z. B. "notify.mobile_app_dein_handy"

@@ -1,0 +1,5 @@
+# Alle Textdateien mit LF speichern (Add-on läuft auf Linux; run.sh braucht LF).
+* text=auto eol=lf
+
+# Binärdateien nicht anfassen.
+*.png binary
