@@ -45,7 +45,4 @@ jobs:
       - name: Testbuild (ohne Push)
         uses: home-assistant/builder@master
         with:
-          args: |
-            --test \
-            --${{ matrix.arch }} \
-            --target kfz_schnaeppchen
+          args: --test --${{ matrix.arch }} --target /data/kfz_schnaeppchen
