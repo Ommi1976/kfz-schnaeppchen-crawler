@@ -43,11 +43,23 @@ Fingerprinting, nicht IP). Ein geblocktes Portal stoppt die anderen **nicht**.
   -Batteriekapazität.
 
 ## Als Home Assistant Add-on installieren
+
+[![Add-Repository zu Home Assistant hinzufügen](https://my.home-assistant.io/badges/supervisor_add_addon_repository.svg)](https://my.home-assistant.io/redirect/supervisor_add_addon_repository/?repository_url=https%3A%2F%2Fgithub.com%2FOmmi1976%2Fkfz-schnaeppchen-crawler)
+
+**Ein-Klick:** Auf den Button oben klicken → HA-Adresse bestätigen → **Hinzufügen**.
+Danach das Add-on im Store (Abschnitt „KFZ Schnäppchen Add-ons", ganz unten)
+installieren.
+
+**Manuell:**
 1. **Einstellungen → Add-ons → Add-on Store**
-2. Drei-Punkte-Menü → **Repositories** → URL dieses Repos hinzufügen
-3. **„KFZ Schnäppchen Crawler"** installieren, konfigurieren, starten
+2. Oben rechts **⋮ → Repositories**
+3. URL hinzufügen: `https://github.com/Ommi1976/kfz-schnaeppchen-crawler`
+4. Store neu laden, nach unten scrollen → **„KFZ Schnäppchen Crawler"** installieren
 
 Details und alle Optionen: [kfz_schnaeppchen/DOCS.md](kfz_schnaeppchen/DOCS.md)
+
+> Hinweis: Ein eigenes Add-on muss **einmalig** als Repository hinzugefügt
+> werden – das ist bei Home Assistant für alle Nicht-Standard-Add-ons so.
 
 ## Ohne Home Assistant (Standalone-CLI)
 Der Crawler läuft auch eigenständig auf jedem Rechner mit Python:
