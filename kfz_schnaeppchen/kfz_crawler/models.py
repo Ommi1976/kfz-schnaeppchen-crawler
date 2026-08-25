@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import re
 from dataclasses import dataclass, field
 from typing import Optional
 
@@ -79,31 +80,77 @@ class SearchQuery:
     ev_range_from: Optional[int] = None       # Mindest-Reichweite (km)
     battery_from_kwh: Optional[float] = None  # Mindest-Batteriekapazität (kWh)
 
+    # Ausstattung / Freitext (Titel/Beschreibung):
+    keywords: list = field(default_factory=list)        # müssen ALLE enthalten sein
+    exclude_terms: list = field(default_factory=list)   # dürfen NICHT enthalten sein
+
+    # Verwaltung (nur UI/DB):
+    id: str = ""
+    active: bool = True
+
+    @staticmethod
+    def _termlist(value) -> list:
+        if value is None:
+            return []
+        if isinstance(value, str):
+            parts = re.split(r"[,;\n]+", value)
+        else:
+            parts = list(value)
+        return [str(p).strip() for p in parts if str(p).strip()]
+
     @classmethod
     def from_dict(cls, d: dict) -> "SearchQuery":
         def s(key: str) -> str:
             return str(d.get(key, "") or "").strip().lower()
 
+        def i(key: str):
+            v = d.get(key)
+            if v in (None, "", "null"):
+                return None
+            try:
+                return int(v)
+            except (TypeError, ValueError):
+                return None
+
         return cls(
             name=d.get("name", "Unbenannte Suche"),
             make=s("make"),
             model=s("model"),
-            year_from=d.get("year_from"),
-            year_to=d.get("year_to"),
-            price_from=d.get("price_from"),
-            price_to=d.get("price_to"),
-            mileage_from=d.get("mileage_from"),
-            mileage_to=d.get("mileage_to"),
+            year_from=i("year_from"),
+            year_to=i("year_to"),
+            price_from=i("price_from"),
+            price_to=i("price_to"),
+            mileage_from=i("mileage_from"),
+            mileage_to=i("mileage_to"),
             fuel=s("fuel"),
             transmission=s("transmission"),
             body_type=s("body_type"),
-            power_from=d.get("power_from"),
-            power_to=d.get("power_to"),
+            power_from=i("power_from"),
+            power_to=i("power_to"),
             seller=s("seller"),
             doors=s("doors"),
-            ev_range_from=d.get("ev_range_from"),
-            battery_from_kwh=d.get("battery_from_kwh"),
+            ev_range_from=i("ev_range_from"),
+            battery_from_kwh=(float(d["battery_from_kwh"])
+                              if d.get("battery_from_kwh") not in (None, "", "null") else None),
+            keywords=cls._termlist(d.get("keywords")),
+            exclude_terms=cls._termlist(d.get("exclude_terms")),
+            id=str(d.get("id", "") or ""),
+            active=bool(d.get("active", True)),
         )
+
+    def to_dict(self) -> dict:
+        return {
+            "id": self.id, "name": self.name, "active": self.active,
+            "make": self.make, "model": self.model,
+            "year_from": self.year_from, "year_to": self.year_to,
+            "price_from": self.price_from, "price_to": self.price_to,
+            "mileage_from": self.mileage_from, "mileage_to": self.mileage_to,
+            "fuel": self.fuel, "transmission": self.transmission,
+            "body_type": self.body_type, "power_from": self.power_from,
+            "power_to": self.power_to, "seller": self.seller, "doors": self.doors,
+            "ev_range_from": self.ev_range_from, "battery_from_kwh": self.battery_from_kwh,
+            "keywords": self.keywords, "exclude_terms": self.exclude_terms,
+        }
 
 
 # Gängige Marken-Synonyme/Abkürzungen für den Titel-Abgleich.
@@ -194,4 +241,13 @@ def matches_query(l: Listing, q: SearchQuery) -> bool:
         return False
     if q.battery_from_kwh and l.battery_kwh is not None and l.battery_kwh < q.battery_from_kwh:
         return False
+
+    # Ausstattung / Freitext: Stichwörter müssen ALLE vorkommen, Ausschluss keiner.
+    hay = f"{l.title or ''} {l.body or ''}".lower()
+    for term in getattr(q, "keywords", []) or []:
+        if term.lower() not in hay:
+            return False
+    for term in getattr(q, "exclude_terms", []) or []:
+        if term.lower() in hay:
+            return False
     return True

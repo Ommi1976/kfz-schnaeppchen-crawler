@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import json
 import sqlite3
 import threading
 import time
+import uuid
 from pathlib import Path
-from typing import List
+from typing import List, Optional
 
 from .models import Listing
 
@@ -47,7 +49,97 @@ class SeenStore:
             )
             """
         )
+        # In der UI verwaltete Suchen.
+        self.conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS searches (
+                id         TEXT PRIMARY KEY,
+                name       TEXT,
+                active     INTEGER DEFAULT 1,
+                spec_json  TEXT,
+                sort_order INTEGER,
+                created    REAL
+            )
+            """
+        )
         self.conn.commit()
+
+    # ---- Suchen (UI-Verwaltung) ---------------------------------------
+    def list_searches(self) -> List[dict]:
+        with self._lock:
+            cur = self.conn.execute(
+                "SELECT id, name, active, spec_json FROM searches "
+                "ORDER BY sort_order ASC, created ASC"
+            )
+            out = []
+            for r in cur.fetchall():
+                spec = json.loads(r["spec_json"] or "{}")
+                spec["id"] = r["id"]
+                spec["name"] = r["name"]
+                spec["active"] = bool(r["active"])
+                out.append(spec)
+            return out
+
+    def get_search(self, search_id: str) -> Optional[dict]:
+        with self._lock:
+            cur = self.conn.execute(
+                "SELECT id, name, active, spec_json FROM searches WHERE id = ?", (search_id,)
+            )
+            r = cur.fetchone()
+            if not r:
+                return None
+            spec = json.loads(r["spec_json"] or "{}")
+            spec["id"] = r["id"]
+            spec["name"] = r["name"]
+            spec["active"] = bool(r["active"])
+            return spec
+
+    def create_search(self, spec: dict) -> dict:
+        sid = str(uuid.uuid4())[:8]
+        spec = dict(spec)
+        spec["id"] = sid
+        with self._lock:
+            cur = self.conn.execute("SELECT COALESCE(MAX(sort_order), 0) AS m FROM searches")
+            order = int(cur.fetchone()["m"]) + 1
+            self.conn.execute(
+                "INSERT INTO searches (id, name, active, spec_json, sort_order, created) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
+                (sid, spec.get("name", "Suche"), int(bool(spec.get("active", True))),
+                 json.dumps(spec, ensure_ascii=False), order, time.time()),
+            )
+            self.conn.commit()
+        return self.get_search(sid)
+
+    def update_search(self, search_id: str, spec: dict) -> Optional[dict]:
+        with self._lock:
+            if self.conn.execute("SELECT 1 FROM searches WHERE id = ?", (search_id,)).fetchone() is None:
+                return None
+            spec = dict(spec)
+            spec["id"] = search_id
+            self.conn.execute(
+                "UPDATE searches SET name = ?, active = ?, spec_json = ? WHERE id = ?",
+                (spec.get("name", "Suche"), int(bool(spec.get("active", True))),
+                 json.dumps(spec, ensure_ascii=False), search_id),
+            )
+            self.conn.commit()
+        return self.get_search(search_id)
+
+    def delete_search(self, search_id: str) -> bool:
+        with self._lock:
+            cur = self.conn.execute("DELETE FROM searches WHERE id = ?", (search_id,))
+            self.conn.commit()
+            return cur.rowcount > 0
+
+    def count_searches(self) -> int:
+        with self._lock:
+            return int(self.conn.execute("SELECT COUNT(*) AS c FROM searches").fetchone()["c"])
+
+    def seed_searches(self, specs: List[dict]) -> None:
+        """Einmalig aus den Add-on-Optionen befüllen, falls noch keine Suchen da sind."""
+        if self.count_searches() > 0:
+            return
+        for spec in specs:
+            self.create_search(spec)
 
     def is_new(self, listing: Listing) -> bool:
         with self._lock:

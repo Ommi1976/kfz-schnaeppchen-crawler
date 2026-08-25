@@ -14,7 +14,7 @@ from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import Body, FastAPI, HTTPException
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -22,7 +22,19 @@ from . import __version__
 from .config import Config
 from .ha_run import build_config, load_options
 from .main import run_search
+from .models import SearchQuery
+from .portals import REGISTRY
 from .storage import SeenStore
+
+# Auswahllisten für das Suchformular in der UI.
+META = {
+    "portals": list(REGISTRY.keys()),
+    "fuel": ["", "benzin", "diesel", "elektro", "hybrid", "lpg", "cng"],
+    "transmission": ["", "schaltgetriebe", "automatik"],
+    "body_type": ["", "limousine", "kombi", "suv", "cabrio", "coupe", "van", "kleinwagen"],
+    "seller": ["", "haendler", "privat"],
+    "doors": ["", "2/3", "4/5"],
+}
 
 WEB_DIR = Path(__file__).parent / "web"
 
@@ -39,14 +51,19 @@ def _load_cfg() -> Config:
     return build_config(load_options())
 
 
-def _run_all(app: FastAPI) -> dict:
-    """Führt alle aktiven Suchen aus (blockierend -> via to_thread aufrufen)."""
-    cfg = _load_cfg()
+def _run_all(app: FastAPI, only_id: str | None = None) -> dict:
+    """Führt die (aktiven) Suchen aus der DB aus (blockierend -> via to_thread)."""
+    cfg = _load_cfg()  # globale Einstellungen/Portale/Benachrichtigung
     app.state.cfg = cfg
     store: SeenStore = app.state.store
     summary = {}
     total = 0
-    for query in cfg.searches:
+    for spec in store.list_searches():
+        if only_id and spec.get("id") != only_id:
+            continue
+        if not spec.get("active", True):
+            continue
+        query = SearchQuery.from_dict(spec)
         try:
             deals = run_search(cfg, query, store)
             summary[query.name] = len(deals)
@@ -57,12 +74,12 @@ def _run_all(app: FastAPI) -> dict:
     return {"total": total, "per_search": summary}
 
 
-async def _do_run(app: FastAPI) -> None:
+async def _do_run(app: FastAPI, only_id: str | None = None) -> None:
     async with app.state.run_lock:
         app.state.running = True
         app.state.last_run_at = _now_iso()
         try:
-            report = await asyncio.to_thread(_run_all, app)
+            report = await asyncio.to_thread(_run_all, app, only_id)
             app.state.last_report = report
         finally:
             app.state.running = False
@@ -95,6 +112,8 @@ async def lifespan(app: FastAPI):
     cfg = _load_cfg()
     app.state.cfg = cfg
     app.state.store = SeenStore(cfg.settings.db_path)
+    # Beim ersten Start die Suchen aus den Add-on-Optionen übernehmen.
+    app.state.store.seed_searches([s.to_dict() for s in cfg.searches])
     app.state.run_lock = asyncio.Lock()
     app.state.running = False
     app.state.last_run_at = None
@@ -132,23 +151,20 @@ async def ready():
     return {"ready": True}
 
 
+@app.get("/api/meta")
+async def meta():
+    return META
+
+
 @app.get("/api/status")
 async def status():
     cfg: Config = app.state.cfg
-    searches = [
-        {
-            "name": s.name,
-            "make": s.make,
-            "model": s.model,
-            "fuel": s.fuel,
-            "price_from": s.price_from,
-            "price_to": s.price_to,
-            "year_from": s.year_from,
-            "year_to": s.year_to,
-            "count": app.state.last_report.get("per_search", {}).get(s.name),
-        }
-        for s in cfg.searches
-    ]
+    per = app.state.last_report.get("per_search", {})
+    searches = []
+    for spec in app.state.store.list_searches():
+        spec = dict(spec)
+        spec["count"] = per.get(spec.get("name"))
+        searches.append(spec)
     return {
         "version": __version__,
         "running": app.state.running,
@@ -161,6 +177,53 @@ async def status():
         "searches": searches,
         "last_report": app.state.last_report,
     }
+
+
+# ---- Suchen verwalten -------------------------------------------------
+def _validate_spec(payload: dict) -> dict:
+    name = str(payload.get("name", "")).strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="Bitte einen Namen angeben.")
+    # Über SearchQuery normalisieren (coerct Typen, säubert Freitext) und zurück
+    # als sauberes Dict speichern.
+    spec = SearchQuery.from_dict(payload).to_dict()
+    spec["name"] = name
+    spec["active"] = bool(payload.get("active", True))
+    return spec
+
+
+@app.get("/api/searches")
+async def list_searches():
+    return app.state.store.list_searches()
+
+
+@app.post("/api/searches", status_code=201)
+async def create_search(payload: dict = Body(...)):
+    return app.state.store.create_search(_validate_spec(payload))
+
+
+@app.put("/api/searches/{search_id}")
+async def update_search(search_id: str, payload: dict = Body(...)):
+    updated = app.state.store.update_search(search_id, _validate_spec(payload))
+    if updated is None:
+        raise HTTPException(status_code=404, detail="Suche nicht gefunden.")
+    return updated
+
+
+@app.delete("/api/searches/{search_id}", status_code=204)
+async def delete_search(search_id: str):
+    if not app.state.store.delete_search(search_id):
+        raise HTTPException(status_code=404, detail="Suche nicht gefunden.")
+
+
+@app.post("/api/searches/{search_id}/run")
+async def run_one(search_id: str):
+    if app.state.store.get_search(search_id) is None:
+        raise HTTPException(status_code=404, detail="Suche nicht gefunden.")
+    if app.state.running:
+        return JSONResponse({"status": "already_running"}, status_code=409)
+    asyncio.create_task(_do_run(app, only_id=search_id))
+    return {"status": "started"}
 
 
 @app.get("/api/deals")

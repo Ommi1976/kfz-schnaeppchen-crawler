@@ -16,40 +16,109 @@
       </div>
     </div>
     <div class="actions">
-      <button id="run" class="btn primary">Jetzt suchen</button>
+      <button id="run" class="btn primary">Alle jetzt suchen</button>
       <button id="refresh" class="btn">Aktualisieren</button>
     </div>
   </header>
 
   <section class="stats" id="stats"></section>
 
-  <section class="controls">
-    <label>Suche:
-      <select id="searchFilter"><option value="">Alle</option></select>
-    </label>
-    <span class="spacer"></span>
-    <button id="clear" class="btn danger small">Trefferliste leeren</button>
+  <!-- Suchen verwalten -->
+  <section class="block">
+    <div class="block-head">
+      <h2>Suchen</h2>
+      <button id="new-search" class="btn primary small">＋ Neue Suche</button>
+    </div>
+    <div id="search-list" class="search-list"></div>
   </section>
 
-  <section class="tablewrap">
-    <table id="deals">
-      <thead>
-        <tr>
-          <th>Portal</th><th>Fahrzeug</th><th class="num">Preis</th>
-          <th class="num">Marktpreis</th><th class="num">Rabatt</th>
-          <th class="num">Baujahr</th><th class="num">km</th>
-          <th>Gefunden</th><th></th>
-        </tr>
-      </thead>
-      <tbody id="deals-body">
-        <tr><td colspan="9" class="empty">lädt…</td></tr>
-      </tbody>
-    </table>
+  <!-- Treffer -->
+  <section class="block">
+    <div class="block-head">
+      <h2>Treffer</h2>
+      <div class="controls-inline">
+        <label>Suche:
+          <select id="searchFilter"><option value="">Alle</option></select>
+        </label>
+        <button id="clear" class="btn danger small">Liste leeren</button>
+      </div>
+    </div>
+    <div class="tablewrap">
+      <table id="deals">
+        <thead>
+          <tr>
+            <th>Portal</th><th>Fahrzeug</th><th class="num">Preis</th>
+            <th class="num">Marktpreis</th><th class="num">Rabatt</th>
+            <th class="num">Baujahr</th><th class="num">km</th>
+            <th>Gefunden</th><th></th>
+          </tr>
+        </thead>
+        <tbody id="deals-body">
+          <tr><td colspan="9" class="empty">lädt…</td></tr>
+        </tbody>
+      </table>
+    </div>
   </section>
 
-  <footer>
-    <span id="footer-info"></span>
-  </footer>
+  <footer><span id="footer-info"></span></footer>
+
+  <!-- Formular-Dialog -->
+  <div id="modal" class="modal hidden">
+    <div class="modal-card">
+      <div class="modal-head">
+        <h3 id="modal-title">Neue Suche</h3>
+        <button id="modal-close" class="iconbtn">✕</button>
+      </div>
+      <form id="search-form">
+        <input type="hidden" id="f-id">
+        <div class="grid">
+          <label class="full">Name *
+            <input id="f-name" required placeholder="z. B. VW Golf Diesel">
+          </label>
+
+          <label>Marke <input id="f-make" placeholder="volkswagen"></label>
+          <label>Modell <input id="f-model" placeholder="golf"></label>
+
+          <label>Kraftstoff <select id="f-fuel"></select></label>
+          <label>Getriebe <select id="f-transmission"></select></label>
+
+          <label>Karosserie <select id="f-body_type"></select></label>
+          <label>Anbieter <select id="f-seller"></select></label>
+
+          <label>Baujahr von <input id="f-year_from" type="number" min="1990" max="2030"></label>
+          <label>Baujahr bis <input id="f-year_to" type="number" min="1990" max="2030"></label>
+
+          <label>Preis von (€) <input id="f-price_from" type="number" min="0"></label>
+          <label>Preis bis (€) <input id="f-price_to" type="number" min="0"></label>
+
+          <label>km von <input id="f-mileage_from" type="number" min="0"></label>
+          <label>km bis <input id="f-mileage_to" type="number" min="0"></label>
+
+          <label>Leistung von (PS) <input id="f-power_from" type="number" min="0"></label>
+          <label>Leistung bis (PS) <input id="f-power_to" type="number" min="0"></label>
+
+          <label>Türen <select id="f-doors"></select></label>
+          <label>E‑Reichweite min (km) <input id="f-ev_range_from" type="number" min="0"></label>
+
+          <label>Akku min (kWh) <input id="f-battery_from_kwh" type="number" min="0" step="0.1"></label>
+          <label class="check"><input id="f-active" type="checkbox" checked> aktiv</label>
+
+          <label class="full">Ausstattung / Stichwörter (Titel muss enthalten, Komma-getrennt)
+            <input id="f-keywords" placeholder="navi, klimaautomatik, ahk">
+          </label>
+          <label class="full">Ausschluss‑Stichwörter (Komma-getrennt)
+            <input id="f-exclude_terms" placeholder="unfall, export, bastler">
+          </label>
+        </div>
+        <div class="modal-actions">
+          <span id="form-error" class="form-error"></span>
+          <span class="spacer"></span>
+          <button type="button" id="modal-cancel" class="btn">Abbrechen</button>
+          <button type="submit" class="btn primary">Speichern</button>
+        </div>
+      </form>
+    </div>
+  </div>
 
   <script src="static/app.js"></script>
 </body>
