@@ -1,10 +1,18 @@
-#!/usr/bin/with-contenv bashio
-# Startet den KFZ Schnäppchen Crawler im Add-on-Kontext.
-# Die Konfiguration wird von Home Assistant nach /data/options.json geschrieben
-# und direkt von kfz_crawler.ha_run gelesen.
+#!/usr/bin/env bash
+set -euo pipefail
 
-bashio::log.info "Starte KFZ Schnäppchen Crawler…"
+export TZ="Europe/Berlin"
+export PYTHONUNBUFFERED=1
+export DATA_DIR=/data
 
-cd /app || bashio::exit.nok "Arbeitsverzeichnis /app fehlt"
+# Home Assistant mountet /data als root:root. Einmal beim Start korrigieren,
+# danach läuft die App ohne Root-Rechte.
+if [ "$(id -u)" = "0" ]; then
+    mkdir -p /data
+    chown -R crawler:crawler /data
+    exec gosu crawler /run.sh
+fi
 
+echo "[KFZ Schnäppchen] Starte Crawler (Intervall-Schleife)..."
+cd /app
 exec python3 -m kfz_crawler.ha_run
