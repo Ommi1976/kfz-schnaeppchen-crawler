@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import sys
+from collections import Counter
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import List
 
@@ -75,8 +76,18 @@ def run_search(cfg: Config, query: SearchQuery, store: SeenStore) -> List[Listin
             all_listings.extend(fut.result())
 
     # Zentraler Nachfilter: erweiterte Kriterien (Getriebe, Leistung, Karosserie,
-    # E-Auto-Reichweite …) portalübergreifend anwenden.
+    # E-Auto-Reichweite …) portalübergreifend anwenden. Die Aufteilung wird
+    # protokolliert, damit ein Portal mit Roh-Treffern nicht stillschweigend
+    # aus der Anzeige verschwindet.
+    before_filter = Counter(l.portal for l in all_listings)
     all_listings = [l for l in all_listings if matches_query(l, query)]
+    after_filter = Counter(l.portal for l in all_listings)
+    if before_filter:
+        portal_counts = ", ".join(
+            f"{portal}: {after_filter.get(portal, 0)}/{count}"
+            for portal, count in sorted(before_filter.items())
+        )
+        console.print(f"  [dim]Portalfilter: {portal_counts} (passend/Roh)[/dim]")
 
     # Dublettenfilter: dasselbe Auto (Baujahr + exakter km) nur einmal.
     all_listings = dedupe(all_listings)

@@ -127,13 +127,19 @@ class AutoScout24(BasePortal):
                     str(d.get("data", "")) for d in (it.get("vehicleDetails") or [])
                     if isinstance(d, dict)
                 )
+                first_registration = (
+                    tr.get("firstRegistration")
+                    or v.get("firstRegistrationDate")
+                    or v.get("firstRegistration")
+                    or ""
+                )
                 listings.append(
                     Listing(
                         portal=self.name,
                         title=self._title(it),
                         url=self._url(it),
                         price=price,
-                        year=self._to_int(v.get("firstRegistrationDate", "")[:4]),
+                        year=self._extract_year(first_registration),
                         mileage=self._to_int(tr.get("mileage")),
                         fuel=v.get("fuelType"),
                         location=(it.get("location") or {}).get("city"),
@@ -194,6 +200,14 @@ class AutoScout24(BasePortal):
         if url and not url.startswith("http"):
             url = self.BASE + url
         return url or self.BASE
+
+    @staticmethod
+    def _extract_year(value) -> Optional[int]:
+        """Erstzulassungsjahr aus ISO-Datum oder MM-JJJJ lesen."""
+        if not value:
+            return None
+        match = re.search(r"\b(19\d{2}|20\d{2})\b", str(value))
+        return int(match.group(1)) if match else None
 
     @staticmethod
     def _text(node, selector: str) -> Optional[str]:

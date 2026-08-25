@@ -16,7 +16,7 @@ from typing import List, Optional
 import requests
 from bs4 import BeautifulSoup
 
-from ..models import Listing, SearchQuery, extract_ev_range_km
+from ..models import Listing, SearchQuery, extract_battery_kwh, extract_ev_range_km
 from .base import BasePortal, PortalError
 
 # Wie viele Detailseiten pro Suche höchstens nachgeladen werden (Requests sparen).
@@ -142,6 +142,7 @@ class Kleinanzeigen(BasePortal):
 
     def _parse_detail(self, html: str, l: Listing) -> None:
         soup = BeautifulSoup(html, "lxml")
+        full_text = soup.get_text(" ", strip=True)
         for li in soup.select("li.addetailslist--detail"):
             valel = li.select_one(".addetailslist--detail--value")
             if not valel:
@@ -171,6 +172,13 @@ class Kleinanzeigen(BasePortal):
             elif "fahrzeugzustand" in key:
                 # Zustand in body ablegen -> Betrugsfilter (#5) kann greifen.
                 l.body = (l.body + " " if l.body else "") + value
+
+        # Akku und Reichweite stehen bei Kleinanzeigen häufig im
+        # Beschreibungstext statt in den strukturierten Detailzeilen.
+        if l.battery_kwh is None:
+            l.battery_kwh = extract_battery_kwh(full_text)
+        if l.ev_range_km is None:
+            l.ev_range_km = extract_ev_range_km(full_text)
 
     # ---- Heuristiken --------------------------------------------------
     @staticmethod
