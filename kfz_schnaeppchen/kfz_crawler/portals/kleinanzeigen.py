@@ -7,9 +7,13 @@ werden sie heuristisch extrahiert.
 
 from __future__ import annotations
 
+import random
 import re
+import time
+from concurrent.futures import ThreadPoolExecutor
 from typing import List, Optional
 
+import requests
 from bs4 import BeautifulSoup
 
 from ..models import Listing, SearchQuery
@@ -17,6 +21,23 @@ from .base import BasePortal, PortalError
 
 # Wie viele Detailseiten pro Suche höchstens nachgeladen werden (Requests sparen).
 DETAIL_LIMIT = 40
+# Parallele Detailabrufe (begrenzt, um Kleinanzeigen nicht zu überlasten).
+ENRICH_WORKERS = 5
+
+
+def _fetch_html(url: str, headers: dict, proxy: Optional[str]) -> Optional[str]:
+    """Thread-sicherer Einzelabruf mit eigener Session + kleiner Jitter-Pause."""
+    time.sleep(random.uniform(0.2, 0.8))
+    try:
+        with requests.Session() as s:
+            if proxy:
+                s.proxies.update({"http": proxy, "https": proxy})
+            r = s.get(url, headers=headers, timeout=20)
+            if r.status_code in (403, 429):
+                return None
+            return r.text if r.ok else None
+    except requests.RequestException:
+        return None
 
 _FUEL_NORM = {
     "benzin": "benzin", "diesel": "diesel", "elektro": "elektro",
@@ -104,12 +125,17 @@ class Kleinanzeigen(BasePortal):
                               query.power_to, query.doors])
         if not needs:
             return listings
-        for l in listings[:DETAIL_LIMIT]:
-            try:
-                html = self._get(l.url).text
-            except (PortalError, Exception):
-                continue
-            self._parse_detail(html, l)
+        targets = listings[:DETAIL_LIMIT]
+
+        def work(l: Listing) -> None:
+            html = _fetch_html(l.url, self._headers(), self.proxy)
+            if html:
+                self._parse_detail(html, l)
+
+        # Parallele Detailabrufe mit begrenzter Nebenläufigkeit (eigene Session
+        # pro Thread; höflich gedrosselt, damit Kleinanzeigen nicht überlastet wird).
+        with ThreadPoolExecutor(max_workers=ENRICH_WORKERS) as ex:
+            list(ex.map(work, targets))
         return listings
 
     def _parse_detail(self, html: str, l: Listing) -> None:

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import sys
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import List
 
 from rich.console import Console
@@ -19,39 +20,49 @@ from .storage import SeenStore
 console = Console()
 
 
+def _search_one_portal(cfg: Config, key: str, query: SearchQuery) -> List[Listing]:
+    """Ein Portal abfragen (+ ggf. anreichern). Läuft in eigenem Thread."""
+    portal_cls = REGISTRY.get(key)
+    if portal_cls is None:
+        console.print(f"[yellow]Unbekanntes Portal in config: {key}[/yellow]")
+        return []
+    portal = portal_cls(
+        request_delay=cfg.settings.request_delay,
+        max_pages=cfg.settings.max_pages,
+        proxy=cfg.settings.proxy or None,
+        render=cfg.settings.use_browser,
+    )
+    try:
+        found = portal.search(query)
+        # Homogenisierung: Felder, die die Trefferliste nicht liefert, per
+        # Detailseite nachladen (verify_details erzwingt zusätzlich via force).
+        if hasattr(portal, "enrich"):
+            found = portal.enrich(found, query, force=cfg.settings.verify_details)
+        console.print(f"  [dim]{portal.name}: {len(found)} Treffer[/dim]")
+        return found
+    except PortalError as e:
+        console.print(f"  [yellow]{e}[/yellow]")
+    except Exception as e:  # pragma: no cover - robuster Lauf trotz Portalfehler
+        console.print(f"  [red]{portal.name}: Fehler – {e}[/red]")
+    return []
+
+
 def run_search(cfg: Config, query: SearchQuery, store: SeenStore) -> List[Listing]:
-    """Führt eine Suche auf allen aktiven Portalen aus und liefert neue Deals."""
+    """Führt eine Suche auf allen aktiven Portalen aus und liefert neue Deals.
+
+    Die Portale laufen PARALLEL (verschiedene Hosts) – das halbiert die Laufzeit,
+    ohne einen einzelnen Host stärker zu belasten. Jedes Portal behält seine
+    eigene höfliche Anfrage-Drosselung.
+    """
+    active = [k for k, on in cfg.portals.items() if on and REGISTRY.get(k)]
     all_listings: List[Listing] = []
+    if not active:
+        return []
 
-    for key, active in cfg.portals.items():
-        if not active:
-            continue
-        portal_cls = REGISTRY.get(key)
-        if portal_cls is None:
-            console.print(f"[yellow]Unbekanntes Portal in config: {key}[/yellow]")
-            continue
-
-        portal = portal_cls(
-            request_delay=cfg.settings.request_delay,
-            max_pages=cfg.settings.max_pages,
-            proxy=cfg.settings.proxy or None,
-            render=cfg.settings.use_browser,
-        )
-        try:
-            found = portal.search(query)
-            # Homogenisierung: Felder, die die Trefferliste nicht liefert
-            # (z. B. Kleinanzeigen-Kraftstoff/Getriebe/Leistung), per Detailseite
-            # nachladen, damit der gemeinsame Filtersatz überall greift.
-            # verify_details erzwingt zusätzlich die Anreicherung auch ohne solche
-            # Filter (force).
-            if hasattr(portal, "enrich"):
-                found = portal.enrich(found, query, force=cfg.settings.verify_details)
-            console.print(f"  [dim]{portal.name}: {len(found)} Treffer[/dim]")
-            all_listings.extend(found)
-        except PortalError as e:
-            console.print(f"  [yellow]{e}[/yellow]")
-        except Exception as e:  # pragma: no cover - robuster Lauf trotz Portalfehler
-            console.print(f"  [red]{portal.name}: Fehler – {e}[/red]")
+    with ThreadPoolExecutor(max_workers=len(active)) as ex:
+        futures = {ex.submit(_search_one_portal, cfg, k, query): k for k in active}
+        for fut in as_completed(futures):
+            all_listings.extend(fut.result())
 
     # Zentraler Nachfilter: erweiterte Kriterien (Getriebe, Leistung, Karosserie,
     # E-Auto-Reichweite …) portalübergreifend anwenden.
