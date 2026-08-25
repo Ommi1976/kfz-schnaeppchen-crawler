@@ -186,10 +186,16 @@ class SeenStore:
     def record_listing(self, search_name: str, listing: Listing) -> None:
         with self._lock:
             self.conn.execute(
-                "INSERT OR IGNORE INTO deals "
+                "INSERT INTO deals "
                 "(fingerprint, search_name, portal, title, url, price, market_price, "
                 " discount, year, mileage, fuel, battery_kwh, ev_range_km, is_deal, is_suspicious, reasons, first_seen) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+                " ON CONFLICT(fingerprint) DO UPDATE SET "
+                "search_name=excluded.search_name, portal=excluded.portal, title=excluded.title, "
+                "url=excluded.url, price=excluded.price, market_price=excluded.market_price, "
+                "discount=excluded.discount, year=excluded.year, mileage=excluded.mileage, "
+                "fuel=excluded.fuel, battery_kwh=excluded.battery_kwh, ev_range_km=excluded.ev_range_km, "
+                "is_deal=excluded.is_deal, is_suspicious=excluded.is_suspicious, reasons=excluded.reasons",
                 (
                     listing.fingerprint,
                     search_name,

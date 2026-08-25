@@ -95,20 +95,24 @@ def run_search(cfg: Config, query: SearchQuery, store: SeenStore) -> List[Listin
             f"{len(result.deals)} Deals, {len(result.priced)} Inserate[/dim]".replace(",", ".")
         )
 
-    # ALLE (neuen, nicht-dublettigen) Inserate für die UI speichern – Schnäppchen
-    # sind über is_deal markiert. Zurückgegeben werden nur neue Deals (für Meldung).
+    # ALLE aktuellen Inserate für die UI speichern – Schnäppchen sind über
+    # is_deal markiert. Der seen-Store steuert nur Benachrichtigungen, nicht die
+    # Anzeige: bekannte Fahrzeuge werden bei jedem Lauf aktualisiert.
     new_deals = []
     for l in result.priced:
-        if not store.is_new(l):
-            continue
-        # Cross-Lauf-Dublette (gleiches Auto in früherem Lauf/anderem Portal)?
-        if hasattr(store, "similar_exists") and store.similar_exists(l.year, l.mileage, l.price):
+        is_new = store.is_new(l)
+        # Cross-Lauf-Dublette nur für neue Inserate unterdrücken; bekannte
+        # Inserate werden trotzdem für die aktuelle UI-Anzeige aktualisiert.
+        if is_new and hasattr(store, "similar_exists") and store.similar_exists(
+            l.year, l.mileage, l.price
+        ):
             store.mark_seen(l)  # merken, aber nicht doppelt anzeigen
             continue
-        store.mark_seen(l)
+        if is_new:
+            store.mark_seen(l)
         if hasattr(store, "record_listing"):
             store.record_listing(query.name, l)
-        if l.is_deal:
+        if is_new and l.is_deal:
             new_deals.append(l)
     if hasattr(store, "prune"):
         store.prune()
