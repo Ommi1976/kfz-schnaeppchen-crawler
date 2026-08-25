@@ -119,6 +119,30 @@ def _make_tokens(make: str) -> list:
     return MAKE_SYNONYMS.get(make, [make])
 
 
+# Kleinstfahrzeuge / Nicht-PKW, die (v. a. bei fuel=elektro ohne Marke) in den
+# Ergebnissen auftauchen, aber keine echten PKW sind. Titel-Treffer -> ausschließen.
+import re as _re
+
+_NON_PKW_PATTERNS = [
+    _re.compile(p) for p in [
+        r"\b\d{2}\s*km/?h\b",            # "45 km/h", "25 km/h" (Leichtfahrzeuge)
+        r"leichtfahrzeug", r"leichtkraftfahrzeug", r"leicht-?kfz",
+        r"mini-?elektro", r"mini-?e-?auto", r"elektro-?mini",
+        r"kabinenroller", r"\bkabinen", r"\btrike", r"lastentrike", r"lastenrad",
+        r"\broller\b", r"e-?roller", r"elektroroller", r"e-?scooter", r"\bscooter\b",
+        r"\bmofa\b", r"\bmoped\b", r"mokick", r"\bquad\b", r"\batv\b",
+        r"\bpedelec", r"e-?bike", r"seniorenmobil", r"elektromobil",
+        r"\bl6e\b", r"\bl7e\b", r"golf-?cart", r"golfcart", r"gabelstapler",
+        r"\brikscha", r"tuk-?tuk", r"selbstfahr",
+    ]
+]
+
+
+def is_non_pkw(listing: "Listing") -> bool:
+    hay = f"{listing.title} {listing.body or ''}".lower()
+    return any(p.search(hay) for p in _NON_PKW_PATTERNS)
+
+
 def matches_query(l: Listing, q: SearchQuery) -> bool:
     """Clientseitiger Nachfilter.
 
@@ -126,6 +150,10 @@ def matches_query(l: Listing, q: SearchQuery) -> bool:
     bekannt ist UND ihn verletzt. Fehlt der Wert im Inserat, wird NICHT
     ausgeschlossen (sonst würden brauchbare Treffer verloren gehen).
     """
+    # Kleinstfahrzeuge / Nicht-PKW grundsätzlich ausschließen (echte PKW-Suche).
+    if is_non_pkw(l):
+        return False
+
     # Marke/Modell nur prüfen, wenn ein Titel vorliegt (Portale, die nicht
     # server-seitig nach Marke filtern, liefern gemischte Ergebnisse).
     title = (l.title or "").lower()
