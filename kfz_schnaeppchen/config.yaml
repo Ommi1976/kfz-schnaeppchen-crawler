@@ -17,7 +17,7 @@ options:
   deal_threshold: 15
   min_comparables: 5
   request_delay: 2.5
-  max_pages: 2
+  max_pages: 5
   proxy: ""
   suspicious_discount: 60
   verify_details: false
