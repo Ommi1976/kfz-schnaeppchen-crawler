@@ -27,7 +27,7 @@ RUN apt-get update \
         gosu \
         netbase \
         ca-certificates \
-    && python3 -m pip install --no-cache-dir --break-system-packages rich PySocks \
+    && python3 -m pip install --no-cache-dir --break-system-packages rich PySocks fastapi uvicorn \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
@@ -43,5 +43,8 @@ RUN tr -d '\r' < /run.sh > /run.sh.tmp && mv /run.sh.tmp /run.sh \
     && useradd --system --uid 10002 --home /data --shell /usr/sbin/nologin crawler \
     && mkdir -p /data \
     && chown -R crawler:crawler /app /data
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
+    CMD curl -fsS http://127.0.0.1:8099/api/ready || exit 1
 
 CMD [ "/run.sh" ]

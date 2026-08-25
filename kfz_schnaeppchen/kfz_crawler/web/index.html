@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>KFZ Schnäppchen Crawler</title>
+  <link rel="stylesheet" href="static/style.css">
+</head>
+<body>
+  <header>
+    <div class="brand">
+      <span class="logo">🚗</span>
+      <div>
+        <h1>KFZ Schnäppchen Crawler</h1>
+        <div class="sub" id="subline">lädt…</div>
+      </div>
+    </div>
+    <div class="actions">
+      <button id="run" class="btn primary">Jetzt suchen</button>
+      <button id="refresh" class="btn">Aktualisieren</button>
+    </div>
+  </header>
+
+  <section class="stats" id="stats"></section>
+
+  <section class="controls">
+    <label>Suche:
+      <select id="searchFilter"><option value="">Alle</option></select>
+    </label>
+    <span class="spacer"></span>
+    <button id="clear" class="btn danger small">Trefferliste leeren</button>
+  </section>
+
+  <section class="tablewrap">
+    <table id="deals">
+      <thead>
+        <tr>
+          <th>Portal</th><th>Fahrzeug</th><th class="num">Preis</th>
+          <th class="num">Marktpreis</th><th class="num">Rabatt</th>
+          <th class="num">Baujahr</th><th class="num">km</th>
+          <th>Gefunden</th><th></th>
+        </tr>
+      </thead>
+      <tbody id="deals-body">
+        <tr><td colspan="9" class="empty">lädt…</td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <footer>
+    <span id="footer-info"></span>
+  </footer>
+
+  <script src="static/app.js"></script>
+</body>
+</html>

@@ -71,6 +71,9 @@ def run_search(cfg: Config, query: SearchQuery, store: SeenStore) -> List[Listin
     new_deals = [d for d in result.deals if store.is_new(d)]
     for d in new_deals:
         store.mark_seen(d)
+        # Für die Weboberfläche dauerhaft festhalten.
+        if hasattr(store, "record_deal"):
+            store.record_deal(query.name, d)
 
     return new_deals
 

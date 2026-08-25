@@ -13,6 +13,7 @@ if [ "$(id -u)" = "0" ]; then
     exec gosu crawler /run.sh
 fi
 
-echo "[KFZ Schnäppchen] Starte Crawler (Intervall-Schleife)..."
+echo "[KFZ Schnäppchen] Starte Weboberfläche + Crawler auf Port 8099..."
 cd /app
-exec python3 -m kfz_crawler.ha_run
+exec python3 -m uvicorn kfz_crawler.web:app --host 0.0.0.0 --port 8099 \
+    --proxy-headers --forwarded-allow-ips="*"

@@ -4,3 +4,5 @@ lxml>=5.0
 PyYAML>=6.0
 rich>=13.7
 PySocks>=1.7          # optionaler SOCKS-Proxy-Support (z. B. Tor)
+fastapi>=0.110        # Ingress-Weboberfläche
+uvicorn>=0.27         # ASGI-Server für die Weboberfläche
