@@ -121,3 +121,17 @@ footer { padding: 12px 18px 24px; color: var(--muted); font-size: 12px; }
 .modal-actions { display: flex; align-items: center; gap: 10px; margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--line); }
 .form-error { color: #fca5a5; font-size: 12px; }
 @media (max-width: 560px) { .grid { grid-template-columns: 1fr; } }
+
+/* Ausstattungs-Picker */
+.equip { border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; background: var(--bg); }
+.equip-head { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
+.equip-head > span:first-child { font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: .03em; }
+.equip-search { flex: 1; background: var(--panel2); color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 6px 9px; font-size: 12px; }
+.equip-count { font-size: 11px; color: var(--accent2); white-space: nowrap; }
+.equip-groups { max-height: 240px; overflow-y: auto; padding-right: 4px; }
+.equip-group { margin-bottom: 8px; }
+.equip-group h4 { margin: 6px 0 4px; font-size: 11px; color: var(--accent2); font-weight: 600; }
+.equip-items { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 2px 10px; }
+.equip-items label { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text); flex-direction: row; padding: 2px 0; cursor: pointer; }
+.equip-items label.hide { display: none; }
+.equip-items input { width: 14px; height: 14px; }

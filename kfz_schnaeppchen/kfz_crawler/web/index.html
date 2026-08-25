@@ -103,7 +103,17 @@
           <label>Akku min (kWh) <input id="f-battery_from_kwh" type="number" min="0" step="0.1"></label>
           <label class="check"><input id="f-active" type="checkbox" checked> aktiv</label>
 
-          <label class="full">Ausstattung / Stichwörter (Titel muss enthalten, Komma-getrennt)
+          <div class="full equip">
+            <div class="equip-head">
+              <span>Ausstattung (AutoScout24)</span>
+              <input id="equip-search" class="equip-search" placeholder="filtern… z. B. navi">
+              <span id="equip-count" class="equip-count">0 gewählt</span>
+            </div>
+            <div id="equip-groups" class="equip-groups"></div>
+            <div class="equip-note">Wirkt server-seitig bei AutoScout24. Für andere Portale zusätzlich Stichwörter nutzen.</div>
+          </div>
+
+          <label class="full">Stichwörter (Titel muss enthalten, Komma-getrennt) — portalübergreifend
             <input id="f-keywords" placeholder="navi, klimaautomatik, ahk">
           </label>
           <label class="full">Ausschluss‑Stichwörter (Komma-getrennt)

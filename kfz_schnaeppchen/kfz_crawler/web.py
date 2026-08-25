@@ -24,6 +24,7 @@ from .ha_run import build_config, load_options
 from .main import run_search
 from .models import SearchQuery
 from .portals import REGISTRY
+from .portals.as24_taxonomy import EQUIPMENT, EQUIPMENT_GROUPS
 from .storage import SeenStore
 
 # Auswahllisten für das Suchformular in der UI.
@@ -34,6 +35,10 @@ META = {
     "body_type": ["", "limousine", "kombi", "suv", "cabrio", "coupe", "van", "kleinwagen"],
     "seller": ["", "haendler", "privat"],
     "doors": ["", "2/3", "4/5"],
+    "equipment_groups": [
+        {"group": name, "items": [{"id": i, "label": EQUIPMENT[i]} for i in ids]}
+        for name, ids in EQUIPMENT_GROUPS
+    ],
 }
 
 WEB_DIR = Path(__file__).parent / "web"

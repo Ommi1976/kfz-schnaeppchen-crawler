@@ -51,6 +51,40 @@ async function loadMeta() {
     const el = document.getElementById("f-" + key);
     el.innerHTML = META[key].map((v) => `<option value="${v}">${label(v)}</option>`).join("");
   }
+  renderEquipment(META.equipment_groups || []);
+}
+
+function renderEquipment(groups) {
+  const box = document.getElementById("equip-groups");
+  box.innerHTML = groups.map((g) => `
+    <div class="equip-group">
+      <h4>${escapeHtml(g.group)}</h4>
+      <div class="equip-items">
+        ${g.items.map((it) => `<label data-lbl="${escapeHtml(it.label.toLowerCase())}">
+          <input type="checkbox" class="eq-box" value="${it.id}"> ${escapeHtml(it.label)}
+        </label>`).join("")}
+      </div>
+    </div>`).join("");
+  box.addEventListener("change", updateEquipCount);
+}
+
+function updateEquipCount() {
+  const n = document.querySelectorAll(".eq-box:checked").length;
+  document.getElementById("equip-count").textContent = n + " gewählt";
+}
+function setEquipment(ids) {
+  const set = new Set((ids || []).map(Number));
+  document.querySelectorAll(".eq-box").forEach((b) => { b.checked = set.has(Number(b.value)); });
+  updateEquipCount();
+}
+function getEquipment() {
+  return Array.from(document.querySelectorAll(".eq-box:checked")).map((b) => Number(b.value));
+}
+function filterEquip(term) {
+  const t = (term || "").trim().toLowerCase();
+  document.querySelectorAll("#equip-groups .equip-items label").forEach((lb) => {
+    lb.classList.toggle("hide", t && !lb.dataset.lbl.includes(t));
+  });
 }
 
 // ---------- Status / Stats ----------
@@ -98,6 +132,7 @@ function chips(spec) {
   if (spec.power_from || spec.power_to) c.push(`${spec.power_from || 0}–${spec.power_to || "∞"} PS`);
   if (spec.seller) c.push(label(spec.seller));
   if (spec.ev_range_from) c.push(`≥${spec.ev_range_from} km Reichw.`);
+  if ((spec.equipment || []).length) c.push(`🔧 ${spec.equipment.length} Ausstattung`);
   (spec.keywords || []).forEach((k) => c.push("＋" + k));
   (spec.exclude_terms || []).forEach((k) => c.push("－" + k));
   return c.map((x) => `<span class="chip">${escapeHtml(String(x))}</span>`).join("");
@@ -128,7 +163,7 @@ function renderSearches(searches) {
 function chipsCount(s) {
   return ["make","model","fuel","transmission","body_type","seller","doors","year_from","year_to",
     "price_from","price_to","mileage_from","mileage_to","power_from","power_to","ev_range_from","battery_from_kwh"]
-    .filter((k) => s[k]).length + (s.keywords||[]).length + (s.exclude_terms||[]).length;
+    .filter((k) => s[k]).length + (s.keywords||[]).length + (s.exclude_terms||[]).length + (s.equipment||[]).length;
 }
 
 // ---------- Deals ----------
@@ -173,6 +208,9 @@ function openForm(spec) {
   NUMS.forEach((k) => { document.getElementById("f-" + k).value = (spec && spec[k] != null) ? spec[k] : ""; });
   document.getElementById("f-keywords").value = spec && spec.keywords ? spec.keywords.join(", ") : "";
   document.getElementById("f-exclude_terms").value = spec && spec.exclude_terms ? spec.exclude_terms.join(", ") : "";
+  setEquipment(spec ? spec.equipment : []);
+  document.getElementById("equip-search").value = "";
+  filterEquip("");
   document.getElementById("modal").classList.remove("hidden");
 }
 function closeForm() { document.getElementById("modal").classList.add("hidden"); }
@@ -188,6 +226,7 @@ function collectForm() {
     fuel: val("f-fuel"), transmission: val("f-transmission"),
     body_type: val("f-body_type"), seller: val("f-seller"), doors: val("f-doors"),
     keywords: val("f-keywords"), exclude_terms: val("f-exclude_terms"),
+    equipment: getEquipment(),
   };
   NUMS.forEach((k) => { spec[k] = num("f-" + k); });
   return spec;
@@ -220,6 +259,7 @@ document.getElementById("new-search").addEventListener("click", () => openForm(n
 document.getElementById("modal-close").addEventListener("click", closeForm);
 document.getElementById("modal-cancel").addEventListener("click", closeForm);
 document.getElementById("search-form").addEventListener("submit", submitForm);
+document.getElementById("equip-search").addEventListener("input", (e) => filterEquip(e.target.value));
 document.getElementById("modal").addEventListener("click", (e) => { if (e.target.id === "modal") closeForm(); });
 
 document.getElementById("search-list").addEventListener("click", async (e) => {

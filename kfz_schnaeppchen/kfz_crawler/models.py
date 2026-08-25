@@ -80,6 +80,9 @@ class SearchQuery:
     ev_range_from: Optional[int] = None       # Mindest-Reichweite (km)
     battery_from_kwh: Optional[float] = None  # Mindest-Batteriekapazität (kWh)
 
+    # Ausstattung: AutoScout24-IDs (server-seitig via eq=)
+    equipment: list = field(default_factory=list)
+
     # Ausstattung / Freitext (Titel/Beschreibung):
     keywords: list = field(default_factory=list)        # müssen ALLE enthalten sein
     exclude_terms: list = field(default_factory=list)   # dürfen NICHT enthalten sein
@@ -97,6 +100,16 @@ class SearchQuery:
         else:
             parts = list(value)
         return [str(p).strip() for p in parts if str(p).strip()]
+
+    @staticmethod
+    def _intlist(value) -> list:
+        out = []
+        for p in SearchQuery._termlist(value):
+            try:
+                out.append(int(p))
+            except (TypeError, ValueError):
+                continue
+        return out
 
     @classmethod
     def from_dict(cls, d: dict) -> "SearchQuery":
@@ -132,6 +145,7 @@ class SearchQuery:
             ev_range_from=i("ev_range_from"),
             battery_from_kwh=(float(d["battery_from_kwh"])
                               if d.get("battery_from_kwh") not in (None, "", "null") else None),
+            equipment=cls._intlist(d.get("equipment")),
             keywords=cls._termlist(d.get("keywords")),
             exclude_terms=cls._termlist(d.get("exclude_terms")),
             id=str(d.get("id", "") or ""),
@@ -149,6 +163,7 @@ class SearchQuery:
             "body_type": self.body_type, "power_from": self.power_from,
             "power_to": self.power_to, "seller": self.seller, "doors": self.doors,
             "ev_range_from": self.ev_range_from, "battery_from_kwh": self.battery_from_kwh,
+            "equipment": self.equipment,
             "keywords": self.keywords, "exclude_terms": self.exclude_terms,
         }
 
@@ -232,10 +247,9 @@ def matches_query(l: Listing, q: SearchQuery) -> bool:
     if q.transmission and l.transmission:
         if q.transmission not in l.transmission.strip().lower():
             return False
-    if q.body_type:
-        hay = f"{l.body or ''} {l.title}".lower()
-        if q.body_type not in hay:
-            return False
+    # Karosserie wird bei AutoScout24 server-seitig gefiltert (body=<id>); ein
+    # Titel-Keyword-Abgleich würde korrekte Treffer fälschlich ausschließen
+    # (z. B. „Golf Variant" ohne das Wort „Kombi"), daher hier kein Nachfilter.
     # E-Auto-Filter
     if q.ev_range_from and l.ev_range_km is not None and l.ev_range_km < q.ev_range_from:
         return False

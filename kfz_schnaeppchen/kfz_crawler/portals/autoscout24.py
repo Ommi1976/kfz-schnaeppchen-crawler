@@ -24,6 +24,8 @@ GEAR_MAP = {"schaltgetriebe": "M", "automatik": "A"}
 SELLER_MAP = {"haendler": "D", "händler": "D", "privat": "P"}
 PS_TO_KW = 1.35962
 
+from .as24_taxonomy import BODY_TYPE_TO_AS24, DOORS_TO_AS24, VALID_EQUIPMENT_IDS
+
 
 class AutoScout24(BasePortal):
     name = "AutoScout24"
@@ -60,6 +62,21 @@ class AutoScout24(BasePortal):
             params.append(f"powertype=kw&powerfrom={round(query.power_from / PS_TO_KW)}")
         if query.power_to:
             params.append(f"powertype=kw&powerto={round(query.power_to / PS_TO_KW)}")
+        # Karosserie (body=<id>)
+        body_id = BODY_TYPE_TO_AS24.get(query.body_type)
+        if body_id:
+            params.append(f"body={body_id}")
+        # Türen (doorfrom/doorto)
+        doors = DOORS_TO_AS24.get(query.doors)
+        if doors:
+            params.append(f"doorfrom={doors[0]}&doorto={doors[1]}")
+        # E-Reichweite (erange) – server-seitig statt nur Nachfilter
+        if query.ev_range_from:
+            params.append(f"erange={query.ev_range_from}")
+        # Ausstattung (eq=<id>,<id>,…)
+        eq = [str(i) for i in (query.equipment or []) if i in VALID_EQUIPMENT_IDS]
+        if eq:
+            params.append("eq=" + ",".join(eq))
         qs = "&".join(params)
         return f"{self.BASE}{path}?{qs}"
 
