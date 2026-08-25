@@ -38,7 +38,10 @@ class AutoScout24(BasePortal):
             path = f"/lst/{query.make}" + (f"/{query.model}" if query.model else "")
         else:
             path = "/lst"
-        params = [f"sort=price", "desc=0", f"page={page}", "size=20"]
+        # Neueste zuerst (repräsentative Stichprobe). Eine Preis-Sortierung würde
+        # den Marktpreis aus den billigsten Autos schätzen und fast alle
+        # Schnäppchen verschlucken.
+        params = ["sort=age", "desc=1", f"page={page}", "size=20"]
         if query.price_from:
             params.append(f"pricefrom={query.price_from}")
         if query.price_to:
