@@ -116,6 +116,8 @@ footer { padding: 12px 18px 24px; color: var(--muted); font-size: 12px; }
 .grid label { display: flex; flex-direction: column; gap: 5px; font-size: 12px; color: var(--muted); }
 .grid label.full { grid-column: 1 / -1; }
 .grid label.check { flex-direction: row; align-items: center; gap: 8px; color: var(--text); }
+.section-note { font-size: 12px; color: var(--muted); background: var(--bg); border: 1px solid var(--line); border-left: 3px solid var(--accent2); border-radius: 6px; padding: 8px 10px; line-height: 1.5; }
+.section-note b { color: var(--text); }
 .grid input, .grid select { background: var(--panel2); color: var(--text); border: 1px solid var(--line); border-radius: 7px; padding: 8px 10px; font-size: 13px; }
 .grid input:focus, .grid select:focus { outline: none; border-color: var(--accent2); }
 .modal-actions { display: flex; align-items: center; gap: 10px; margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--line); }

@@ -39,9 +39,13 @@ def run_search(cfg: Config, query: SearchQuery, store: SeenStore) -> List[Listin
         )
         try:
             found = portal.search(query)
-            # #4: Kleinanzeigen-Treffer optional per Detailseite anreichern.
-            if cfg.settings.verify_details and hasattr(portal, "enrich"):
-                found = portal.enrich(found, query)
+            # Homogenisierung: Felder, die die Trefferliste nicht liefert
+            # (z. B. Kleinanzeigen-Kraftstoff/Getriebe/Leistung), per Detailseite
+            # nachladen, damit der gemeinsame Filtersatz überall greift.
+            # verify_details erzwingt zusätzlich die Anreicherung auch ohne solche
+            # Filter (force).
+            if hasattr(portal, "enrich"):
+                found = portal.enrich(found, query, force=cfg.settings.verify_details)
             console.print(f"  [dim]{portal.name}: {len(found)} Treffer[/dim]")
             all_listings.extend(found)
         except PortalError as e:

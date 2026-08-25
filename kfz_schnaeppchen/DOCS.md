@@ -71,13 +71,22 @@ searches:
     battery_from_kwh: 40
 ```
 
-**So wirken die Filter:** Bei **AutoScout24** werden `make`, `model`, Preis,
-Jahr, km, `fuel`, `transmission`, `seller` und `power` direkt server-seitig
-angewandt. Die übrigen (`body_type`, `ev_range_from`, `battery_from_kwh`) und
-alle Filter auf den anderen Portalen werden als **Nachfilter** angewandt –
-und schließen ein Inserat nur aus, wenn der Wert bekannt ist und ihn verletzt.
-Tipp: Bei `fuel: elektro` ohne `make`/`model` erscheinen teils auch E-Roller;
-mit `make`/`model` oder `body_type` eingrenzen.
+**So wirken die Filter (portalübergreifend homogenisiert):**
+Der **gemeinsame Filtersatz** (Marke, Modell, Preis, Baujahr, km, Kraftstoff,
+Getriebe, Leistung, Karosserie, Anbieter) steuert **alle Portale einheitlich**:
+
+- **AutoScout24:** wendet alles server-seitig an (inkl. Karosserie, Türen,
+  E‑Reichweite und – als einziges Portal – die 136 Ausstattungsmerkmale via `eq`).
+- **Kleinanzeigen:** die Trefferliste liefert Kraftstoff/Getriebe/Leistung nicht;
+  daher werden bei Bedarf **automatisch die Detailseiten nachgeladen**, damit
+  derselbe Filter greift (z. B. `fuel: diesel` behält wirklich nur Diesel).
+- **Alle Portale:** zentraler **Nachfilter**, der ein Inserat nur ausschließt,
+  wenn der Wert bekannt ist und ihn verletzt.
+
+**Ausstattung:** Die Ausstattungs-Auswahl in der UI wirkt server-seitig nur bei
+AutoScout24. Für andere Portale dieselbe Wirkung über **Stichwörter** erzielen
+(z. B. „navi, ahk"). Tipp: Bei `fuel: elektro` ohne `make`/`model` mit
+`power_from` (echte PKW) oder Marke/Modell eingrenzen.
 
 ## Benachrichtigungen in Home Assistant
 - **Persistent:** Erscheint als Benachrichtigung in der HA-Oberfläche.

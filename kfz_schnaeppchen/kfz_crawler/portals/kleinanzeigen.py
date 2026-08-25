@@ -90,13 +90,18 @@ class Kleinanzeigen(BasePortal):
             return False
         return True
 
-    # ---- #4: Detailseiten-Anreicherung --------------------------------
-    def enrich(self, listings: List[Listing], query: SearchQuery) -> List[Listing]:
-        """Lädt Detailseiten nach, um Kraftstoff/Getriebe/Leistung/EZ/km
-        strukturiert zu ermitteln. Nur sinnvoll, wenn die Suche Kriterien
-        nutzt, die aus der Trefferliste nicht hervorgehen."""
-        needs = any([query.fuel, query.transmission, query.power_from,
-                     query.power_to, query.doors])
+    # ---- Detailseiten-Anreicherung (Homogenisierung) ------------------
+    def enrich(self, listings: List[Listing], query: SearchQuery,
+               force: bool = False) -> List[Listing]:
+        """Lädt Detailseiten nach, um Kraftstoff/Getriebe/Leistung/EZ/km/Türen
+        strukturiert zu ermitteln – damit der gemeinsame Filtersatz auch bei
+        Kleinanzeigen greift (die Trefferliste liefert diese Felder nicht).
+
+        Läuft automatisch, sobald die Suche eines dieser Felder nutzt; `force`
+        erzwingt die Anreicherung auch ohne solche Filter.
+        """
+        needs = force or any([query.fuel, query.transmission, query.power_from,
+                              query.power_to, query.doors])
         if not needs:
             return listings
         for l in listings[:DETAIL_LIMIT]:
