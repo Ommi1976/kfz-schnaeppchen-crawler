@@ -66,7 +66,9 @@ def _run_all(app: FastAPI, only_id: str | None = None) -> dict:
     for spec in store.list_searches():
         if only_id and spec.get("id") != only_id:
             continue
-        if not spec.get("active", True):
+        # Inaktive Suchen laufen nicht im Scheduler / bei „Alle suchen" – aber ein
+        # expliziter Einzellauf über den „Suchen"-Button (only_id) führt sie aus.
+        if not only_id and not spec.get("active", True):
             continue
         query = SearchQuery.from_dict(spec)
         try:

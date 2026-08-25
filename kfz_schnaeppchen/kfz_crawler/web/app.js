@@ -154,6 +154,7 @@ function renderSearches(searches) {
       <div class="params">${chips(s) || "<span class='chip'>alle Fahrzeuge</span>"}</div>
       <div class="row">
         <button class="btn small" data-run="${s.id}">Suchen</button>
+        <button class="btn small" data-toggle="${s.id}">${s.active ? "Deaktivieren" : "Aktivieren"}</button>
         <button class="btn small" data-edit="${s.id}">Bearbeiten</button>
         <button class="btn small danger" data-del="${s.id}">Löschen</button>
       </div>
@@ -270,6 +271,14 @@ document.getElementById("search-list").addEventListener("click", async (e) => {
   } else if (t.dataset.del) {
     if (!confirm("Diese Suche löschen?")) return;
     await fetch(`${API}/searches/${t.dataset.del}`, { method: "DELETE" });
+    refresh();
+  } else if (t.dataset.toggle) {
+    const s = (statusCache.searches || []).find((x) => x.id === t.dataset.toggle);
+    if (!s) return;
+    const spec = { ...s, active: !s.active };
+    await fetch(`${API}/searches/${s.id}`, {
+      method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(spec),
+    });
     refresh();
   } else if (t.dataset.run) {
     t.disabled = true; t.textContent = "läuft…";
