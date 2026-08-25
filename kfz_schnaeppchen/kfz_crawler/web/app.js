@@ -124,6 +124,8 @@ function chips(spec) {
   const c = [];
   if (spec.make) c.push(spec.make);
   if (spec.model) c.push(spec.model);
+  if ((spec.exclude_makes || []).length) c.push(`− Hersteller: ${spec.exclude_makes.join(", ")}`);
+  if ((spec.exclude_models || []).length) c.push(`− Modelle: ${spec.exclude_models.join(", ")}`);
   if (spec.fuel) c.push(label(spec.fuel));
   if (spec.transmission) c.push(label(spec.transmission));
   if (spec.body_type) c.push(label(spec.body_type));
@@ -151,6 +153,9 @@ function renderSearches(searches) {
   }
   box.innerHTML = searches.map((s) => {
     const cnt = s.count == null ? "" : ` · ${s.count} neu`;
+    const mobileLink = statusCache?.portals_active?.includes("mobile_de")
+      ? `<a class="btn small external" href="${mobileSearchUrl(s)}" target="_blank" rel="noopener">mobile.de ↗</a>`
+      : "";
     return `<div class="search-card ${s.active ? "" : "inactive"}">
       <div class="name">${escapeHtml(s.name)}
         <span class="badge ${s.active ? "on" : ""}">${s.active ? "aktiv" : "aus"}</span>
@@ -161,6 +166,7 @@ function renderSearches(searches) {
         <button class="btn small" data-run="${s.id}">Suchen</button>
         <button class="btn small" data-toggle="${s.id}">${s.active ? "Deaktivieren" : "Aktivieren"}</button>
         <button class="btn small" data-edit="${s.id}">Bearbeiten</button>
+        ${mobileLink}
         <button class="btn small danger" data-del="${s.id}">Löschen</button>
       </div>
     </div>`;
@@ -169,7 +175,22 @@ function renderSearches(searches) {
 function chipsCount(s) {
   return ["make","model","fuel","transmission","body_type","seller","doors","year_from","year_to",
     "price_from","price_to","mileage_from","mileage_to","power_from","power_to","ev_range_from","battery_from_kwh"]
-    .filter((k) => s[k]).length + (s.keywords||[]).length + (s.exclude_terms||[]).length + (s.equipment||[]).length;
+    .filter((k) => s[k]).length + (s.exclude_makes||[]).length + (s.exclude_models||[]).length
+    + (s.keywords||[]).length + (s.exclude_terms||[]).length + (s.equipment||[]).length;
+}
+
+function mobileSearchUrl(s) {
+  const params = new URLSearchParams({ isSearchRequest: "true", s: "Car", vc: "Car" });
+  const span = (key, low, high) => {
+    if (low != null || high != null) params.set(key, `${low ?? ""}:${high ?? ""}`);
+  };
+  span("p", s.price_from, s.price_to);
+  span("fr", s.year_from, s.year_to);
+  span("ml", s.mileage_from, s.mileage_to);
+  if (s.ev_range_from) params.set("re", String(Math.max(50, Math.floor(Number(s.ev_range_from) / 100) * 100)));
+  if (s.battery_from_kwh) params.set("bc", String(Math.max(10, Math.floor(Number(s.battery_from_kwh) / 10) * 10)));
+  if (s.make || s.model) params.set("q", [s.make, s.model].filter(Boolean).join(" "));
+  return "https://suchen.mobile.de/fahrzeuge/search.html?" + params.toString();
 }
 
 // ---------- Deals ----------
@@ -219,6 +240,9 @@ function openForm(spec) {
   document.getElementById("f-active").checked = spec ? !!spec.active : true;
   SELS.forEach((k) => { document.getElementById("f-" + k).value = (spec && spec[k]) || ""; });
   NUMS.forEach((k) => { document.getElementById("f-" + k).value = (spec && spec[k] != null) ? spec[k] : ""; });
+  ["exclude_makes", "exclude_models"].forEach((k) => {
+    document.getElementById("f-" + k).value = spec && spec[k] ? spec[k].join(", ") : "";
+  });
   document.getElementById("f-keywords").value = spec && spec.keywords ? spec.keywords.join(", ") : "";
   document.getElementById("f-exclude_terms").value = spec && spec.exclude_terms ? spec.exclude_terms.join(", ") : "";
   setEquipment(spec ? spec.equipment : []);
@@ -236,6 +260,7 @@ function collectForm() {
     name: val("f-name"),
     active: document.getElementById("f-active").checked,
     make: val("f-make"), model: val("f-model"),
+    exclude_makes: val("f-exclude_makes"), exclude_models: val("f-exclude_models"),
     fuel: val("f-fuel"), transmission: val("f-transmission"),
     body_type: val("f-body_type"), seller: val("f-seller"), doors: val("f-doors"),
     keywords: val("f-keywords"), exclude_terms: val("f-exclude_terms"),

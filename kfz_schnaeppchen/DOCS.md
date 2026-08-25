@@ -38,6 +38,8 @@ Alle außer `name` sind optional.
 | Filter | Werte / Einheit |
 |---|---|
 | `make`, `model` | z. B. `volkswagen`, `golf` |
+| `exclude_makes` | Hersteller, die ausgeschlossen werden sollen (Komma-getrennt). |
+| `exclude_models` | Modelle, die ausgeschlossen werden sollen (Komma-getrennt). |
 | `year_from`, `year_to` | Erstzulassung (Jahr) |
 | `price_from`, `price_to` | Preis in € |
 | `mileage_from`, `mileage_to` | Kilometerstand |
@@ -80,6 +82,10 @@ Getriebe, Leistung, Karosserie, Anbieter) steuert **alle Portale einheitlich**:
 - **Kleinanzeigen:** die Trefferliste liefert Kraftstoff/Getriebe/Leistung nicht;
   daher werden bei Bedarf **automatisch die Detailseiten nachgeladen**, damit
   derselbe Filter greift (z. B. `fuel: diesel` behält wirklich nur Diesel).
+- **mobile.de:** wird wieder über die öffentliche Suchseite vorbereitet. Das
+  Portal kann automatisierte Abrufe trotzdem mit HTTP 403/DataDome blockieren;
+  ein solcher Fehler stoppt die übrigen Portale nicht. In der Suche steht
+  zusätzlich ein direkter mobile.de-Link mit grob passenden Filtern bereit.
 - **Alle Portale:** zentraler **Nachfilter**, der ein Inserat nur ausschließt,
   wenn der Wert bekannt ist und ihn verletzt.
 

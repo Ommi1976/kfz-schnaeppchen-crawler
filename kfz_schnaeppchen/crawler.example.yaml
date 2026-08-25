@@ -51,6 +51,7 @@ portals:
 # Beliebig viele. Jede Suche wird auf allen aktiven Portalen ausgeführt.
 # Alle Felder außer "name" sind optional. Verfügbare Filter:
 #   make, model
+#   exclude_makes / exclude_models  Hersteller/Modelle ausschließen (Komma-getrennt)
 #   year_from / year_to           Erstzulassung
 #   price_from / price_to         Preis (€)
 #   mileage_from / mileage_to     Kilometerstand

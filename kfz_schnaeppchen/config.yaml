@@ -1,5 +1,5 @@
 name: KFZ Schnäppchen Crawler
-version: "0.6.4"
+version: "0.6.5"
 slug: kfz_schnaeppchen
 description: Findet Auto-Schnäppchen über deutsche Fahrzeugportale und meldet Treffer an Home Assistant.
 url: https://github.com/Ommi1976/kfz-schnaeppchen-crawler
@@ -25,6 +25,7 @@ options:
   portals:
     - autoscout24
     - kleinanzeigen
+    - mobile_de
   searches:
     - name: VW Golf 7 Diesel Automatik
       make: volkswagen
@@ -67,6 +68,8 @@ schema:
     - name: str
       make: str?
       model: str?
+      exclude_makes: str?
+      exclude_models: str?
       year_from: int?
       year_to: int?
       price_from: int?

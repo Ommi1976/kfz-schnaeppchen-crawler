@@ -17,11 +17,12 @@ Stand aus echten Testläufen (2026-08):
 | **AutoScout24** | ✅ funktioniert (server-seitige Filter) | – |
 | **Kleinanzeigen** | ✅ funktioniert (+ Detail-Anreicherung #4) | – |
 | AutoUncle | ❌ HTTP 403 | ⚠️ lädt, aber nur wenige vorgerenderte Angebote |
-| mobile.de | ❌ HTTP 403 (DataDome) | ❌ auch headless geblockt |
+| mobile.de | ⚠️ öffentliche Suche wird vorbereitet, häufig HTTP 403 (DataDome) | ❌ auch headless geblockt |
 | heycar | ⚠️ 0 Treffer | ❌ liefert britische Inhalte (hey.car → UK) |
 
-**Empfehlung:** AutoScout24 + Kleinanzeigen sind die verlässlichen Portale und
-standardmäßig aktiv. Der Browser-Modus (Playwright) umgeht zwar die 403-Blocks
+**Empfehlung:** AutoScout24 + Kleinanzeigen bleiben die verlässlichen Portale;
+mobile.de ist zusätzlich wieder auswählbar und erhält einen direkten Suchlink.
+Der Browser-Modus (Playwright) umgeht zwar die 403-Blocks
 von AutoUncle, liefert dort aber nur eine dünne, vorgerenderte Liste; mobile.de
 bleibt hart geblockt. Ein Proxy/Tor hilft gegen die Blocks **nicht** (Bot-
 Fingerprinting, nicht IP). Ein geblocktes Portal stoppt die anderen **nicht**.
@@ -39,8 +40,8 @@ Fingerprinting, nicht IP). Ein geblocktes Portal stoppt die anderen **nicht**.
   und ermittelt Kraftstoff/Getriebe/Leistung strukturiert – so rutschen z. B.
   bei `fuel: diesel` keine Benziner mehr durch.
 - **Filter:** Marke, Modell, Baujahr, Preis, km, Kraftstoff, Getriebe,
-  Karosserie, Leistung (PS), Anbieter – plus E-Auto: Mindest-Reichweite und
-  -Batteriekapazität.
+  Karosserie, Leistung (PS), Anbieter – plus Hersteller-/Modell-Ausschlüsse und
+  E-Auto: Mindest-Reichweite und -Batteriekapazität.
 
 ## Als Home Assistant Add-on installieren
 

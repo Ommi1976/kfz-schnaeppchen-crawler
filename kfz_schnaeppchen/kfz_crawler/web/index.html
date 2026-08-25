@@ -72,55 +72,73 @@
       </div>
       <form id="search-form">
         <input type="hidden" id="f-id">
-        <div class="grid">
-          <label class="full">Name *
-            <input id="f-name" required placeholder="z. B. VW Golf Diesel">
-          </label>
-          <div class="full section-note">Diese Sucheinstellungen gelten für <b>alle Portale</b> (AutoScout24, Kleinanzeigen …) — einheitlich durchgesetzt. Die Ausstattungs-Auswahl weiter unten wirkt nur bei AutoScout24; für andere Portale die Stichwörter nutzen.</div>
-
-          <label>Marke <input id="f-make" placeholder="volkswagen"></label>
-          <label>Modell <input id="f-model" placeholder="golf"></label>
-
-          <label>Kraftstoff <select id="f-fuel"></select></label>
-          <label>Getriebe <select id="f-transmission"></select></label>
-
-          <label>Karosserie <select id="f-body_type"></select></label>
-          <label>Anbieter <select id="f-seller"></select></label>
-
-          <label>Baujahr von <input id="f-year_from" type="number" min="1990" max="2030"></label>
-          <label>Baujahr bis <input id="f-year_to" type="number" min="1990" max="2030"></label>
-
-          <label>Preis von (€) <input id="f-price_from" type="number" min="0"></label>
-          <label>Preis bis (€) <input id="f-price_to" type="number" min="0"></label>
-
-          <label>km von <input id="f-mileage_from" type="number" min="0"></label>
-          <label>km bis <input id="f-mileage_to" type="number" min="0"></label>
-
-          <label>Leistung von (PS) <input id="f-power_from" type="number" min="0"></label>
-          <label>Leistung bis (PS) <input id="f-power_to" type="number" min="0"></label>
-
-          <label>Türen <select id="f-doors"></select></label>
-          <label>E‑Reichweite min (km) <input id="f-ev_range_from" type="number" min="0"></label>
-
-          <label>Akku min (kWh) <input id="f-battery_from_kwh" type="number" min="0" step="0.1"></label>
-          <label class="check"><input id="f-active" type="checkbox" checked> aktiv</label>
-
-          <div class="full equip">
-            <div class="equip-head">
-              <span>Ausstattung (AutoScout24)</span>
-              <input id="equip-search" class="equip-search" placeholder="filtern… z. B. navi">
-              <span id="equip-count" class="equip-count">0 gewählt</span>
-            </div>
-            <div id="equip-groups" class="equip-groups"></div>
-            <div class="equip-note">Wirkt server-seitig bei AutoScout24. Für andere Portale zusätzlich Stichwörter nutzen.</div>
+        <div class="form-section note-section">
+          <div class="section-heading"><span class="section-icon">◎</span><div><h4>Suche festlegen</h4><p>Ein Name und die wichtigsten Fahrzeugdaten.</p></div></div>
+          <div class="grid">
+            <label class="full">Name * <input id="f-name" required placeholder="z. B. E-Autos bis 27.500 €"></label>
+            <div class="full section-note">Die Kriterien werden portalübergreifend angewendet. Portal-spezifische Filter werden zusätzlich genutzt, wenn das jeweilige Portal sie unterstützt.</div>
+            <label>Hersteller <input id="f-make" placeholder="z. B. volkswagen"></label>
+            <label>Modell <input id="f-model" placeholder="z. B. golf"></label>
           </div>
+        </div>
 
-          <label class="full">Stichwörter (Titel muss enthalten, Komma-getrennt) — portalübergreifend
-            <input id="f-keywords" placeholder="navi, klimaautomatik, ahk">
-          </label>
-          <label class="full">Ausschluss‑Stichwörter (Komma-getrennt)
-            <input id="f-exclude_terms" placeholder="unfall, export, bastler">
-          </label>
+        <div class="form-section">
+          <div class="section-heading"><span class="section-icon">⌕</span><div><h4>Ausschließen</h4><p>Mehrere Werte mit Komma trennen.</p></div></div>
+          <div class="grid">
+            <label>Hersteller ausschließen <input id="f-exclude_makes" placeholder="z. B. tesla, smart"></label>
+            <label>Modelle ausschließen <input id="f-exclude_models" placeholder="z. B. spring, zoe"></label>
+            <label class="full">Ausschluss-Stichwörter <input id="f-exclude_terms" placeholder="z. B. unfall, export, bastler"></label>
+          </div>
+        </div>
+
+        <div class="form-section">
+          <div class="section-heading"><span class="section-icon">€</span><div><h4>Rahmenbedingungen</h4><p>Preis, Alter und Nutzung des Fahrzeugs.</p></div></div>
+          <div class="grid">
+            <label>Baujahr von <input id="f-year_from" type="number" min="1990" max="2030" placeholder="2022"></label>
+            <label>Baujahr bis <input id="f-year_to" type="number" min="1990" max="2030" placeholder="beliebig"></label>
+            <label>Preis von (€) <input id="f-price_from" type="number" min="0" placeholder="0"></label>
+            <label>Preis bis (€) <input id="f-price_to" type="number" min="0" placeholder="27.500"></label>
+            <label>km von <input id="f-mileage_from" type="number" min="0" placeholder="0"></label>
+            <label>km bis <input id="f-mileage_to" type="number" min="0" placeholder="90.000"></label>
+            <label>Anbieter <select id="f-seller"></select></label>
+            <label class="check"><input id="f-active" type="checkbox" checked> Suche aktiv</label>
+          </div>
+        </div>
+
+        <div class="form-section">
+          <div class="section-heading"><span class="section-icon">⚙</span><div><h4>Fahrzeug & Technik</h4><p>Nur ausfüllen, wenn es für die Suche wichtig ist.</p></div></div>
+          <div class="grid">
+            <label>Kraftstoff <select id="f-fuel"></select></label>
+            <label>Getriebe <select id="f-transmission"></select></label>
+            <label>Karosserie <select id="f-body_type"></select></label>
+            <label>Türen <select id="f-doors"></select></label>
+            <label>Leistung von (PS) <input id="f-power_from" type="number" min="0" placeholder="150"></label>
+            <label>Leistung bis (PS) <input id="f-power_to" type="number" min="0"></label>
+          </div>
+        </div>
+
+        <div class="form-section ev-section">
+          <div class="section-heading"><span class="section-icon">⚡</span><div><h4>E-Auto-Kriterien</h4><p>Akku unbekannt? Bei gesetzter Reichweite greift der Reichweiten-Fallback.</p></div></div>
+          <div class="grid">
+            <label>Reichweite ab (km) <input id="f-ev_range_from" type="number" min="0" placeholder="450"></label>
+            <label>Akku ab (kWh) <input id="f-battery_from_kwh" type="number" min="0" step="0.1" placeholder="62"></label>
+          </div>
+        </div>
+
+        <div class="form-section">
+          <div class="section-heading"><span class="section-icon">✦</span><div><h4>Ausstattung & Begriffe</h4><p>Ausstattung wird direkt bei AutoScout24 gefiltert.</p></div></div>
+          <div class="grid">
+            <div class="full equip">
+              <div class="equip-head">
+                <span>Ausstattung (AutoScout24)</span>
+                <input id="equip-search" class="equip-search" placeholder="filtern… z. B. navi">
+                <span id="equip-count" class="equip-count">0 gewählt</span>
+              </div>
+              <div id="equip-groups" class="equip-groups"></div>
+              <div class="equip-note">Für Kleinanzeigen und mobile.de zusätzlich Stichwörter verwenden.</div>
+            </div>
+            <label class="full">Stichwörter <input id="f-keywords" placeholder="z. B. navi, klimaautomatik, ahk"></label>
+          </div>
         </div>
         <div class="modal-actions">
           <span id="form-error" class="form-error"></span>

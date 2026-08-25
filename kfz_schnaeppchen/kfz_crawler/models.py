@@ -128,6 +128,8 @@ class SearchQuery:
     name: str
     make: str = ""
     model: str = ""
+    exclude_makes: list = field(default_factory=list)  # Hersteller ausschließen
+    exclude_models: list = field(default_factory=list)  # Modelle ausschließen
     year_from: Optional[int] = None
     year_to: Optional[int] = None
     price_from: Optional[int] = None
@@ -195,6 +197,8 @@ class SearchQuery:
             name=d.get("name", "Unbenannte Suche"),
             make=s("make"),
             model=s("model"),
+            exclude_makes=cls._termlist(d.get("exclude_makes")),
+            exclude_models=cls._termlist(d.get("exclude_models")),
             year_from=i("year_from"),
             year_to=i("year_to"),
             price_from=i("price_from"),
@@ -222,6 +226,8 @@ class SearchQuery:
         return {
             "id": self.id, "name": self.name, "active": self.active,
             "make": self.make, "model": self.model,
+            "exclude_makes": self.exclude_makes,
+            "exclude_models": self.exclude_models,
             "year_from": self.year_from, "year_to": self.year_to,
             "price_from": self.price_from, "price_to": self.price_to,
             "mileage_from": self.mileage_from, "mileage_to": self.mileage_to,
@@ -290,6 +296,18 @@ def matches_query(l: Listing, q: SearchQuery) -> bool:
             return False
     if q.model and title:
         if q.model not in title:
+            return False
+    # Ausschlüsse werden bewusst erst nach dem Portalabruf geprüft, weil die
+    # Portale dafür keine einheitliche serverseitige Schnittstelle haben.
+    if q.exclude_makes and title:
+        if any(
+            token in title
+            for make in q.exclude_makes
+            for token in _make_tokens(make.lower())
+        ):
+            return False
+    if q.exclude_models and title:
+        if any(model.lower() in title for model in q.exclude_models):
             return False
     if q.price_from and l.price is not None and l.price < q.price_from:
         return False
