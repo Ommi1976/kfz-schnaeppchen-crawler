@@ -38,6 +38,15 @@ _SUSPECT_PATTERNS: List[Tuple[str, str]] = [
     (r"\bspringt\s+nicht\s+an", "springt nicht an"),
     (r"\bohne\s+t[üu]v\b", "ohne TÜV"),
     (r"\bnicht\s+fahrbereit", "nicht fahrbereit"),
+    # Lockangebote / Neuwagen-Anzahlungen (kein echtes Gebrauchtwagen-Schnäppchen)
+    (r"sofort\s+verf[üu]gbar", "Lockangebot (sofort verfügbar)"),
+    (r"sofort\s+lieferbar", "Lockangebot (sofort lieferbar)"),
+    (r"\banzahlung\b", "Anzahlung/Leasing"),
+    (r"\bbestellfahrzeug", "Bestellfahrzeug"),
+    (r"\bkonfigurier", "Konfigurierbar (Neuwagen)"),
+    (r"lieferzeit", "Lieferzeit (Neuwagen)"),
+    (r"\bverf[üu]gbar\s+ab\b", "verfügbar ab (Neuwagen)"),
+    (r"probefahrt\s+m[öo]glich.*neu", "Neuwagen"),
 ]
 
 
@@ -155,17 +164,35 @@ def build_price_model(listings: List[Listing]) -> Optional[PriceModel]:
         if sd > 0:
             kept = [p for p, r in zip(pts, resids) if abs(r) <= 2.5 * sd]
             if len(kept) >= 6:
-                coeffs = _fit_loglinear(kept) or coeffs
+                # Nach dem Trimmen neu fitten. Schlägt der Fit fehl (zu wenig
+                # Varianz), auf Median zurückfallen statt die verzerrte
+                # ursprüngliche Schätzung zu behalten.
+                coeffs = _fit_loglinear(kept)
 
     return PriceModel(coeffs=coeffs, median=median, current_year=current_year)
 
 
 @dataclass
 class DealResult:
-    deals: List[Listing]          # echte Schnäppchen
-    suspicious: List[Listing]     # verdächtig (nicht melden, nur zählen)
+    deals: List[Listing]          # echte Schnäppchen (is_deal)
+    suspicious: List[Listing]     # verdächtig / Lockangebote (is_suspicious)
+    priced: List[Listing]         # ALLE bepreisten Inserate (annotiert)
     market_median: Optional[int]
     used_regression: bool
+
+
+def _classify(l: Listing, discount: float, deal_threshold: float,
+              suspicious_discount: float) -> None:
+    """Setzt is_deal / is_suspicious / suspicious_reasons auf dem Inserat."""
+    reasons = fraud_reasons(l)
+    # Lockangebot: Neuwagen (0 km) deutlich unter Markt = Anzahlung/Köder.
+    if (l.mileage == 0) and discount >= deal_threshold and "0 km" not in " ".join(reasons):
+        reasons = reasons + ["Lockangebot (Neuwagen, 0 km)"]
+    if discount >= suspicious_discount and not reasons:
+        reasons = ["unrealistisch günstig"]
+    l.suspicious_reasons = reasons
+    l.is_suspicious = bool(reasons)
+    l.is_deal = (discount >= deal_threshold) and not l.is_suspicious
 
 
 def find_deals(
@@ -176,11 +203,13 @@ def find_deals(
 ) -> DealResult:
     priced = [l for l in listings if l.price and l.price > 0]
     if len(priced) < min_comparables:
-        return DealResult(deals=[], suspicious=[], market_median=None, used_regression=False)
+        return DealResult(deals=[], suspicious=[], priced=priced,
+                          market_median=None, used_regression=False)
 
     model = build_price_model(priced)
     if model is None:
-        return DealResult(deals=[], suspicious=[], market_median=None, used_regression=False)
+        return DealResult(deals=[], suspicious=[], priced=priced,
+                          market_median=None, used_regression=False)
 
     deals: List[Listing] = []
     suspicious: List[Listing] = []
@@ -191,25 +220,50 @@ def find_deals(
         discount = (exp - l.price) / exp
         l.market_price = exp
         l.discount = discount
-        if discount < deal_threshold:
-            continue
-        reasons = fraud_reasons(l)
-        if discount >= suspicious_discount and not reasons:
-            reasons = ["unrealistisch günstig"]
-        if reasons:
-            l.suspicious_reasons = reasons
-            suspicious.append(l)
-        else:
+        _classify(l, discount, deal_threshold, suspicious_discount)
+        if l.is_deal:
             deals.append(l)
+        elif l.is_suspicious:
+            suspicious.append(l)
 
     deals.sort(key=lambda x: x.discount or 0, reverse=True)
     suspicious.sort(key=lambda x: x.discount or 0, reverse=True)
+    priced.sort(key=lambda x: x.discount or -1, reverse=True)
     return DealResult(
         deals=deals,
         suspicious=suspicious,
+        priced=priced,
         market_median=model.median,
         used_regression=model.coeffs is not None,
     )
+
+
+def dedupe(listings: List[Listing]) -> List[Listing]:
+    """Portalübergreifende Dubletten entfernen: gleiches Baujahr + exakter
+    Kilometerstand = i. d. R. dasselbe Auto. Bei nahen Preisen wird das
+    günstigere behalten; weichen die Preise stark ab, sind es vermutlich
+    verschiedene Autos und beide bleiben erhalten."""
+    kept: List[Listing] = []
+    index: dict = {}
+    for l in listings:
+        k = l.dedupe_key
+        if k is None:
+            kept.append(l)
+            continue
+        if k not in index:
+            index[k] = len(kept)
+            kept.append(l)
+            continue
+        i = index[k]
+        other = kept[i]
+        lp, op = l.price or 0, other.price or 0
+        close = lp and op and min(lp, op) >= 0.7 * max(lp, op)
+        if close:
+            if lp and (op == 0 or lp < op):
+                kept[i] = l   # günstigeres Angebot desselben Autos behalten
+        else:
+            kept.append(l)    # deutlich anderer Preis -> vermutlich anderes Auto
+    return kept
 
 
 # --- Rückwärtskompatibilität ---------------------------------------------

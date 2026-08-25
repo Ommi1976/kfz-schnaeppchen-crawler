@@ -30,25 +30,38 @@ class SeenStore:
             )
             """
         )
-        # Volltext-Deals für die Weboberfläche.
+        # Alle gefundenen Inserate für die Weboberfläche (nicht nur Deals).
         self.conn.execute(
             """
             CREATE TABLE IF NOT EXISTS deals (
-                fingerprint  TEXT PRIMARY KEY,
-                search_name  TEXT,
-                portal       TEXT,
-                title        TEXT,
-                url          TEXT,
-                price        INTEGER,
-                market_price INTEGER,
-                discount     REAL,
-                year         INTEGER,
-                mileage      INTEGER,
-                fuel         TEXT,
-                first_seen   REAL
+                fingerprint   TEXT PRIMARY KEY,
+                search_name   TEXT,
+                portal        TEXT,
+                title         TEXT,
+                url           TEXT,
+                price         INTEGER,
+                market_price  INTEGER,
+                discount      REAL,
+                year          INTEGER,
+                mileage       INTEGER,
+                fuel          TEXT,
+                is_deal       INTEGER DEFAULT 0,
+                is_suspicious INTEGER DEFAULT 0,
+                reasons       TEXT,
+                first_seen    REAL
             )
             """
         )
+        for ddl in [
+            "ALTER TABLE deals ADD COLUMN is_deal INTEGER DEFAULT 0",
+            "ALTER TABLE deals ADD COLUMN is_suspicious INTEGER DEFAULT 0",
+            "ALTER TABLE deals ADD COLUMN reasons TEXT",
+        ]:
+            try:
+                self.conn.execute(ddl)
+            except sqlite3.OperationalError:
+                pass  # Spalte existiert bereits
+        self.conn.execute("CREATE INDEX IF NOT EXISTS idx_deals_ym ON deals(year, mileage)")
         # In der UI verwaltete Suchen.
         self.conn.execute(
             """
@@ -165,14 +178,14 @@ class SeenStore:
             )
             self.conn.commit()
 
-    # ---- Deals (für die Weboberfläche) --------------------------------
-    def record_deal(self, search_name: str, listing: Listing) -> None:
+    # ---- Inserate (für die Weboberfläche) -----------------------------
+    def record_listing(self, search_name: str, listing: Listing) -> None:
         with self._lock:
             self.conn.execute(
                 "INSERT OR IGNORE INTO deals "
                 "(fingerprint, search_name, portal, title, url, price, market_price, "
-                " discount, year, mileage, fuel, first_seen) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                " discount, year, mileage, fuel, is_deal, is_suspicious, reasons, first_seen) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     listing.fingerprint,
                     search_name,
@@ -185,29 +198,80 @@ class SeenStore:
                     listing.year,
                     listing.mileage,
                     listing.fuel,
+                    1 if listing.is_deal else 0,
+                    1 if listing.is_suspicious else 0,
+                    "; ".join(listing.suspicious_reasons or []),
                     time.time(),
                 ),
             )
             self.conn.commit()
 
-    def list_deals(self, limit: int = 300, search_name: str | None = None) -> List[dict]:
+    # Rückwärtskompatibler Alias.
+    record_deal = record_listing
+
+    def similar_exists(self, year, mileage, price=None, tol=0.3) -> bool:
+        """Dublette über Läufe hinweg: gleiches Baujahr + exakter km bereits
+        gespeichert (optional mit Preisnähe)."""
+        if not year or not mileage or mileage <= 0:
+            return False
         with self._lock:
+            cur = self.conn.execute(
+                "SELECT price FROM deals WHERE year = ? AND mileage = ?", (year, mileage)
+            )
+            rows = cur.fetchall()
+        if not rows:
+            return False
+        if price is None:
+            return True
+        for r in rows:
+            op = r["price"]
+            if not op:
+                return True
+            if min(price, op) >= (1 - tol) * max(price, op):
+                return True
+        return False
+
+    def list_deals(self, limit: int = 300, search_name: str | None = None,
+                   deals_only: bool = False) -> List[dict]:
+        with self._lock:
+            where = []
+            params: list = []
             if search_name:
-                cur = self.conn.execute(
-                    "SELECT * FROM deals WHERE search_name = ? "
-                    "ORDER BY first_seen DESC LIMIT ?",
-                    (search_name, limit),
-                )
-            else:
-                cur = self.conn.execute(
-                    "SELECT * FROM deals ORDER BY first_seen DESC LIMIT ?", (limit,)
-                )
+                where.append("search_name = ?")
+                params.append(search_name)
+            if deals_only:
+                where.append("is_deal = 1")
+            wsql = (" WHERE " + " AND ".join(where)) if where else ""
+            # Deals zuerst, dann nach Rabatt, dann neueste.
+            params.append(limit)
+            cur = self.conn.execute(
+                f"SELECT * FROM deals{wsql} "
+                "ORDER BY is_deal DESC, discount DESC, first_seen DESC LIMIT ?",
+                params,
+            )
             return [dict(r) for r in cur.fetchall()]
 
-    def deal_count(self) -> int:
+    def deal_count(self, deals_only: bool = True) -> int:
         with self._lock:
-            cur = self.conn.execute("SELECT COUNT(*) AS c FROM deals")
-            return int(cur.fetchone()["c"])
+            sql = "SELECT COUNT(*) AS c FROM deals"
+            if deals_only:
+                sql += " WHERE is_deal = 1"
+            return int(self.conn.execute(sql).fetchone()["c"])
+
+    def total_count(self) -> int:
+        with self._lock:
+            return int(self.conn.execute("SELECT COUNT(*) AS c FROM deals").fetchone()["c"])
+
+    def prune(self, keep: int = 3000) -> None:
+        """Älteste Einträge kappen, damit die Tabelle nicht unbegrenzt wächst."""
+        with self._lock:
+            self.conn.execute(
+                "DELETE FROM deals WHERE fingerprint IN ("
+                "  SELECT fingerprint FROM deals ORDER BY first_seen DESC LIMIT -1 OFFSET ?"
+                ")",
+                (keep,),
+            )
+            self.conn.commit()
 
     def clear_deals(self) -> int:
         with self._lock:

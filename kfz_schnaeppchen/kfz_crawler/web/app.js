@@ -99,7 +99,8 @@ async function loadStatus() {
 
   const nextIn = s.next_run_at ? Math.max(0, Math.round((s.next_run_at - Date.now() / 1000) / 60)) : null;
   const cards = [
-    { k: "Schnäppchen gesamt", v: s.total_deals ?? "–" },
+    { k: "Schnäppchen", v: s.total_deals ?? "–" },
+    { k: "Inserate gesamt", v: s.total_listings ?? "–" },
     { k: "Suchen", v: (s.searches || []).length },
     { k: "Letzter Lauf", v: fmtClock(s.last_finished_at || s.last_run_at) },
     { k: "Nächster Lauf", v: nextIn == null ? "–" : `in ${nextIn} min` },
@@ -170,17 +171,24 @@ function chipsCount(s) {
 // ---------- Deals ----------
 async function loadDeals() {
   const sel = document.getElementById("searchFilter");
-  const q = sel.value ? `?search=${sel.value}` : "";
-  const data = await getJSON(`${API}/deals${q}`);
+  const dealsOnly = document.getElementById("dealsOnly").checked;
+  const params = [];
+  if (sel.value) params.push(`search=${sel.value}`);
+  if (dealsOnly) params.push("deals_only=true");
+  const data = await getJSON(`${API}/deals${params.length ? "?" + params.join("&") : ""}`);
   const body = document.getElementById("deals-body");
   if (!data.deals.length) {
-    body.innerHTML = `<tr><td colspan="9" class="empty">Noch keine Schnäppchen. Lege eine Suche an und klick „Suchen".</td></tr>`;
+    body.innerHTML = `<tr><td colspan="10" class="empty">Noch keine Treffer. Lege eine Suche an und klick „Suchen".</td></tr>`;
   } else {
     body.innerHTML = data.deals.map((d) => {
-      const disc = d.discount == null ? "" : `-${Math.round(d.discount * 100)} %`;
-      return `<tr>
+      const disc = d.discount == null ? "" : `${d.discount < 0 ? "+" : "-"}${Math.abs(Math.round(d.discount * 100))} %`;
+      let mark = "", rowcls = "";
+      if (d.is_deal) { mark = `<span class="mark deal" title="Schnäppchen">★</span>`; rowcls = "row-deal"; }
+      else if (d.is_suspicious) { mark = `<span class="mark susp" title="${escapeHtml(d.reasons || "verdächtig")}">⚠</span>`; rowcls = "row-susp"; }
+      return `<tr class="${rowcls}">
+        <td class="markcell">${mark}</td>
         <td><span class="portal-badge">${escapeHtml(d.portal || "")}</span></td>
-        <td class="title">${escapeHtml(d.title || "")}</td>
+        <td class="title">${escapeHtml(d.title || "")}${d.is_suspicious ? `<div class="reason">${escapeHtml(d.reasons || "")}</div>` : ""}</td>
         <td class="num">${euro(d.price)}</td>
         <td class="num">${euro(d.market_price)}</td>
         <td class="num discount ${discountClass(d.discount)}">${disc}</td>
@@ -192,7 +200,7 @@ async function loadDeals() {
     }).join("");
   }
   document.getElementById("footer-info").textContent =
-    `${data.count} Treffer angezeigt · Auto-Aktualisierung alle 20 s`;
+    `${data.count} Treffer angezeigt${dealsOnly ? " (nur Schnäppchen)" : ""} · Auto-Aktualisierung alle 20 s`;
 }
 
 // ---------- Formular ----------
@@ -295,6 +303,7 @@ document.getElementById("run").addEventListener("click", async () => {
 });
 document.getElementById("refresh").addEventListener("click", refresh);
 document.getElementById("searchFilter").addEventListener("change", loadDeals);
+document.getElementById("dealsOnly").addEventListener("change", loadDeals);
 document.getElementById("clear").addEventListener("click", async () => {
   if (!confirm("Trefferliste wirklich leeren? (Duplikat-Filter bleibt erhalten)")) return;
   await fetch(`${API}/deals`, { method: "DELETE" });

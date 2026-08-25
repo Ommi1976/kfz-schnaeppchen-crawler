@@ -23,6 +23,7 @@ from .config import Config
 from .ha_run import build_config, load_options
 from .main import run_search
 from .models import SearchQuery
+from .notify import notify_all
 from .portals import REGISTRY
 from .portals.as24_taxonomy import EQUIPMENT, EQUIPMENT_GROUPS
 from .storage import SeenStore
@@ -75,6 +76,12 @@ def _run_all(app: FastAPI, only_id: str | None = None) -> dict:
             deals = run_search(cfg, query, store)
             summary[query.name] = len(deals)
             total += len(deals)
+            # Neue Schnäppchen an Home Assistant / Telegram melden.
+            if deals:
+                try:
+                    notify_all(cfg.notify, query.name, deals)
+                except Exception:
+                    logger.exception("Benachrichtigung fehlgeschlagen")
         except Exception as e:  # eine Suche darf die anderen nicht stoppen
             logger.exception("Suche '%s' fehlgeschlagen: %s", query.name, e)
             summary[query.name] = -1
@@ -180,7 +187,8 @@ async def status():
         "next_run_at": app.state.next_run_at,
         "portals_active": [k for k, v in cfg.portals.items() if v],
         "deal_threshold": cfg.settings.deal_threshold,
-        "total_deals": app.state.store.deal_count(),
+        "total_deals": app.state.store.deal_count(deals_only=True),
+        "total_listings": app.state.store.total_count(),
         "searches": searches,
         "last_report": app.state.last_report,
     }
@@ -234,8 +242,10 @@ async def run_one(search_id: str):
 
 
 @app.get("/api/deals")
-async def deals(search: str | None = None, limit: int = 300):
-    rows = app.state.store.list_deals(limit=min(limit, 1000), search_name=search)
+async def deals(search: str | None = None, limit: int = 400, deals_only: bool = False):
+    rows = app.state.store.list_deals(
+        limit=min(limit, 2000), search_name=search, deals_only=deals_only
+    )
     return {"count": len(rows), "deals": rows}
 
 

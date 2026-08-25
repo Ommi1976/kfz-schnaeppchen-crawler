@@ -9,7 +9,7 @@ from typing import List
 from rich.console import Console
 
 from .config import Config
-from .dealfinder import find_deals
+from .dealfinder import dedupe, find_deals
 from .models import Listing, SearchQuery, matches_query
 from .notify import notify_all
 from .portals import REGISTRY
@@ -57,7 +57,10 @@ def run_search(cfg: Config, query: SearchQuery, store: SeenStore) -> List[Listin
     # E-Auto-Reichweite …) portalübergreifend anwenden.
     all_listings = [l for l in all_listings if matches_query(l, query)]
 
-    # #3/#5: erwarteten Preis (Regression) schätzen, Deals + Verdachtsfälle trennen.
+    # Dublettenfilter: dasselbe Auto (Baujahr + exakter km) nur einmal.
+    all_listings = dedupe(all_listings)
+
+    # Preis-Modell + Klassifikation (Deal / verdächtig / Lockangebot) für ALLE.
     result = find_deals(
         all_listings,
         deal_threshold=cfg.settings.deal_threshold,
@@ -66,18 +69,28 @@ def run_search(cfg: Config, query: SearchQuery, store: SeenStore) -> List[Listin
     )
     if result.market_median is not None:
         modus = "Regression" if result.used_regression else "Median"
-        extra = f", {len(result.suspicious)} verdächtig unterdrückt" if result.suspicious else ""
         console.print(
-            f"  [dim]Preismodell: {modus} (Median ~{result.market_median:,} €{extra})[/dim]".replace(",", ".")
+            f"  [dim]Preismodell: {modus} (Median ~{result.market_median:,} €) – "
+            f"{len(result.deals)} Deals, {len(result.priced)} Inserate[/dim]".replace(",", ".")
         )
 
-    # Nur neue (noch nicht gemeldete) Deals durchlassen.
-    new_deals = [d for d in result.deals if store.is_new(d)]
-    for d in new_deals:
-        store.mark_seen(d)
-        # Für die Weboberfläche dauerhaft festhalten.
-        if hasattr(store, "record_deal"):
-            store.record_deal(query.name, d)
+    # ALLE (neuen, nicht-dublettigen) Inserate für die UI speichern – Schnäppchen
+    # sind über is_deal markiert. Zurückgegeben werden nur neue Deals (für Meldung).
+    new_deals = []
+    for l in result.priced:
+        if not store.is_new(l):
+            continue
+        # Cross-Lauf-Dublette (gleiches Auto in früherem Lauf/anderem Portal)?
+        if hasattr(store, "similar_exists") and store.similar_exists(l.year, l.mileage, l.price):
+            store.mark_seen(l)  # merken, aber nicht doppelt anzeigen
+            continue
+        store.mark_seen(l)
+        if hasattr(store, "record_listing"):
+            store.record_listing(query.name, l)
+        if l.is_deal:
+            new_deals.append(l)
+    if hasattr(store, "prune"):
+        store.prune()
 
     return new_deals
 

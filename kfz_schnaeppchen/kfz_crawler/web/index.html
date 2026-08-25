@@ -37,6 +37,7 @@
     <div class="block-head">
       <h2>Treffer</h2>
       <div class="controls-inline">
+        <label class="switch"><input type="checkbox" id="dealsOnly"> nur Schnäppchen</label>
         <label>Suche:
           <select id="searchFilter"><option value="">Alle</option></select>
         </label>
@@ -47,14 +48,14 @@
       <table id="deals">
         <thead>
           <tr>
-            <th>Portal</th><th>Fahrzeug</th><th class="num">Preis</th>
+            <th></th><th>Portal</th><th>Fahrzeug</th><th class="num">Preis</th>
             <th class="num">Marktpreis</th><th class="num">Rabatt</th>
             <th class="num">Baujahr</th><th class="num">km</th>
             <th>Gefunden</th><th></th>
           </tr>
         </thead>
         <tbody id="deals-body">
-          <tr><td colspan="9" class="empty">lädt…</td></tr>
+          <tr><td colspan="10" class="empty">lädt…</td></tr>
         </tbody>
       </table>
     </div>

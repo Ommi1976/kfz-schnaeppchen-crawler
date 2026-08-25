@@ -33,6 +33,17 @@ class Listing:
     market_price: Optional[int] = field(default=None, compare=False)
     discount: Optional[float] = field(default=None, compare=False)  # 0.20 = 20 % unter Markt
     suspicious_reasons: list = field(default_factory=list, compare=False)
+    is_deal: bool = field(default=False, compare=False)
+    is_suspicious: bool = field(default=False, compare=False)
+
+    @property
+    def dedupe_key(self):
+        """Grober Fahrzeug-Fingerabdruck für portalübergreifende Dubletten:
+        gleiches Baujahr + exakter Kilometerstand identifizieren i. d. R. dasselbe
+        Auto (auch wenn es von mehreren Händlern/Portalen inseriert wird)."""
+        if self.year and self.mileage and self.mileage > 0:
+            return (self.year, self.mileage)
+        return None
 
     @property
     def fingerprint(self) -> str:
