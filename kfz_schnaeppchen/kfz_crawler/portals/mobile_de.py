@@ -39,7 +39,8 @@ class MobileDe(BasePortal):
 
         def span(name: str, low, high) -> None:
             if low is not None or high is not None:
-                params.append(f"{name}={requests_quote(f'{low or ""}:{high or ""}')}")
+                value = f"{low or ''}:{high or ''}"
+                params.append(f"{name}={requests_quote(value)}")
 
         span("p", query.price_from, query.price_to)
         span("fr", query.year_from, query.year_to)
