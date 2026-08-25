@@ -11,7 +11,13 @@ from rich.console import Console
 
 from .config import Config
 from .dealfinder import dedupe, find_deals
-from .models import Listing, SearchQuery, matches_query
+from .models import (
+    Listing,
+    SearchQuery,
+    infer_listing_battery,
+    infer_listing_range,
+    matches_query,
+)
 from .notify import notify_all
 from .portals import REGISTRY
 from .portals.base import PortalError
@@ -38,6 +44,10 @@ def _search_one_portal(cfg: Config, key: str, query: SearchQuery) -> List[Listin
         # Detailseite nachladen (verify_details erzwingt zusätzlich via force).
         if hasattr(portal, "enrich"):
             found = portal.enrich(found, query, force=cfg.settings.verify_details)
+        # Viele Portale liefern die Akku-Kapazität nur im Titel (z. B. "62 kWh").
+        for listing in found:
+            infer_listing_battery(listing)
+            infer_listing_range(listing)
         console.print(f"  [dim]{portal.name}: {len(found)} Treffer[/dim]")
         return found
     except PortalError as e:

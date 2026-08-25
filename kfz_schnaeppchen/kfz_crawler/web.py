@@ -22,7 +22,7 @@ from . import __version__
 from .config import Config
 from .ha_run import build_config, load_options
 from .main import run_search
-from .models import SearchQuery
+from .models import SearchQuery, extract_battery_kwh, extract_ev_range_km
 from .notify import notify_all
 from .portals import REGISTRY
 from .portals.as24_taxonomy import EQUIPMENT, EQUIPMENT_GROUPS
@@ -246,6 +246,29 @@ async def deals(search: str | None = None, limit: int = 400, deals_only: bool = 
     rows = app.state.store.list_deals(
         limit=min(limit, 2000), search_name=search, deals_only=deals_only
     )
+    # Bereits gespeicherte Treffer stammen ggf. aus einer früheren Version der
+    # Suche. Bei einer nachträglich gesetzten Akku-Mindestgröße müssen sie
+    # ebenfalls geprüft werden, sonst bleiben kleinere Akkus sichtbar.
+    specs = {s["name"]: SearchQuery.from_dict(s) for s in app.state.store.list_searches()}
+    filtered = []
+    for row in rows:
+        query = specs.get(row.get("search_name"))
+        minimum = query.battery_from_kwh if query else None
+        if minimum:
+            battery = row.get("battery_kwh")
+            if battery is None:
+                battery = extract_battery_kwh(row.get("title"))
+            if battery is not None:
+                if battery < minimum:
+                    continue
+            else:
+                range_km = row.get("ev_range_km") or extract_ev_range_km(row.get("title"))
+                range_ok = bool(query.ev_range_from and range_km and range_km >= query.ev_range_from)
+                as24_server_checked = bool(query.ev_range_from and row.get("portal") == "AutoScout24")
+                if not (range_ok or as24_server_checked):
+                    continue
+        filtered.append(row)
+    rows = filtered
     return {"count": len(rows), "deals": rows}
 
 

@@ -133,6 +133,10 @@ function chips(spec) {
   if (spec.power_from || spec.power_to) c.push(`${spec.power_from || 0}–${spec.power_to || "∞"} PS`);
   if (spec.seller) c.push(label(spec.seller));
   if (spec.ev_range_from) c.push(`≥${spec.ev_range_from} km Reichw.`);
+  if (spec.battery_from_kwh) {
+    const fallback = spec.ev_range_from ? ` oder Reichw. ≥${spec.ev_range_from} km` : "";
+    c.push(`Akku ≥${spec.battery_from_kwh} kWh${fallback}`);
+  }
   if ((spec.equipment || []).length) c.push(`🔧 ${spec.equipment.length} Ausstattung`);
   (spec.keywords || []).forEach((k) => c.push("＋" + k));
   (spec.exclude_terms || []).forEach((k) => c.push("－" + k));

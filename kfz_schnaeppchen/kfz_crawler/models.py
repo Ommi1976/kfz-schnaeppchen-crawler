@@ -8,6 +8,61 @@ from dataclasses import dataclass, field
 from typing import Optional
 
 
+_BATTERY_KWH_RE = re.compile(
+    r"(?<![\w.,])(\d{1,3}(?:[.,]\d{1,2})?)\s*k\s*wh\b",
+    re.IGNORECASE,
+)
+_EV_RANGE_RE = re.compile(
+    r"(?:reichweite|range)\D{0,24}(\d{2,4})\s*km|"
+    r"(\d{2,4})\s*km\D{0,24}(?:reichweite|range)",
+    re.IGNORECASE,
+)
+
+
+def extract_battery_kwh(text: str | None) -> Optional[float]:
+    """Erkennt eine Akku-Kapazität aus Inseratstexten, z. B. ``62 kWh``."""
+    if not text:
+        return None
+    values = []
+    for match in _BATTERY_KWH_RE.finditer(str(text)):
+        try:
+            value = float(match.group(1).replace(",", "."))
+        except ValueError:
+            continue
+        if 5 <= value <= 200:
+            values.append(value)
+    return max(values) if values else None
+
+
+def extract_ev_range_km(text: str | None) -> Optional[int]:
+    """Erkennt eine elektrische Reichweite aus Texten wie ``455 km Reichweite``."""
+    if not text:
+        return None
+    for match in _EV_RANGE_RE.finditer(str(text)):
+        value = match.group(1) or match.group(2)
+        if value:
+            number = int(value)
+            if 50 <= number <= 1500:
+                return number
+    return None
+
+
+def infer_listing_battery(listing: "Listing") -> None:
+    """Füllt den Akkuwert aus Titel/Text nach, falls das Portal ihn nicht liefert."""
+    if listing.battery_kwh is not None:
+        return
+    text = f"{listing.title or ''} {getattr(listing, 'body', '') or ''}"
+    listing.battery_kwh = extract_battery_kwh(text)
+
+
+def infer_listing_range(listing: "Listing") -> None:
+    """Füllt die elektrische Reichweite aus Titel/Text nach."""
+    if listing.ev_range_km is not None:
+        return
+    text = f"{listing.title or ''} {getattr(listing, 'body', '') or ''}"
+    listing.ev_range_km = extract_ev_range_km(text)
+
+
 @dataclass
 class Listing:
     """Ein einzelnes Fahrzeug-Inserat, portal-übergreifend normalisiert."""
@@ -264,8 +319,21 @@ def matches_query(l: Listing, q: SearchQuery) -> bool:
     # E-Auto-Filter
     if q.ev_range_from and l.ev_range_km is not None and l.ev_range_km < q.ev_range_from:
         return False
-    if q.battery_from_kwh and l.battery_kwh is not None and l.battery_kwh < q.battery_from_kwh:
-        return False
+    # Ein bekannter kleiner Akku wird immer ausgeschlossen. Fehlt die kWh-
+    # Angabe, reicht bei gesetztem Reichweitenfilter eine nachweislich passende
+    # Reichweite als sinnvolle Fallback-Prüfung.
+    if q.battery_from_kwh:
+        if l.battery_kwh is not None:
+            if l.battery_kwh < q.battery_from_kwh:
+                return False
+        elif q.ev_range_from and l.ev_range_km is not None and l.ev_range_km >= q.ev_range_from:
+            pass
+        elif q.ev_range_from and l.portal == "AutoScout24":
+            # AutoScout24 setzt erange server-seitig; falls die Reichweite in
+            # der Ergebnisliste fehlt, ist dieser Treffer trotzdem verifiziert.
+            pass
+        else:
+            return False
 
     # Ausstattung / Freitext: Stichwörter müssen ALLE vorkommen, Ausschluss keiner.
     hay = f"{l.title or ''} {l.body or ''}".lower()

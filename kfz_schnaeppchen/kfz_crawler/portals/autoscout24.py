@@ -13,7 +13,7 @@ from typing import List, Optional
 
 from bs4 import BeautifulSoup
 
-from ..models import Listing, SearchQuery
+from ..models import Listing, SearchQuery, extract_ev_range_km
 from .base import BasePortal, PortalError
 
 FUEL_MAP = {
@@ -123,6 +123,10 @@ class AutoScout24(BasePortal):
                 # Leistung: bevorzugt kW aus Tracking, in PS umrechnen.
                 kw = self._to_int(tr.get("powerInKw") or v.get("rawPowerInKw"))
                 power_ps = round(kw * PS_TO_KW) if kw else self._to_int(tr.get("powerInHp"))
+                detail_text = " ".join(
+                    str(d.get("data", "")) for d in (it.get("vehicleDetails") or [])
+                    if isinstance(d, dict)
+                )
                 listings.append(
                     Listing(
                         portal=self.name,
@@ -136,6 +140,7 @@ class AutoScout24(BasePortal):
                         transmission=self._norm_gear(v.get("transmissionType") or tr.get("transmission")),
                         power_ps=power_ps,
                         body=v.get("bodyType"),
+                        ev_range_km=extract_ev_range_km(detail_text),
                         raw_id=str(it.get("id") or ""),
                     )
                 )

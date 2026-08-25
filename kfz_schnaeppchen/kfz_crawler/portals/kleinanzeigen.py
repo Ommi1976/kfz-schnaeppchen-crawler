@@ -16,7 +16,7 @@ from typing import List, Optional
 import requests
 from bs4 import BeautifulSoup
 
-from ..models import Listing, SearchQuery
+from ..models import Listing, SearchQuery, extract_ev_range_km
 from .base import BasePortal, PortalError
 
 # Wie viele Detailseiten pro Suche höchstens nachgeladen werden (Requests sparen).
@@ -86,14 +86,16 @@ class Kleinanzeigen(BasePortal):
             price = self._to_int(self._text(art, ".aditem-main--middle--price-shipping--price"))
             location = self._text(art, ".aditem-main--top--left")
             desc = self._text(art, ".aditem-main--middle--description") or ""
+            listing_text = desc + " " + (title or "")
 
             listing = Listing(
                 portal=self.name,
                 title=(title or "Kleinanzeigen-Inserat")[:120],
                 url=url,
                 price=price,
-                mileage=self._extract_km(desc + " " + (title or "")),
-                year=self._extract_year(desc + " " + (title or "")),
+                mileage=self._extract_km(listing_text),
+                year=self._extract_year(listing_text),
+                ev_range_km=extract_ev_range_km(listing_text),
                 location=location,
                 raw_id=art.get("data-adid"),
             )

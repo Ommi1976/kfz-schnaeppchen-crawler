@@ -45,6 +45,8 @@ class SeenStore:
                 year          INTEGER,
                 mileage       INTEGER,
                 fuel          TEXT,
+                battery_kwh   REAL,
+                ev_range_km   INTEGER,
                 is_deal       INTEGER DEFAULT 0,
                 is_suspicious INTEGER DEFAULT 0,
                 reasons       TEXT,
@@ -53,6 +55,8 @@ class SeenStore:
             """
         )
         for ddl in [
+            "ALTER TABLE deals ADD COLUMN battery_kwh REAL",
+            "ALTER TABLE deals ADD COLUMN ev_range_km INTEGER",
             "ALTER TABLE deals ADD COLUMN is_deal INTEGER DEFAULT 0",
             "ALTER TABLE deals ADD COLUMN is_suspicious INTEGER DEFAULT 0",
             "ALTER TABLE deals ADD COLUMN reasons TEXT",
@@ -184,8 +188,8 @@ class SeenStore:
             self.conn.execute(
                 "INSERT OR IGNORE INTO deals "
                 "(fingerprint, search_name, portal, title, url, price, market_price, "
-                " discount, year, mileage, fuel, is_deal, is_suspicious, reasons, first_seen) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                " discount, year, mileage, fuel, battery_kwh, ev_range_km, is_deal, is_suspicious, reasons, first_seen) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     listing.fingerprint,
                     search_name,
@@ -198,6 +202,8 @@ class SeenStore:
                     listing.year,
                     listing.mileage,
                     listing.fuel,
+                    listing.battery_kwh,
+                    listing.ev_range_km,
                     1 if listing.is_deal else 0,
                     1 if listing.is_suspicious else 0,
                     "; ".join(listing.suspicious_reasons or []),

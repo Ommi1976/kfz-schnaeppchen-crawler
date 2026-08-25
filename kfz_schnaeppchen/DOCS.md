@@ -83,6 +83,12 @@ Getriebe, Leistung, Karosserie, Anbieter) steuert **alle Portale einheitlich**:
 - **Alle Portale:** zentraler **Nachfilter**, der ein Inserat nur ausschließt,
   wenn der Wert bekannt ist und ihn verletzt.
 
+**Akku-Mindestkapazität:** Wird im Inseratstitel nach Angaben wie `62 kWh`
+ausgewertet. Ein bekannter kleinerer Akku wird ausgeschlossen. Fehlt die
+kWh-Angabe, darf ein Inserat als Fallback erscheinen, wenn die geforderte
+elektrische Reichweite nachweislich erfüllt ist; so bleiben brauchbare Treffer
+ohne Kapazitätsangabe erhalten.
+
 **Ausstattung:** Die Ausstattungs-Auswahl in der UI wirkt server-seitig nur bei
 AutoScout24. Für andere Portale dieselbe Wirkung über **Stichwörter** erzielen
 (z. B. „navi, ahk"). Tipp: Bei `fuel: elektro` ohne `make`/`model` mit
