@@ -171,7 +171,8 @@ class MobileDe(BasePortal):
             title=title[:120],
             url=url,
             price=int(price) if isinstance(price, (int, float)) else self._to_int(price),
-            year=self._year_from_attr(attr),
+            year=self._year_from_attr(attr) or self._year_from_text(
+                (it.get("formattedAttributes") or "") + " " + url),
             mileage=self._to_int(attr.get("ml")),
             fuel=self._norm_fuel(attr.get("ft")),
             power_ps=self._to_int(attr.get("pw")),
@@ -198,12 +199,17 @@ class MobileDe(BasePortal):
 
     @staticmethod
     def _year_from_attr(attr: dict) -> Optional[int]:
-        fr = attr.get("fr") or attr.get("ez") or ""
-        m = re.search(r"(19|20)\d{2}", str(fr))
-        if m:
-            return int(m.group(0))
-        # Neuwagen ohne EZ -> None
+        for key in ("fr", "ez", "reg", "firstRegistration"):
+            m = re.search(r"(19|20)\d{2}", str(attr.get(key) or ""))
+            if m:
+                return int(m.group(0))
         return None
+
+    @staticmethod
+    def _year_from_text(text: str) -> Optional[int]:
+        # z. B. "EZ 03/2018" in formattedAttributes oder ...-2018-... in der URL
+        m = re.search(r"\b(19[89]\d|20[0-3]\d)\b", text or "")
+        return int(m.group(1)) if m else None
 
     @staticmethod
     def _norm_fuel(value) -> Optional[str]:
