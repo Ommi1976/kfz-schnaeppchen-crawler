@@ -10,10 +10,11 @@ Scraper CookiesExpired und die Oberfläche fordert zum Aktualisieren auf.
 
 from __future__ import annotations
 
-import json
 import re
 from typing import List, Optional
 from urllib.parse import quote_plus
+
+from bs4 import BeautifulSoup
 
 from ..models import Listing, SearchQuery
 from .base import BasePortal, CookiesExpired, PortalError
@@ -90,97 +91,83 @@ class MobileDe(BasePortal):
         seen_ids = set()
         for page in range(1, self.max_pages + 1):
             html = self._fetch(self._build_url(query, page))
-            items = self._collect_from_state(html)
+            cards = self._parse_cards(html)
             new = 0
-            for it in items:
-                lid = it.get("id")
-                if lid in seen_ids:
+            for l in cards:
+                if l.raw_id and l.raw_id in seen_ids:
                     continue
-                seen_ids.add(lid)
-                listing = self._to_listing(it)
-                if listing:
-                    results.append(listing)
-                    new += 1
+                if l.raw_id:
+                    seen_ids.add(l.raw_id)
+                results.append(l)
+                new += 1
             if new == 0:
                 break
         return results
 
-    # ---- State-Parsing ------------------------------------------------
+    # ---- HTML-Karten-Parsing (server-gerendert, mit gültigen Cookies) --
+    def _parse_cards(self, html: str) -> List[Listing]:
+        soup = BeautifulSoup(html, "lxml")
+        listings: List[Listing] = []
+        for art in soup.select("article"):
+            link = art.select_one("a[href*='details.html']")
+            if not link:
+                continue
+            href = link.get("href", "")
+            url = href if href.startswith("http") else "https://suchen.mobile.de" + href
+            m = re.search(r"id=(\d+)", href)
+            lid = m.group(1) if m else None
+            tnode = (art.select_one("[data-testid$='-title']")
+                     or art.select_one("[data-testid='listing-title-card-view']"))
+            title = (re.sub(r"^Gesponsert\s*", "", tnode.get_text(" ", strip=True))
+                     if tnode else "mobile.de-Inserat")
+            pnode = (art.select_one("[data-testid='main-price-label']")
+                     or art.select_one("[data-testid='price-label']"))
+            price = self._to_int(pnode.get_text() if pnode else "")
+            dnode = (art.select_one("[data-testid='listing-details-attributes']")
+                     or art.select_one("[data-testid='listing-details']"))
+            det = self._parse_details(dnode.get_text(" ", strip=True) if dnode else "")
+            snode = art.select_one("[data-testid='seller-info']")
+            listings.append(Listing(
+                portal=self.name,
+                title=title[:120],
+                url=url,
+                price=price,
+                year=det["year"],
+                mileage=det["mileage"],
+                fuel=det["fuel"],
+                power_ps=det["power_ps"],
+                location=snode.get_text(" ", strip=True)[:60] if snode else None,
+                body=("Unfallfahrzeug" if det["damaged"] else None),
+                raw_id=lid,
+            ))
+        return listings
+
     @staticmethod
-    def _extract_state(html: str) -> Optional[dict]:
-        i = html.find("window.__INITIAL_STATE__")
-        if i < 0:
-            return None
-        start = html.find("{", i)
-        depth = 0
-        instr = False
-        esc = False
-        for j in range(start, len(html)):
-            c = html[j]
-            if instr:
-                if esc:
-                    esc = False
-                elif c == "\\":
-                    esc = True
-                elif c == '"':
-                    instr = False
-            else:
-                if c == '"':
-                    instr = True
-                elif c == "{":
-                    depth += 1
-                elif c == "}":
-                    depth -= 1
-                    if depth == 0:
-                        try:
-                            return json.loads(html[start:j + 1])
-                        except json.JSONDecodeError:
-                            return None
-        return None
-
-    def _collect_from_state(self, html: str) -> List[dict]:
-        state = self._extract_state(html)
-        if not state:
-            return []
-        found: dict = {}
-
-        def walk(o):
-            if isinstance(o, list):
-                for x in o:
-                    if (isinstance(x, dict) and isinstance(x.get("price"), dict)
-                            and x.get("make") and x.get("url") and x.get("id") is not None):
-                        found[x["id"]] = x
-                    else:
-                        walk(x)
-            elif isinstance(o, dict):
-                for v in o.values():
-                    walk(v)
-
-        walk(state)
-        return list(found.values())
-
-    def _to_listing(self, it: dict) -> Optional[Listing]:
-        attr = it.get("attr") or {}
-        make = (it.get("make") or {}).get("localized") or ""
-        model = (it.get("model") or {}).get("localized") or ""
-        title = f"{make} {model}".strip() or "mobile.de-Inserat"
-        price = (((it.get("price") or {}).get("grs") or {}).get("amount"))
-        url = it.get("url") or ""
-        return Listing(
-            portal=self.name,
-            title=title[:120],
-            url=url,
-            price=int(price) if isinstance(price, (int, float)) else self._to_int(price),
-            year=self._year_from_attr(attr) or self._year_from_text(
-                (it.get("formattedAttributes") or "") + " " + url),
-            mileage=self._to_int(attr.get("ml")),
-            fuel=self._norm_fuel(attr.get("ft")),
-            power_ps=self._to_int(attr.get("pw")),
-            transmission=self._norm_gear(attr.get("tr")),
-            battery_kwh=self._to_float(attr.get("bc")),
-            location=attr.get("loc"),
-            raw_id=str(it.get("id")),
-        )
+    def _parse_details(text: str) -> dict:
+        """Parst z. B. 'Unfallfrei • EZ 01/2019 • 195.500 km • 85 kW (116 PS) • Diesel'."""
+        out = {"year": None, "mileage": None, "power_ps": None, "fuel": None, "damaged": False}
+        if not text:
+            return out
+        t = text.replace("\xa0", " ")
+        m = re.search(r"EZ\s*\d{2}/(\d{4})", t)
+        if m:
+            out["year"] = int(m.group(1))
+        m = re.search(r"([\d.]+)\s*km", t)
+        if m:
+            out["mileage"] = MobileDe._to_int(m.group(1))
+        m = re.search(r"\((\d{2,4})\s*PS\)", t)
+        if m:
+            out["power_ps"] = int(m.group(1))
+        low = t.lower()
+        for f in ("elektro", "diesel", "benzin", "hybrid"):
+            if f in low:
+                out["fuel"] = f
+                break
+        if out["fuel"] is None and ("autogas" in low or "lpg" in low):
+            out["fuel"] = "lpg"
+        if "unfallfahrzeug" in low or ("unfall" in low and "unfallfrei" not in low):
+            out["damaged"] = True
+        return out
 
     # ---- Feld-Helfer --------------------------------------------------
     @staticmethod
@@ -189,27 +176,6 @@ class MobileDe(BasePortal):
             return None
         digits = re.sub(r"[^\d]", "", str(value))
         return int(digits) if digits else None
-
-    @staticmethod
-    def _to_float(value) -> Optional[float]:
-        if value is None:
-            return None
-        m = re.search(r"\d+(?:[.,]\d+)?", str(value))
-        return float(m.group(0).replace(",", ".")) if m else None
-
-    @staticmethod
-    def _year_from_attr(attr: dict) -> Optional[int]:
-        for key in ("fr", "ez", "reg", "firstRegistration"):
-            m = re.search(r"(19|20)\d{2}", str(attr.get(key) or ""))
-            if m:
-                return int(m.group(0))
-        return None
-
-    @staticmethod
-    def _year_from_text(text: str) -> Optional[int]:
-        # z. B. "EZ 03/2018" in formattedAttributes oder ...-2018-... in der URL
-        m = re.search(r"\b(19[89]\d|20[0-3]\d)\b", text or "")
-        return int(m.group(1)) if m else None
 
     @staticmethod
     def _norm_fuel(value) -> Optional[str]:
