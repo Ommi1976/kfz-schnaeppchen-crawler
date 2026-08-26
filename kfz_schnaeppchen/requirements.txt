@@ -6,3 +6,4 @@ rich>=13.7
 PySocks>=1.7          # optionaler SOCKS-Proxy-Support (z. B. Tor)
 fastapi>=0.110        # Ingress-Weboberfläche
 uvicorn>=0.27         # ASGI-Server für die Weboberfläche
+curl_cffi>=0.7        # mobile.de: Chrome-TLS-Imitation für Cookie-Nutzung

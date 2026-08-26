@@ -21,6 +21,11 @@
     </div>
   </header>
 
+  <div id="mobile-banner" class="mobile-banner hidden">
+    <span id="mobile-banner-text"></span>
+    <button id="mobile-open" class="btn small">Cookies aktualisieren</button>
+  </div>
+
   <section class="stats" id="stats"></section>
 
   <!-- Suchen verwalten -->
@@ -150,6 +155,31 @@
           <button type="submit" class="btn primary">Speichern</button>
         </div>
       </form>
+    </div>
+  </div>
+
+  <!-- mobile.de Cookie-Dialog -->
+  <div id="mobile-modal" class="modal hidden">
+    <div class="modal-card">
+      <div class="modal-head">
+        <h3>mobile.de – Cookies aktualisieren</h3>
+        <button id="mobile-close" class="iconbtn">✕</button>
+      </div>
+      <div style="padding:16px 18px;">
+        <p class="section-note" style="margin-bottom:12px;">
+          mobile.de ist durch Akamai geschützt und nur mit Cookies aus deinem
+          eingeloggten Browser abrufbar. Nutze die <b>Edge/Chrome-Extension</b>
+          („mobile.de Cookie-Export"): in mobile.de einloggen → Extension →
+          „Cookies kopieren" → hier einfügen.
+        </p>
+        <textarea id="mobile-cookies" rows="4" placeholder="_abck=...; bm_sv=...; ak_bmsc=..."
+          style="width:100%; background:var(--panel2); color:var(--text); border:1px solid var(--line); border-radius:8px; padding:10px; font-family:monospace; font-size:12px;"></textarea>
+        <div class="modal-actions">
+          <span id="mobile-result" class="form-error"></span>
+          <span class="spacer"></span>
+          <button id="mobile-test" class="btn primary">Testen &amp; Speichern</button>
+        </div>
+      </div>
     </div>
   </div>
 

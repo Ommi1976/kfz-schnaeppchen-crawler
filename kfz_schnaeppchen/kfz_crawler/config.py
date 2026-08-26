@@ -22,6 +22,7 @@ class Settings:
     use_browser: bool = False        # #1: Playwright-Backend für geblockte Portale
     verify_details: bool = False     # #4: Kleinanzeigen-Detailseiten anreichern
     suspicious_discount: float = 0.6  # #5: ab diesem Rabatt gilt ein Inserat als verdächtig
+    mobile_cookies: str = ""         # mobile.de Session-Cookies (Browser-Add-on); leer = aus
 
 
 @dataclass

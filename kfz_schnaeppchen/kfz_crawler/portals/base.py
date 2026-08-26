@@ -32,6 +32,10 @@ class PortalError(Exception):
     """Wird geworfen, wenn ein Portal nicht abgefragt werden kann (z. B. Block)."""
 
 
+class CookiesExpired(PortalError):
+    """Portal braucht (neue) Session-Cookies – z. B. mobile.de nach Ablauf."""
+
+
 class _Rendered:
     """Minimaler Response-Ersatz für vom Browser gerenderte Seiten."""
     def __init__(self, text: str):

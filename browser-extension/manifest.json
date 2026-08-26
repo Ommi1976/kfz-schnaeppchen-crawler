@@ -1,0 +1,15 @@
+{
+  "manifest_version": 3,
+  "name": "KFZ Schnäppchen – mobile.de Cookie-Export",
+  "version": "1.0.0",
+  "description": "Exportiert deine mobile.de-Session-Cookies per Knopfdruck für das KFZ Schnäppchen Home-Assistant-Add-on.",
+  "permissions": ["cookies"],
+  "host_permissions": [
+    "https://*.mobile.de/*",
+    "http://*.mobile.de/*"
+  ],
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "mobile.de Cookies exportieren"
+  }
+}

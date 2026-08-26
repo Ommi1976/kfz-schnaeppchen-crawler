@@ -21,13 +21,13 @@ from .models import (
 )
 from .notify import notify_all
 from .portals import REGISTRY
-from .portals.base import PortalError
+from .portals.base import CookiesExpired, PortalError
 from .storage import SeenStore
 
 console = Console()
 
 
-def _search_one_portal(cfg: Config, key: str, query: SearchQuery) -> List[Listing]:
+def _search_one_portal(cfg: Config, key: str, query: SearchQuery, store=None) -> List[Listing]:
     """Ein Portal abfragen (+ ggf. anreichern). Läuft in eigenem Thread."""
     portal_cls = REGISTRY.get(key)
     if portal_cls is None:
@@ -39,6 +39,10 @@ def _search_one_portal(cfg: Config, key: str, query: SearchQuery) -> List[Listin
         proxy=cfg.settings.proxy or None,
         render=cfg.settings.use_browser,
     )
+    # mobile.de: importierte Session-Cookies (Browser-Add-on) durchreichen.
+    cookies = getattr(cfg.settings, "mobile_cookies", "")
+    if cookies and hasattr(portal, "cookies"):
+        portal.cookies = cookies
     try:
         found = portal.search(query)
         # Homogenisierung: Felder, die die Trefferliste nicht liefert, per
@@ -50,12 +54,28 @@ def _search_one_portal(cfg: Config, key: str, query: SearchQuery) -> List[Listin
             infer_listing_battery(listing)
             infer_listing_range(listing)
         console.print(f"  [dim]{portal.name}: {len(found)} Treffer[/dim]")
+        if key == "mobile_de" and store is not None:
+            _set_mobile_status(store, "ok", f"{len(found)} Treffer")
         return found
+    except CookiesExpired as e:
+        console.print(f"  [yellow]{e}[/yellow]")
+        if key == "mobile_de" and store is not None:
+            _set_mobile_status(store, "expired", str(e))
     except PortalError as e:
         console.print(f"  [yellow]{e}[/yellow]")
     except Exception as e:  # pragma: no cover - robuster Lauf trotz Portalfehler
         console.print(f"  [red]{portal.name}: Fehler – {e}[/red]")
     return []
+
+
+def _set_mobile_status(store, state: str, message: str) -> None:
+    import json as _json
+    import time as _time
+    try:
+        store.set_setting("mobile_status", _json.dumps(
+            {"state": state, "message": message, "checked_at": _time.time()}))
+    except Exception:
+        pass
 
 
 def run_search(cfg: Config, query: SearchQuery, store: SeenStore) -> List[Listing]:
@@ -71,7 +91,7 @@ def run_search(cfg: Config, query: SearchQuery, store: SeenStore) -> List[Listin
         return []
 
     with ThreadPoolExecutor(max_workers=len(active)) as ex:
-        futures = {ex.submit(_search_one_portal, cfg, k, query): k for k in active}
+        futures = {ex.submit(_search_one_portal, cfg, k, query, store): k for k in active}
         for fut in as_completed(futures):
             all_listings.extend(fut.result())
 

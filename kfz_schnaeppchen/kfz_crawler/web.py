@@ -62,8 +62,10 @@ def _load_cfg() -> Config:
 def _run_all(app: FastAPI, only_id: str | None = None) -> dict:
     """Führt die (aktiven) Suchen aus der DB aus (blockierend -> via to_thread)."""
     cfg = _load_cfg()  # globale Einstellungen/Portale/Benachrichtigung
-    app.state.cfg = cfg
     store: SeenStore = app.state.store
+    # mobile.de-Cookies aus dem Store (Browser-Add-on-Import) übernehmen.
+    cfg.settings.mobile_cookies = store.get_setting("mobile_cookies", "")
+    app.state.cfg = cfg
     summary = {}
     total = 0
     for spec in store.list_searches():
@@ -193,7 +195,71 @@ async def status():
         "total_listings": app.state.store.total_count(),
         "searches": searches,
         "last_report": app.state.last_report,
+        "mobile": _mobile_status(app),
     }
+
+
+def _mobile_status(app: FastAPI) -> dict:
+    """Status der mobile.de-Cookie-Anbindung für Banner/Refresh-Button."""
+    import json as _json
+    store = app.state.store
+    cfg: Config = app.state.cfg
+    active = bool(cfg.portals.get("mobile_de"))
+    has_cookies = bool(store.get_setting("mobile_cookies", ""))
+    raw = store.get_setting("mobile_status", "")
+    try:
+        st = _json.loads(raw) if raw else {}
+    except Exception:
+        st = {}
+    state = st.get("state") or ("ok" if has_cookies else "none")
+    return {
+        "active": active,
+        "has_cookies": has_cookies,
+        "state": state,            # none | ok | expired
+        "message": st.get("message", ""),
+        "checked_at": st.get("checked_at"),
+    }
+
+
+@app.get("/api/mobile-status")
+async def mobile_status():
+    return _mobile_status(app)
+
+
+def _test_mobile_cookies(cookies: str) -> dict:
+    """Cookies sofort gegen mobile.de testen (kleiner Suchlauf)."""
+    from .models import SearchQuery as _SQ
+    from .portals.mobile_de import MobileDe
+    from .portals.base import CookiesExpired, PortalError
+    portal = MobileDe(request_delay=0.5, max_pages=1, cookies=cookies)
+    try:
+        found = portal.search(_SQ(name="test", make="volkswagen", model="golf"))
+        return {"ok": True, "count": len(found),
+                "message": f"{len(found)} Treffer – Cookies gültig."}
+    except CookiesExpired as e:
+        return {"ok": False, "message": str(e)}
+    except PortalError as e:
+        return {"ok": False, "message": str(e)}
+    except Exception as e:
+        return {"ok": False, "message": f"Fehler: {e}"}
+
+
+@app.post("/api/mobile-cookies")
+async def save_mobile_cookies(payload: dict = Body(...)):
+    import json as _json
+    import time as _time
+    cookies = str(payload.get("cookies", "") or "").strip()
+    if not cookies or "_abck" not in cookies:
+        raise HTTPException(status_code=400,
+                            detail="Ungültig: erwarte den mobile.de-Cookie-String (mit _abck).")
+    store = app.state.store
+    result = await asyncio.to_thread(_test_mobile_cookies, cookies)
+    if result["ok"]:
+        store.set_setting("mobile_cookies", cookies)
+    store.set_setting("mobile_status", _json.dumps({
+        "state": "ok" if result["ok"] else "expired",
+        "message": result["message"], "checked_at": _time.time()}))
+    return result
 
 
 # ---- Suchen verwalten -------------------------------------------------

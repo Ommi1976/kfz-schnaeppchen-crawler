@@ -118,6 +118,7 @@ async function loadStatus() {
   sel.value = cur;
 
   renderSearches(s.searches || []);
+  renderMobileBanner(s.mobile);
   document.getElementById("run").disabled = running;
 }
 
@@ -298,6 +299,55 @@ async function submitForm(ev) {
 }
 
 // ---------- Events ----------
+function renderMobileBanner(m) {
+  const banner = document.getElementById("mobile-banner");
+  if (!m || !m.active) { banner.classList.add("hidden"); return; }
+  banner.classList.remove("hidden");
+  const txt = document.getElementById("mobile-banner-text");
+  banner.classList.remove("ok", "warn");
+  if (m.state === "ok") {
+    banner.classList.add("ok");
+    txt.innerHTML = "✓ <b>mobile.de</b> aktiv – Cookies gültig.";
+  } else if (m.state === "expired") {
+    banner.classList.add("warn");
+    txt.innerHTML = "⚠ <b>mobile.de</b>: Cookies abgelaufen/ungültig – bitte aktualisieren.";
+  } else {
+    banner.classList.add("warn");
+    txt.innerHTML = "⚠ <b>mobile.de</b> ist aktiv, aber es sind keine Cookies hinterlegt.";
+  }
+}
+
+document.getElementById("mobile-open").addEventListener("click", () => {
+  document.getElementById("mobile-result").textContent = "";
+  document.getElementById("mobile-cookies").value = "";
+  document.getElementById("mobile-modal").classList.remove("hidden");
+});
+document.getElementById("mobile-close").addEventListener("click", () =>
+  document.getElementById("mobile-modal").classList.add("hidden"));
+document.getElementById("mobile-modal").addEventListener("click", (e) => {
+  if (e.target.id === "mobile-modal") e.currentTarget.classList.add("hidden");
+});
+document.getElementById("mobile-test").addEventListener("click", async () => {
+  const btn = document.getElementById("mobile-test");
+  const res = document.getElementById("mobile-result");
+  const cookies = document.getElementById("mobile-cookies").value.trim();
+  btn.disabled = true; res.textContent = "teste…"; res.className = "form-error";
+  try {
+    const r = await fetch(`${API}/mobile-cookies`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ cookies }),
+    });
+    const d = await r.json();
+    if (r.ok && d.ok) {
+      res.textContent = "✓ " + d.message; res.style.color = "#86efac";
+      setTimeout(() => { document.getElementById("mobile-modal").classList.add("hidden"); refresh(); }, 1200);
+    } else {
+      res.style.color = ""; res.textContent = d.message || d.detail || "Fehler";
+    }
+  } catch (e) { res.textContent = String(e); }
+  btn.disabled = false;
+});
+
 document.getElementById("new-search").addEventListener("click", () => openForm(null));
 document.getElementById("modal-close").addEventListener("click", closeForm);
 document.getElementById("modal-cancel").addEventListener("click", closeForm);

@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <style>
+    body { width: 320px; margin: 0; font-family: system-ui, "Segoe UI", sans-serif;
+           background: #1a2028; color: #e6edf3; }
+    header { display: flex; align-items: center; gap: 8px; padding: 12px 14px;
+             border-bottom: 1px solid #2d3742; }
+    header .logo { font-size: 22px; }
+    header h1 { font-size: 14px; margin: 0; }
+    main { padding: 14px; }
+    p.hint { font-size: 12px; color: #8b98a5; line-height: 1.5; margin: 0 0 12px; }
+    button { width: 100%; background: #0e7490; color: #fff; border: none;
+             border-radius: 8px; padding: 11px; font-size: 14px; cursor: pointer; }
+    button:hover { background: #0891b2; }
+    button:disabled { opacity: .6; cursor: default; }
+    #status { margin-top: 12px; font-size: 12px; min-height: 32px; }
+    .ok { color: #86efac; } .err { color: #fca5a5; }
+    ol { font-size: 12px; color: #8b98a5; padding-left: 18px; margin: 10px 0 0; line-height: 1.6; }
+  </style>
+</head>
+<body>
+  <header><span class="logo">🚗</span><h1>mobile.de Cookie-Export</h1></header>
+  <main>
+    <p class="hint">Zuerst in <b>mobile.de</b> einloggen. Dann diesen Knopf drücken –
+      die Cookies landen in der Zwischenablage.</p>
+    <button id="copy">Cookies kopieren</button>
+    <div id="status"></div>
+    <ol>
+      <li>In mobile.de einloggen &amp; eine Suche öffnen.</li>
+      <li>Hier „Cookies kopieren" klicken.</li>
+      <li>Im Add-on → mobile.de → „Cookies aktualisieren" → einfügen &amp; testen.</li>
+    </ol>
+  </main>
+  <script src="popup.js"></script>
+</body>
+</html>

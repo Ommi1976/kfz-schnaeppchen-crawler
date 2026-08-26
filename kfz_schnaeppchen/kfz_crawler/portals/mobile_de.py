@@ -1,10 +1,11 @@
-"""mobile.de-Scraper.
+"""mobile.de-Scraper (browserlos via curl_cffi + importierte Session-Cookies).
 
-ACHTUNG: mobile.de setzt starken Bot-Schutz (u. a. DataDome) ein. Direkte
-automatisierte Zugriffe werden häufig geblockt (HTTP 403). Dieser Scraper
-ist bewusst defensiv gebaut und wirft bei einem Block eine PortalError,
-sodass die übrigen Portale weiterlaufen. Für zuverlässigen Betrieb wäre
-die offizielle mobile.de-API oder ein Browser-basierter Ansatz nötig.
+mobile.de ist durch Akamai Bot Manager geschützt. Weder reine requests noch
+ein (auch headless) Browser kommen an echte Daten – Akamai weist automatisierte
+Browser ab. Funktionierender Weg OHNE Browser im Crawler: die Session-Cookies
+aus einem echten, eingeloggten Browser importieren und mit curl_cffi (imitiert
+den Chrome-TLS-Fingerprint) wiederverwenden. Laufen die Cookies ab, meldet der
+Scraper CookiesExpired und die Oberfläche fordert zum Aktualisieren auf.
 """
 
 from __future__ import annotations
@@ -12,16 +13,10 @@ from __future__ import annotations
 import json
 import re
 from typing import List, Optional
+from urllib.parse import quote_plus
 
-from bs4 import BeautifulSoup
-
-from ..models import (
-    Listing,
-    SearchQuery,
-    extract_battery_kwh,
-    extract_ev_range_km,
-)
-from .base import BasePortal
+from ..models import Listing, SearchQuery
+from .base import BasePortal, CookiesExpired, PortalError
 
 FUEL_MAP = {"benzin": "PETROL", "diesel": "DIESEL", "elektro": "ELECTRICITY", "hybrid": "HYBRID"}
 
@@ -29,145 +24,164 @@ FUEL_MAP = {"benzin": "PETROL", "diesel": "DIESEL", "elektro": "ELECTRICITY", "h
 class MobileDe(BasePortal):
     name = "mobile.de"
     BASE = "https://suchen.mobile.de"
-    # Kein Browser: mobile.de ist durch Akamai Bot Manager (JS-Sensor-Challenge)
-    # geschützt. Weder reine requests noch curl_cffi (nur TLS) kommen an echte
-    # Daten; ein headless Browser wird ebenfalls erkannt. Daher browserlos –
-    # bei Block wird sauber leer zurückgefallen, es öffnet sich KEIN Browser.
-    PREFERS_BROWSER = False
+    PREFERS_BROWSER = False  # kein Browser – curl_cffi + importierte Cookies
 
-    @staticmethod
-    def _is_challenge(html: str) -> bool:
-        low = (html or "").lower()
-        return ("behavioral-content" in low or "sec-if-cpt" in low
-                or "datadome" in low or "access denied" in low)
+    def __init__(self, *args, cookies: str = "", **kwargs):
+        super().__init__(*args, **kwargs)
+        self.cookies = (cookies or "").strip()
 
+    # ---- URL ----------------------------------------------------------
     def _build_url(self, query: SearchQuery, page: int) -> str:
-        # Die öffentliche Suchseite verwendet aktuell die Kurzparameter der
-        # Ergebnis-URL. Die alten minPrice/maxPrice-Parameter werden zwar
-        # akzeptiert, aber nicht zuverlässig in der Suche angewendet.
         params = ["isSearchRequest=true", "s=Car", "vc=Car", f"pageNumber={page}"]
 
-        def span(name: str, low, high) -> None:
+        def span(name, low, high):
             if low is not None or high is not None:
-                value = f"{low or ''}:{high or ''}"
-                params.append(f"{name}={requests_quote(value)}")
+                value = "{}:{}".format(low if low is not None else "",
+                                       high if high is not None else "")
+                params.append(f"{name}={quote_plus(value)}")
 
         span("p", query.price_from, query.price_to)
         span("fr", query.year_from, query.year_to)
         span("ml", query.mileage_from, query.mileage_to)
-
-        # mobile.de bietet nur grobe Stufen. Wir wählen die nächstkleinere
-        # Stufe und ziehen den exakten Wert anschließend zentral nach.
+        span("pw", query.power_from, query.power_to)
         if query.ev_range_from:
             params.append(f"re={max(50, (query.ev_range_from // 100) * 100)}")
-        if query.battery_from_kwh:
-            params.append(f"bc={max(10, int(query.battery_from_kwh // 10) * 10)}")
         if query.fuel and query.fuel in FUEL_MAP and query.fuel != "elektro":
             params.append(f"fu={FUEL_MAP[query.fuel]}")
-        # Freitext-Suche über Marke/Modell (Keyword-Feld, portal-unabhängig).
+        elif query.fuel == "elektro":
+            params.append("fu=ELECTRICITY")
         term = " ".join(p for p in (query.make, query.model) if p)
         if term:
-            params.append(f"q={requests_quote(term)}")
+            params.append(f"q={quote_plus(term)}")
         return f"{self.BASE}/fahrzeuge/search.html?{'&'.join(params)}"
 
+    # ---- Abruf --------------------------------------------------------
+    def _fetch(self, url: str) -> str:
+        if not self.cookies:
+            raise CookiesExpired("mobile.de: keine Cookies hinterlegt.")
+        try:
+            from curl_cffi import requests as creq
+        except ImportError:
+            raise PortalError("mobile.de: curl_cffi nicht installiert.")
+        headers = {
+            "User-Agent": ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                           "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"),
+            "Accept-Language": "de-DE,de;q=0.9,en;q=0.7",
+            "Cookie": self.cookies,
+            "Referer": "https://www.mobile.de/",
+        }
+        try:
+            r = creq.get(url, headers=headers, impersonate="chrome124", timeout=25)
+        except Exception as e:  # Netzwerk-/curl-Fehler
+            raise PortalError(f"mobile.de: Abruf fehlgeschlagen ({e}).")
+        html = r.text or ""
+        low = html.lower()
+        if ("behavioral-content" in low or "sec-if-cpt" in low
+                or "zugriff verweigert" in low or "access denied" in low
+                or r.status_code in (403, 429)):
+            raise CookiesExpired(
+                "mobile.de: Cookies abgelaufen oder ungültig – bitte im Browser "
+                "neu einloggen und Cookies aktualisieren."
+            )
+        return html
+
     def search(self, query: SearchQuery) -> List[Listing]:
-        from .base import PortalError
         results: List[Listing] = []
+        seen_ids = set()
         for page in range(1, self.max_pages + 1):
-            url = self._build_url(query, page)
-            resp = self._get(url)  # kann PortalError werfen -> im runner gefangen
-            if self._is_challenge(resp.text):
-                raise PortalError(
-                    "mobile.de: Akamai Bot Manager (JS-Challenge) – ohne Browser "
-                    "nicht abrufbar. Portal wird übersprungen."
-                )
-            items = self._parse(resp.text)
-            if not items:
+            html = self._fetch(self._build_url(query, page))
+            items = self._collect_from_state(html)
+            new = 0
+            for it in items:
+                lid = it.get("id")
+                if lid in seen_ids:
+                    continue
+                seen_ids.add(lid)
+                listing = self._to_listing(it)
+                if listing:
+                    results.append(listing)
+                    new += 1
+            if new == 0:
                 break
-            results.extend(items)
         return results
 
-    def _parse(self, html: str) -> List[Listing]:
-        soup = BeautifulSoup(html, "lxml")
-        # mobile.de bettet Ergebnisdaten teils als JSON in <script> ein.
-        for script in soup.find_all("script"):
-            txt = script.string or ""
-            if "resultListItems" in txt or '"@type":"Car"' in txt:
-                data = self._extract_json(txt)
-                if data:
-                    parsed = self._parse_json(data)
-                    if parsed:
-                        return parsed
-        return self._parse_html(soup)
-
-    def _parse_html(self, soup: BeautifulSoup) -> List[Listing]:
-        listings: List[Listing] = []
-        for a in soup.select(
-            "a[data-testid^='result-listing'], a.vehicle-data, "
-            "a[href*='/fahrzeuge/details.html']"
-        ):
-            href = a.get("href", "")
-            if not href:
-                continue
-            url = href if href.startswith("http") else "https://www.mobile.de" + href
-            text = a.get_text(" ", strip=True)
-            title_node = a.find(["h2", "h3"])
-            title = (
-                title_node.get_text(" ", strip=True)
-                if title_node else text[:120]
-            ) or "mobile.de-Inserat"
-            price = self._to_int(
-                self._text(a, "[data-testid='price-label'], .price-block")
-            ) or self._extract_price(text)
-            listings.append(self._listing_from_text(title, url, price, text))
-        return listings
-
-    def _parse_json(self, data) -> List[Listing]:
-        listings: List[Listing] = []
-        items = data if isinstance(data, list) else data.get("resultListItems", [])
-        for it in items or []:
-            if not isinstance(it, dict):
-                continue
-            listings.append(
-                Listing(
-                    portal=self.name,
-                    title=str(it.get("title") or it.get("name") or "mobile.de-Inserat")[:120],
-                    url=self._abs(it.get("relativeUrl") or it.get("url") or ""),
-                    price=self._to_int((it.get("price") or {}).get("gross") if isinstance(it.get("price"), dict) else it.get("price")),
-                    year=self._extract_year(it.get("firstRegistrationDate") or it.get("registrationDate")),
-                    mileage=self._to_int(it.get("mileage") or it.get("mileageInKm")),
-                    fuel=str(it.get("fuel") or it.get("fuelType") or "").lower() or None,
-                    power_ps=self._extract_power(str(it.get("power") or it.get("powerPs") or "")),
-                    ev_range_km=self._to_int(it.get("range") or it.get("electricRange")),
-                    battery_kwh=self._to_float(it.get("batteryCapacity") or it.get("batteryKwh")),
-                    raw_id=str(it.get("id") or ""),
-                )
-            )
-        return listings
-
-    # ---- Helfer -------------------------------------------------------
-    def _abs(self, href: str) -> str:
-        if not href:
-            return "https://www.mobile.de"
-        return href if href.startswith("http") else "https://www.mobile.de" + href
-
+    # ---- State-Parsing ------------------------------------------------
     @staticmethod
-    def _extract_json(text: str):
-        # Sucht das erste ausgewogene JSON-Objekt/-Array im Script-Text.
-        for pattern in (r"\{.*\}", r"\[.*\]"):
-            m = re.search(pattern, text, re.DOTALL)
-            if m:
-                try:
-                    return json.loads(m.group(0))
-                except json.JSONDecodeError:
-                    continue
+    def _extract_state(html: str) -> Optional[dict]:
+        i = html.find("window.__INITIAL_STATE__")
+        if i < 0:
+            return None
+        start = html.find("{", i)
+        depth = 0
+        instr = False
+        esc = False
+        for j in range(start, len(html)):
+            c = html[j]
+            if instr:
+                if esc:
+                    esc = False
+                elif c == "\\":
+                    esc = True
+                elif c == '"':
+                    instr = False
+            else:
+                if c == '"':
+                    instr = True
+                elif c == "{":
+                    depth += 1
+                elif c == "}":
+                    depth -= 1
+                    if depth == 0:
+                        try:
+                            return json.loads(html[start:j + 1])
+                        except json.JSONDecodeError:
+                            return None
         return None
 
-    @staticmethod
-    def _text(node, selector: str) -> Optional[str]:
-        el = node.select_one(selector)
-        return el.get_text(strip=True) if el else None
+    def _collect_from_state(self, html: str) -> List[dict]:
+        state = self._extract_state(html)
+        if not state:
+            return []
+        found: dict = {}
 
+        def walk(o):
+            if isinstance(o, list):
+                for x in o:
+                    if (isinstance(x, dict) and isinstance(x.get("price"), dict)
+                            and x.get("make") and x.get("url") and x.get("id") is not None):
+                        found[x["id"]] = x
+                    else:
+                        walk(x)
+            elif isinstance(o, dict):
+                for v in o.values():
+                    walk(v)
+
+        walk(state)
+        return list(found.values())
+
+    def _to_listing(self, it: dict) -> Optional[Listing]:
+        attr = it.get("attr") or {}
+        make = (it.get("make") or {}).get("localized") or ""
+        model = (it.get("model") or {}).get("localized") or ""
+        title = f"{make} {model}".strip() or "mobile.de-Inserat"
+        price = (((it.get("price") or {}).get("grs") or {}).get("amount"))
+        url = it.get("url") or ""
+        return Listing(
+            portal=self.name,
+            title=title[:120],
+            url=url,
+            price=int(price) if isinstance(price, (int, float)) else self._to_int(price),
+            year=self._year_from_attr(attr),
+            mileage=self._to_int(attr.get("ml")),
+            fuel=self._norm_fuel(attr.get("ft")),
+            power_ps=self._to_int(attr.get("pw")),
+            transmission=self._norm_gear(attr.get("tr")),
+            battery_kwh=self._to_float(attr.get("bc")),
+            location=attr.get("loc"),
+            raw_id=str(it.get("id")),
+        )
+
+    # ---- Feld-Helfer --------------------------------------------------
     @staticmethod
     def _to_int(value) -> Optional[int]:
         if value is None:
@@ -179,70 +193,39 @@ class MobileDe(BasePortal):
     def _to_float(value) -> Optional[float]:
         if value is None:
             return None
-        match = re.search(r"\d+(?:[.,]\d+)?", str(value))
-        return float(match.group(0).replace(",", ".")) if match else None
+        m = re.search(r"\d+(?:[.,]\d+)?", str(value))
+        return float(m.group(0).replace(",", ".")) if m else None
 
     @staticmethod
-    def _extract_year(text: str | None) -> Optional[int]:
-        if not text:
-            return None
-        match = re.search(r"\b(19\d{2}|20\d{2})\b", str(text))
-        return int(match.group(1)) if match else None
-
-    @staticmethod
-    def _extract_price(text: str | None) -> Optional[int]:
-        if not text:
-            return None
-        for value in re.findall(r"\b(\d{1,3}(?:\.\d{3})+|\d{4,6})\s*€", text):
-            price = int(value.replace(".", ""))
-            if 500 <= price <= 500000:
-                return price
+    def _year_from_attr(attr: dict) -> Optional[int]:
+        fr = attr.get("fr") or attr.get("ez") or ""
+        m = re.search(r"(19|20)\d{2}", str(fr))
+        if m:
+            return int(m.group(0))
+        # Neuwagen ohne EZ -> None
         return None
 
     @staticmethod
-    def _extract_power(text: str | None) -> Optional[int]:
-        if not text:
+    def _norm_fuel(value) -> Optional[str]:
+        if not value:
             return None
-        match = re.search(r"(\d{2,4})\s*kW\s*\((\d{2,4})\s*PS\)", text, re.IGNORECASE)
-        return int(match.group(2)) if match else None
-
-    def _listing_from_text(self, title: str, url: str, price: Optional[int], text: str) -> Listing:
-        return Listing(
-            portal=self.name,
-            title=title[:120],
-            url=url,
-            price=price,
-            year=self._extract_year(text),
-            mileage=self._extract_mileage(text),
-            fuel=self._extract_fuel(text),
-            power_ps=self._extract_power(text),
-            ev_range_km=extract_ev_range_km(text),
-            battery_kwh=extract_battery_kwh(text),
-        )
-
-    @staticmethod
-    def _extract_mileage(text: str | None) -> Optional[int]:
-        if not text:
-            return None
-        match = re.search(r"\b(\d{1,3}(?:\.\d{3})+|\d{4,6})\s*km\b", text, re.IGNORECASE)
-        return int(match.group(1).replace(".", "")) if match else None
-
-    @staticmethod
-    def _extract_fuel(text: str | None) -> Optional[str]:
-        if not text:
-            return None
-        value = text.lower()
-        if "elektro" in value:
-            return "elektro"
-        if "diesel" in value:
-            return "diesel"
-        if "benzin" in value:
-            return "benzin"
-        if "hybrid" in value:
-            return "hybrid"
+        v = str(value).lower()
+        for token in ("elektro", "diesel", "benzin", "hybrid"):
+            if token in v:
+                return token
+        if "lpg" in v or "autogas" in v:
+            return "lpg"
+        if "cng" in v or "erdgas" in v:
+            return "cng"
         return None
 
-
-def requests_quote(s: str) -> str:
-    from urllib.parse import quote_plus
-    return quote_plus(s)
+    @staticmethod
+    def _norm_gear(value) -> Optional[str]:
+        if not value:
+            return None
+        v = str(value).lower()
+        if "auto" in v:
+            return "automatik"
+        if "schalt" in v or "manuell" in v:
+            return "schaltgetriebe"
+        return None

@@ -79,7 +79,27 @@ class SeenStore:
             )
             """
         )
+        # Allgemeiner Key-Value-Speicher (z. B. mobile.de-Cookies + Status).
+        self.conn.execute(
+            "CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT)"
+        )
         self.conn.commit()
+
+    # ---- Key-Value-Einstellungen --------------------------------------
+    def get_setting(self, key: str, default: str = "") -> str:
+        with self._lock:
+            cur = self.conn.execute("SELECT value FROM settings WHERE key = ?", (key,))
+            row = cur.fetchone()
+            return row["value"] if row and row["value"] is not None else default
+
+    def set_setting(self, key: str, value: str) -> None:
+        with self._lock:
+            self.conn.execute(
+                "INSERT INTO settings (key, value) VALUES (?, ?) "
+                "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                (key, value),
+            )
+            self.conn.commit()
 
     # ---- Suchen (UI-Verwaltung) ---------------------------------------
     def list_searches(self) -> List[dict]:

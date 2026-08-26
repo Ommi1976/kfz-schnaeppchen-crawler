@@ -27,7 +27,7 @@ RUN apt-get update \
         gosu \
         netbase \
         ca-certificates \
-    && python3 -m pip install --no-cache-dir --break-system-packages rich PySocks fastapi uvicorn \
+    && python3 -m pip install --no-cache-dir --break-system-packages rich PySocks fastapi uvicorn curl_cffi \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
