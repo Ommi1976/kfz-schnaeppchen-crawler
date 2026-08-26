@@ -320,6 +320,14 @@ function renderMobileBanner(m) {
 document.getElementById("mobile-open").addEventListener("click", () => {
   document.getElementById("mobile-result").textContent = "";
   document.getElementById("mobile-cookies").value = "";
+  const tok = statusCache && statusCache.mobile && statusCache.mobile.ingest_token;
+  const box = document.getElementById("mobile-token-box");
+  if (tok) {
+    document.getElementById("mobile-token").textContent = tok;
+    box.style.display = "";
+  } else {
+    box.style.display = "none";
+  }
   document.getElementById("mobile-modal").classList.remove("hidden");
 });
 document.getElementById("mobile-close").addEventListener("click", () =>
@@ -333,8 +341,10 @@ document.getElementById("mobile-test").addEventListener("click", async () => {
   const cookies = document.getElementById("mobile-cookies").value.trim();
   btn.disabled = true; res.textContent = "teste…"; res.className = "form-error";
   try {
+    const tok = (statusCache && statusCache.mobile && statusCache.mobile.ingest_token) || "";
     const r = await fetch(`${API}/mobile-cookies`, {
-      method: "POST", headers: { "Content-Type": "application/json" },
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-KFZ-Token": tok },
       body: JSON.stringify({ cookies }),
     });
     const d = await r.json();

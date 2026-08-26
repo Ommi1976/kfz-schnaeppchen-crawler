@@ -1,14 +1,24 @@
-// Liest die mobile.de-Cookies über die native cookies-API (keine Entschlüsselung
-// nötig) und kopiert sie als Cookie-String in die Zwischenablage.
+// Liest mobile.de-Cookies über die native cookies-API und exportiert sie:
+// entweder in die Zwischenablage ("Kopieren") oder direkt ans Add-on ("Senden").
 
 const statusEl = document.getElementById("status");
+const urlEl = document.getElementById("url");
+const tokenEl = document.getElementById("token");
+
+// Gespeicherte Add-on-Verbindung laden.
+chrome.storage.local.get(["url", "token"], (cfg) => {
+  if (cfg.url) urlEl.value = cfg.url;
+  if (cfg.token) tokenEl.value = cfg.token;
+  if (!cfg.url || !cfg.token) document.getElementById("cfg").open = true;
+});
+function saveCfg() {
+  chrome.storage.local.set({ url: urlEl.value.trim(), token: tokenEl.value.trim() });
+}
+urlEl.addEventListener("change", saveCfg);
+tokenEl.addEventListener("change", saveCfg);
 
 async function collectCookies() {
-  const urls = [
-    "https://www.mobile.de/",
-    "https://suchen.mobile.de/",
-    "https://m.mobile.de/",
-  ];
+  const urls = ["https://www.mobile.de/", "https://suchen.mobile.de/", "https://m.mobile.de/"];
   const map = {};
   for (const url of urls) {
     const cs = await chrome.cookies.getAll({ url });
@@ -17,26 +27,50 @@ async function collectCookies() {
   return map;
 }
 
+async function getCookieString() {
+  const map = await collectCookies();
+  const names = Object.keys(map);
+  if (!names.length) throw new Error("Keine mobile.de-Cookies gefunden. Bist du eingeloggt?");
+  if (!names.includes("_abck")) throw new Error("_abck fehlt – mobile.de neu laden und erneut versuchen.");
+  return { str: names.map((k) => `${k}=${map[k]}`).join("; "), count: names.length };
+}
+
+function setStatus(html, ok) {
+  statusEl.innerHTML = `<span class="${ok ? "ok" : "err"}">${html}</span>`;
+}
+
 document.getElementById("copy").addEventListener("click", async () => {
-  const btn = document.getElementById("copy");
-  btn.disabled = true;
-  statusEl.textContent = "";
   try {
-    const map = await collectCookies();
-    const names = Object.keys(map);
-    if (names.length === 0) {
-      statusEl.innerHTML = '<span class="err">Keine mobile.de-Cookies gefunden. Bist du eingeloggt?</span>';
-      btn.disabled = false;
-      return;
-    }
-    const str = names.map((k) => `${k}=${map[k]}`).join("; ");
+    const { str, count } = await getCookieString();
     await navigator.clipboard.writeText(str);
-    const hasAbck = names.includes("_abck");
-    statusEl.innerHTML = hasAbck
-      ? `<span class="ok">✓ ${names.length} Cookies kopiert (inkl. _abck). Jetzt im Add-on einfügen.</span>`
-      : `<span class="err">${names.length} Cookies kopiert, aber _abck fehlt – bitte mobile.de neu laden und erneut versuchen.</span>`;
-  } catch (e) {
-    statusEl.innerHTML = `<span class="err">Fehler: ${e.message}</span>`;
+    setStatus(`✓ ${count} Cookies kopiert. Jetzt im Add-on einfügen.`, true);
+  } catch (e) { setStatus(e.message, false); }
+});
+
+document.getElementById("send").addEventListener("click", async () => {
+  const btn = document.getElementById("send");
+  const url = urlEl.value.trim().replace(/\/+$/, "");
+  const token = tokenEl.value.trim();
+  if (!url || !token) {
+    document.getElementById("cfg").open = true;
+    setStatus("Bitte Add-on-URL und Token eintragen.", false);
+    return;
   }
+  saveCfg();
+  btn.disabled = true; setStatus("sende…", true);
+  try {
+    const origin = new URL(url).origin + "/*";
+    const granted = await chrome.permissions.request({ origins: [origin] }).catch(() => false);
+    if (!granted) throw new Error("Berechtigung für die Add-on-URL abgelehnt.");
+    const { str, count } = await getCookieString();
+    const r = await fetch(`${url}/api/mobile-cookies`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-KFZ-Token": token },
+      body: JSON.stringify({ cookies: str }),
+    });
+    const d = await r.json().catch(() => ({}));
+    if (r.ok && d.ok) setStatus(`✓ Gesendet – ${d.message || count + " Cookies"}`, true);
+    else setStatus(d.message || d.detail || `Fehler ${r.status}`, false);
+  } catch (e) { setStatus(e.message, false); }
   btn.disabled = false;
 });

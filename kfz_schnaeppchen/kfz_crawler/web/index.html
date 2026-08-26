@@ -170,8 +170,14 @@
           mobile.de ist durch Akamai geschützt und nur mit Cookies aus deinem
           eingeloggten Browser abrufbar. Nutze die <b>Edge/Chrome-Extension</b>
           („mobile.de Cookie-Export"): in mobile.de einloggen → Extension →
-          „Cookies kopieren" → hier einfügen.
+          <b>Senden</b> (direkt) oder <b>Kopieren</b> → hier einfügen.
         </p>
+        <div id="mobile-token-box" class="section-note" style="margin-bottom:12px; display:none;">
+          <b>Direktversand einrichten</b> (einmalig in der Extension eintragen):<br>
+          Token: <code id="mobile-token" style="user-select:all;"></code><br>
+          <span style="color:var(--muted);">URL: <code>http://&lt;HAOS-IP&gt;:8099</code> — dafür in den
+          Add-on-Netzwerkeinstellungen den Port 8099 zuweisen.</span>
+        </div>
         <textarea id="mobile-cookies" rows="4" placeholder="_abck=...; bm_sv=...; ak_bmsc=..."
           style="width:100%; background:var(--panel2); color:var(--text); border:1px solid var(--line); border-radius:8px; padding:10px; font-family:monospace; font-size:12px;"></textarea>
         <div class="modal-actions">

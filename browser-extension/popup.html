@@ -3,35 +3,48 @@
 <head>
   <meta charset="utf-8">
   <style>
-    body { width: 320px; margin: 0; font-family: system-ui, "Segoe UI", sans-serif;
+    body { width: 340px; margin: 0; font-family: system-ui, "Segoe UI", sans-serif;
            background: #1a2028; color: #e6edf3; }
     header { display: flex; align-items: center; gap: 8px; padding: 12px 14px;
              border-bottom: 1px solid #2d3742; }
     header .logo { font-size: 22px; }
     header h1 { font-size: 14px; margin: 0; }
     main { padding: 14px; }
-    p.hint { font-size: 12px; color: #8b98a5; line-height: 1.5; margin: 0 0 12px; }
-    button { width: 100%; background: #0e7490; color: #fff; border: none;
-             border-radius: 8px; padding: 11px; font-size: 14px; cursor: pointer; }
-    button:hover { background: #0891b2; }
+    p.hint { font-size: 12px; color: #8b98a5; line-height: 1.5; margin: 0 0 10px; }
+    label { display: block; font-size: 11px; color: #8b98a5; margin: 8px 0 3px; }
+    input { width: 100%; box-sizing: border-box; background: #222b35; color: #e6edf3;
+            border: 1px solid #2d3742; border-radius: 6px; padding: 7px 9px; font-size: 12px; }
+    .row { display: flex; gap: 8px; margin-top: 12px; }
+    button { flex: 1; color: #fff; border: none; border-radius: 8px; padding: 10px;
+             font-size: 13px; cursor: pointer; }
+    #send { background: #0e7490; } #send:hover { background: #0891b2; }
+    #copy { background: #222b35; border: 1px solid #2d3742; } #copy:hover { border-color: #22d3ee; }
     button:disabled { opacity: .6; cursor: default; }
-    #status { margin-top: 12px; font-size: 12px; min-height: 32px; }
+    #status { margin-top: 12px; font-size: 12px; min-height: 20px; }
     .ok { color: #86efac; } .err { color: #fca5a5; }
-    ol { font-size: 12px; color: #8b98a5; padding-left: 18px; margin: 10px 0 0; line-height: 1.6; }
+    details { margin-top: 10px; }
+    summary { font-size: 12px; color: #22d3ee; cursor: pointer; }
   </style>
 </head>
 <body>
   <header><span class="logo">🚗</span><h1>mobile.de Cookie-Export</h1></header>
   <main>
-    <p class="hint">Zuerst in <b>mobile.de</b> einloggen. Dann diesen Knopf drücken –
-      die Cookies landen in der Zwischenablage.</p>
-    <button id="copy">Cookies kopieren</button>
+    <p class="hint">In <b>mobile.de</b> einloggen, dann <b>Senden</b> — die Cookies gehen
+      direkt ans Add-on. (Ohne Konfiguration: <b>Kopieren</b> und im Add-on einfügen.)</p>
+
+    <details id="cfg">
+      <summary>Add-on-Verbindung (einmalig)</summary>
+      <label>Add-on-URL (LAN, z. B. http://192.168.178.77:8099)</label>
+      <input id="url" placeholder="http://<HAOS-IP>:8099">
+      <label>Token (aus dem Add-on → mobile.de-Dialog)</label>
+      <input id="token" placeholder="Token einfügen">
+    </details>
+
+    <div class="row">
+      <button id="copy">Kopieren</button>
+      <button id="send">Senden</button>
+    </div>
     <div id="status"></div>
-    <ol>
-      <li>In mobile.de einloggen &amp; eine Suche öffnen.</li>
-      <li>Hier „Cookies kopieren" klicken.</li>
-      <li>Im Add-on → mobile.de → „Cookies aktualisieren" → einfügen &amp; testen.</li>
-    </ol>
   </main>
   <script src="popup.js"></script>
 </body>

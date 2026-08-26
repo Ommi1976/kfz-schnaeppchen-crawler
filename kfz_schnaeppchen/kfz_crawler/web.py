@@ -14,7 +14,7 @@ from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 
-from fastapi import Body, FastAPI, HTTPException
+from fastapi import Body, FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -138,6 +138,10 @@ async def lifespan(app: FastAPI):
     app.state.last_finished_at = None
     app.state.next_run_at = None
     app.state.last_report = {}
+    # Token für den direkten LAN-Zugriff (Browser-Extension). Einmalig erzeugen.
+    if not app.state.store.get_setting("ingest_token", ""):
+        import secrets
+        app.state.store.set_setting("ingest_token", secrets.token_hex(16))
     app.state.scheduler = asyncio.create_task(_scheduler(app))
     try:
         yield
@@ -218,6 +222,7 @@ def _mobile_status(app: FastAPI) -> dict:
         "state": state,            # none | ok | expired
         "message": st.get("message", ""),
         "checked_at": st.get("checked_at"),
+        "ingest_token": store.get_setting("ingest_token", ""),
     }
 
 
@@ -245,14 +250,20 @@ def _test_mobile_cookies(cookies: str) -> dict:
 
 
 @app.post("/api/mobile-cookies")
-async def save_mobile_cookies(payload: dict = Body(...)):
+async def save_mobile_cookies(request: Request, payload: dict = Body(...)):
     import json as _json
     import time as _time
+    store = app.state.store
+    # Token-Schutz: sowohl die (Ingress-)Oberfläche als auch die Browser-Extension
+    # senden den X-KFZ-Token mit. So ist der Endpunkt auch bei freigegebenem
+    # LAN-Port abgesichert, ohne die übrige Oberfläche zu beeinträchtigen.
+    token = store.get_setting("ingest_token", "")
+    if not token or request.headers.get("X-KFZ-Token") != token:
+        raise HTTPException(status_code=401, detail="Ungültiger oder fehlender Token.")
     cookies = str(payload.get("cookies", "") or "").strip()
     if not cookies or "_abck" not in cookies:
         raise HTTPException(status_code=400,
                             detail="Ungültig: erwarte den mobile.de-Cookie-String (mit _abck).")
-    store = app.state.store
     result = await asyncio.to_thread(_test_mobile_cookies, cookies)
     if result["ok"]:
         store.set_setting("mobile_cookies", cookies)

@@ -1,5 +1,5 @@
 name: KFZ Schnäppchen Crawler
-version: "0.9.0"
+version: "0.9.1"
 slug: kfz_schnaeppchen
 description: Findet Auto-Schnäppchen über deutsche Fahrzeugportale und meldet Treffer an Home Assistant.
 url: https://github.com/Ommi1976/kfz-schnaeppchen-crawler
@@ -10,6 +10,13 @@ init: false
 ingress: true
 panel_icon: mdi:car-search
 panel_title: KFZ Schnäppchen
+# Optionaler LAN-Port für die Browser-Extension (Cookie-Direktversand).
+# Standardmäßig NICHT freigegeben (null). In den Add-on-Netzwerkeinstellungen
+# einen Host-Port zuweisen, um ihn zu nutzen. Direktzugriffe brauchen den Token.
+ports:
+  "8099/tcp": null
+ports_description:
+  "8099/tcp": Direktzugriff der mobile.de-Cookie-Extension (Token nötig)
 # Für Benachrichtigungen über http://supervisor/core/api
 homeassistant_api: true
 options:
