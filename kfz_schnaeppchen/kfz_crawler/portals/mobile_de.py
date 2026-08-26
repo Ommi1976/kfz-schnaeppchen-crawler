@@ -29,7 +29,17 @@ FUEL_MAP = {"benzin": "PETROL", "diesel": "DIESEL", "elektro": "ELECTRICITY", "h
 class MobileDe(BasePortal):
     name = "mobile.de"
     BASE = "https://suchen.mobile.de"
-    PREFERS_BROWSER = True   # ohne Browser praktisch immer 403 (DataDome)
+    # Kein Browser: mobile.de ist durch Akamai Bot Manager (JS-Sensor-Challenge)
+    # geschützt. Weder reine requests noch curl_cffi (nur TLS) kommen an echte
+    # Daten; ein headless Browser wird ebenfalls erkannt. Daher browserlos –
+    # bei Block wird sauber leer zurückgefallen, es öffnet sich KEIN Browser.
+    PREFERS_BROWSER = False
+
+    @staticmethod
+    def _is_challenge(html: str) -> bool:
+        low = (html or "").lower()
+        return ("behavioral-content" in low or "sec-if-cpt" in low
+                or "datadome" in low or "access denied" in low)
 
     def _build_url(self, query: SearchQuery, page: int) -> str:
         # Die öffentliche Suchseite verwendet aktuell die Kurzparameter der
@@ -61,10 +71,16 @@ class MobileDe(BasePortal):
         return f"{self.BASE}/fahrzeuge/search.html?{'&'.join(params)}"
 
     def search(self, query: SearchQuery) -> List[Listing]:
+        from .base import PortalError
         results: List[Listing] = []
         for page in range(1, self.max_pages + 1):
             url = self._build_url(query, page)
             resp = self._get(url)  # kann PortalError werfen -> im runner gefangen
+            if self._is_challenge(resp.text):
+                raise PortalError(
+                    "mobile.de: Akamai Bot Manager (JS-Challenge) – ohne Browser "
+                    "nicht abrufbar. Portal wird übersprungen."
+                )
             items = self._parse(resp.text)
             if not items:
                 break

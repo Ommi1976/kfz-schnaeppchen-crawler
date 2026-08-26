@@ -143,6 +143,10 @@ class SearchQuery:
     power_to: Optional[int] = None       # Leistung bis … PS
     seller: str = ""                     # haendler | privat
     doors: str = ""                      # "" | "2/3" | "4/5"
+    # Zustand & Umwelt (Phase 2, server-seitig bei AutoScout24):
+    emission_class: str = ""             # euro4 | euro5 | euro6 | euro6d | euro6e
+    drivetrain: str = ""                 # allrad | front | heck
+    include_damaged: bool = False        # Unfallwagen einschließen (Standard: nur unfallfrei)
 
     # E-Auto-spezifisch:
     ev_range_from: Optional[int] = None       # Mindest-Reichweite (km)
@@ -212,6 +216,9 @@ class SearchQuery:
             power_to=i("power_to"),
             seller=s("seller"),
             doors=s("doors"),
+            emission_class=s("emission_class"),
+            drivetrain=s("drivetrain"),
+            include_damaged=bool(d.get("include_damaged", False)),
             ev_range_from=i("ev_range_from"),
             battery_from_kwh=(float(d["battery_from_kwh"])
                               if d.get("battery_from_kwh") not in (None, "", "null") else None),
@@ -234,6 +241,8 @@ class SearchQuery:
             "fuel": self.fuel, "transmission": self.transmission,
             "body_type": self.body_type, "power_from": self.power_from,
             "power_to": self.power_to, "seller": self.seller, "doors": self.doors,
+            "emission_class": self.emission_class, "drivetrain": self.drivetrain,
+            "include_damaged": self.include_damaged,
             "ev_range_from": self.ev_range_from, "battery_from_kwh": self.battery_from_kwh,
             "equipment": self.equipment,
             "keywords": self.keywords, "exclude_terms": self.exclude_terms,

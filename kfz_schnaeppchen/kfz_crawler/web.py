@@ -36,6 +36,8 @@ META = {
     "body_type": ["", "limousine", "kombi", "suv", "cabrio", "coupe", "van", "kleinwagen"],
     "seller": ["", "haendler", "privat"],
     "doors": ["", "2/3", "4/5"],
+    "emission_class": ["", "euro4", "euro5", "euro6", "euro6d", "euro6e"],
+    "drivetrain": ["", "allrad", "front", "heck"],
     "equipment_groups": [
         {"group": name, "items": [{"id": i, "label": EQUIPMENT[i]} for i in ids]}
         for name, ids in EQUIPMENT_GROUPS

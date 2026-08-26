@@ -11,6 +11,8 @@ const LABELS = {
   limousine: "Limousine", kombi: "Kombi", suv: "SUV/Geländewagen",
   cabrio: "Cabrio", coupe: "Coupé", van: "Van/Bus", kleinwagen: "Kleinwagen",
   haendler: "Händler", privat: "Privat", "2/3": "2/3 Türen", "4/5": "4/5 Türen",
+  euro4: "Euro 4", euro5: "Euro 5", euro6: "Euro 6", euro6d: "Euro 6d", euro6e: "Euro 6e",
+  allrad: "Allrad", front: "Front", heck: "Heck",
 };
 const label = (v) => LABELS[v] ?? v;
 
@@ -47,7 +49,7 @@ function discountClass(d) {
 // ---------- Meta / Selects ----------
 async function loadMeta() {
   META = await getJSON(`${API}/meta`);
-  for (const key of ["fuel", "transmission", "body_type", "seller", "doors"]) {
+  for (const key of ["fuel", "transmission", "body_type", "seller", "doors", "emission_class", "drivetrain"]) {
     const el = document.getElementById("f-" + key);
     el.innerHTML = META[key].map((v) => `<option value="${v}">${label(v)}</option>`).join("");
   }
@@ -230,7 +232,7 @@ async function loadDeals() {
 
 // ---------- Formular ----------
 const NUMS = ["year_from","year_to","price_from","price_to","mileage_from","mileage_to","power_from","power_to","ev_range_from","battery_from_kwh"];
-const SELS = ["make","model","fuel","transmission","body_type","seller","doors"];
+const SELS = ["make","model","fuel","transmission","body_type","seller","doors","emission_class","drivetrain"];
 
 function openForm(spec) {
   document.getElementById("form-error").textContent = "";
@@ -238,6 +240,7 @@ function openForm(spec) {
   document.getElementById("f-id").value = spec ? spec.id : "";
   document.getElementById("f-name").value = spec ? spec.name : "";
   document.getElementById("f-active").checked = spec ? !!spec.active : true;
+  document.getElementById("f-include_damaged").checked = spec ? !!spec.include_damaged : false;
   SELS.forEach((k) => { document.getElementById("f-" + k).value = (spec && spec[k]) || ""; });
   NUMS.forEach((k) => { document.getElementById("f-" + k).value = (spec && spec[k] != null) ? spec[k] : ""; });
   ["exclude_makes", "exclude_models"].forEach((k) => {
@@ -263,6 +266,8 @@ function collectForm() {
     exclude_makes: val("f-exclude_makes"), exclude_models: val("f-exclude_models"),
     fuel: val("f-fuel"), transmission: val("f-transmission"),
     body_type: val("f-body_type"), seller: val("f-seller"), doors: val("f-doors"),
+    emission_class: val("f-emission_class"), drivetrain: val("f-drivetrain"),
+    include_damaged: document.getElementById("f-include_damaged").checked,
     keywords: val("f-keywords"), exclude_terms: val("f-exclude_terms"),
     equipment: getEquipment(),
   };

@@ -26,6 +26,11 @@ PS_TO_KW = 1.35962
 
 from .as24_taxonomy import BODY_TYPE_TO_AS24, DOORS_TO_AS24, VALID_EQUIPMENT_IDS
 
+# Schadstoffklasse-Slug -> AutoScout24 emclass-ID
+EMCLASS_MAP = {"euro4": 4, "euro5": 5, "euro6": 6, "euro6d": 8, "euro6e": 10}
+# Antrieb-Slug -> AutoScout24 drivetrain-Wert
+DRIVETRAIN_MAP = {"allrad": "4", "front": "F", "heck": "R"}
+
 
 class AutoScout24(BasePortal):
     name = "AutoScout24"
@@ -76,6 +81,18 @@ class AutoScout24(BasePortal):
         # E-Reichweite (erange) – server-seitig statt nur Nachfilter
         if query.ev_range_from:
             params.append(f"erange={query.ev_range_from}")
+        # Schadstoffklasse (emclass=<id>)
+        emc = EMCLASS_MAP.get(query.emission_class)
+        if emc:
+            params.append(f"emclass={emc}")
+        # Antrieb (drivetrain: Allrad=4, Front=F, Heck=R)
+        dt = DRIVETRAIN_MAP.get(query.drivetrain)
+        if dt:
+            params.append(f"drivetrain={dt}")
+        # Unfallwagen: AutoScout24 schließt beschädigte standardmäßig aus.
+        # Nur wenn ausdrücklich gewünscht, wieder einschließen.
+        if query.include_damaged:
+            params.append("damaged_listing=include")
         # Ausstattung (eq=<id>,<id>,…)
         eq = [str(i) for i in (query.equipment or []) if i in VALID_EQUIPMENT_IDS]
         if eq:
