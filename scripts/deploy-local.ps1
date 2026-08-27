@@ -60,7 +60,7 @@ finally {
 
 $supervisorCommand = @'
 set -e
-T=$(sudo cat /run/s6/container_environment/SUPERVISOR_TOKEN)
+T=$(cat /run/s6/container_environment/SUPERVISOR_TOKEN)
 AUTH="Authorization: Bearer $T"
 curl -fsS -X POST -H "$AUTH" http://supervisor/store/reload >/dev/null
 sleep 3
@@ -75,7 +75,7 @@ fi
 rm -f /tmp/kfz_update.json /tmp/kfz_update.err
 '@
 
-& ssh @sshArgs $supervisorCommand
+$supervisorCommand | & ssh @sshArgs "sudo bash -s"
 if ($LASTEXITCODE -ne 0) { throw "Supervisor-Update fehlgeschlagen." }
 
 Write-Host "KFZ Schnäppchen $version wurde lokal nach $target übertragen und aktualisiert."
