@@ -50,10 +50,8 @@ class MobileDe(BasePortal):
         pw_from = round(query.power_from / PS_TO_KW) if query.power_from else None
         pw_to = round(query.power_to / PS_TO_KW) if query.power_to else None
         span("pw", pw_from, pw_to)
-        if query.fuel and query.fuel in FUEL_MAP and query.fuel != "elektro":
-            params.append(f"fu={FUEL_MAP[query.fuel]}")
-        elif query.fuel == "elektro":
-            params.append("fu=ELECTRICITY")
+        if query.fuel and query.fuel in FUEL_MAP:
+            params.append(f"ft={FUEL_MAP[query.fuel]}")
         if query.transmission and query.transmission in GEAR_MAP:
             params.append(f"tr={GEAR_MAP[query.transmission]}")
         if query.seller and query.seller in SELLER_MAP:

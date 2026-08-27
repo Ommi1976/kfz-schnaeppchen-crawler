@@ -80,7 +80,7 @@ def test_mobile_de_url_builder():
     assert "p=15000%3A30000" in url or "p=15000:30000" in url
     assert "fr=2019%3A" in url or "fr=2019:" in url
     assert "ml=%3A80000" in url or "ml=:80000" in url
-    assert "fu=PETROL" in url
+    assert "ft=PETROL" in url
     assert "ambc=10115" in url
     assert "rad=100" in url
     assert "q=bmw+320" in url

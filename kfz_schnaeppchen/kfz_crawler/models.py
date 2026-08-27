@@ -356,19 +356,10 @@ def matches_query(l: Listing, q: SearchQuery) -> bool:
     if q.ev_range_from and l.ev_range_km is not None and l.ev_range_km < q.ev_range_from:
         return False
     # Ein bekannter kleiner Akku wird immer ausgeschlossen. Fehlt die kWh-
-    # Angabe, reicht bei gesetztem Reichweitenfilter eine nachweislich passende
-    # Reichweite als sinnvolle Fallback-Prüfung.
-    if q.battery_from_kwh:
-        if l.battery_kwh is not None:
-            if l.battery_kwh < q.battery_from_kwh:
-                return False
-        elif q.ev_range_from and l.ev_range_km is not None and l.ev_range_km >= q.ev_range_from:
-            pass
-        elif q.ev_range_from and l.portal == "AutoScout24":
-            # AutoScout24 setzt erange server-seitig; falls die Reichweite in
-            # der Ergebnisliste fehlt, ist dieser Treffer trotzdem verifiziert.
-            pass
-        else:
+    # Angabe, wird das Inserat nicht verworfen (entsprechend Grundsatz:
+    # unbekannte optionale Werte schließen nicht aus).
+    if q.battery_from_kwh and l.battery_kwh is not None:
+        if l.battery_kwh < q.battery_from_kwh:
             return False
 
     # Ausstattung / Freitext: Stichwörter müssen ALLE vorkommen, Ausschluss keiner.

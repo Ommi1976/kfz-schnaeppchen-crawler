@@ -53,8 +53,15 @@ class Kleinanzeigen(BasePortal):
     BASE = "https://www.kleinanzeigen.de"
 
     def _build_url(self, query: SearchQuery, page: int) -> str:
-        # Rubrik "Autos" = c216. Suchbegriff aus Marke + Modell.
+        # Rubrik "Autos" = c216. Suchbegriff aus Marke + Modell bzw. Keywords/Kraftstoff.
         term_parts = [p for p in (query.make, query.model) if p]
+        if not term_parts:
+            if getattr(query, "keywords", None):
+                term_parts = list(query.keywords)
+            elif query.fuel == "elektro":
+                term_parts = ["elektroauto"]
+            elif query.fuel == "hybrid":
+                term_parts = ["hybrid"]
         term = "-".join(term_parts) if term_parts else "auto"
         loc_seg = f"/{query.zip_code}" if query.zip_code else ""
         price = ""
