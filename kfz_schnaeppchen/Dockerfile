@@ -22,11 +22,15 @@ RUN apt-get update \
         python3-bs4 \
         python3-requests \
         python3-yaml \
+        tesseract-ocr \
+        tesseract-ocr-deu \
+        tesseract-ocr-eng \
+        libtesseract-dev \
         curl \
         gosu \
         netbase \
         ca-certificates \
-    && python3 -m pip install --no-cache-dir --break-system-packages rich PySocks fastapi uvicorn curl_cffi playwright \
+    && python3 -m pip install --no-cache-dir --break-system-packages rich PySocks fastapi uvicorn curl_cffi playwright pytesseract pillow \
     && mkdir -p /opt/playwright-browsers \
     && playwright install --with-deps firefox \
     && chmod -R a+rx /opt/playwright-browsers \

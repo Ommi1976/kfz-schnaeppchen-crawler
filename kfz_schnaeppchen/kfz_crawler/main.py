@@ -51,7 +51,7 @@ def _search_one_portal(cfg: Config, key: str, query: SearchQuery, store=None) ->
             found = portal.enrich(found, query, force=cfg.settings.verify_details)
         # Viele Portale liefern die Akku-Kapazität nur im Titel (z. B. "62 kWh").
         for listing in found:
-            infer_listing_battery(listing)
+            infer_listing_battery(listing, check_images=True)
             infer_listing_range(listing)
         console.print(f"  [dim]{portal.name}: {len(found)} Treffer[/dim]")
         if key == "mobile_de" and store is not None:

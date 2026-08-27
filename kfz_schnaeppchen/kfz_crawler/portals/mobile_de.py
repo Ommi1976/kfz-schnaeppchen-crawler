@@ -136,6 +136,8 @@ class MobileDe(BasePortal):
             det = self._parse_details(dnode.get_text(" ", strip=True) if dnode else "")
             snode = art.select_one("[data-testid='seller-info']")
             full_card_text = art.get_text(" ", strip=True)
+            imgs = [img.get("src") or img.get("data-src") for img in art.select("img[src], img[data-src]")]
+            image_urls = [u for u in imgs if u and u.startswith("http") and not u.endswith(".svg")]
             listings.append(Listing(
                 portal=self.name,
                 title=title[:120],
@@ -147,6 +149,7 @@ class MobileDe(BasePortal):
                 power_ps=det["power_ps"],
                 location=snode.get_text(" ", strip=True)[:60] if snode else None,
                 body=full_card_text,
+                image_urls=image_urls,
                 raw_id=lid,
             ))
         return listings

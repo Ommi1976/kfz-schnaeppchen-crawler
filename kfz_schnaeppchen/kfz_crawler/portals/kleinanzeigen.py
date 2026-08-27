@@ -99,6 +99,8 @@ class Kleinanzeigen(BasePortal):
             location = self._text(art, ".aditem-main--top--left")
             desc = self._text(art, ".aditem-main--middle--description") or ""
             listing_text = desc + " " + (title or "")
+            imgs = [img.get("src") or img.get("data-src") or img.get("data-imgsrc") for img in art.select(".imagebox img")]
+            image_urls = [u for u in imgs if u and u.startswith("http") and not u.endswith(".svg")]
 
             listing = Listing(
                 portal=self.name,
@@ -110,6 +112,7 @@ class Kleinanzeigen(BasePortal):
                 ev_range_km=extract_ev_range_km(listing_text),
                 location=location,
                 body=listing_text,
+                image_urls=image_urls,
                 raw_id=art.get("data-adid"),
             )
             if self._matches(listing, query):

@@ -152,8 +152,8 @@ def infer_ev_specs_from_model(text: str | None) -> tuple[Optional[float], Option
     return None, None
 
 
-def infer_listing_battery(listing: "Listing") -> None:
-    """Füllt den Akkuwert und SoH aus Titel/Text/Modellkatalog nach."""
+def infer_listing_battery(listing: "Listing", check_images: bool = False) -> None:
+    """Füllt den Akkuwert und SoH aus Titel/Text/Modellkatalog und optional OCR nach."""
     text = f"{listing.title or ''} {getattr(listing, 'body', '') or ''}"
     if listing.battery_kwh is None:
         listing.battery_kwh = extract_battery_kwh(text)
@@ -163,6 +163,12 @@ def infer_listing_battery(listing: "Listing") -> None:
                 listing.battery_kwh = kwh
     if listing.battery_soh is None:
         listing.battery_soh = extract_battery_soh(text)
+        if listing.battery_soh is None and check_images and getattr(listing, "image_urls", None):
+            try:
+                from kfz_crawler.battery_analyzer import extract_soh_from_image_urls
+                listing.battery_soh = extract_soh_from_image_urls(listing.image_urls)
+            except Exception:
+                pass
 
 
 def infer_listing_range(listing: "Listing") -> None:
@@ -197,6 +203,7 @@ class Listing:
     ev_range_km: Optional[int] = None     # elektrische Reichweite (km)
     battery_kwh: Optional[float] = None   # Batteriekapazität (kWh)
     battery_soh: Optional[float] = None   # Batteriezustand / State of Health (%)
+    image_urls: list[str] = field(default_factory=list, compare=False)
 
     # Wird vom DealFinder gefüllt:
     market_price: Optional[int] = field(default=None, compare=False)
