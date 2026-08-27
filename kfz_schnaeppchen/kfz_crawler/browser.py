@@ -119,6 +119,18 @@ def fetch_rendered(
             page.goto(url, wait_until=wait_until, timeout=timeout_ms)
             if render_delay > 0:
                 time.sleep(render_delay)
+
+            # Auto-Dismiss Consent-Banner (z. B. mobile.de "Einverstanden")
+            try:
+                for b in page.locator("button").all():
+                    txt = (b.text_content() or "").strip().lower()
+                    if txt in ("einverstanden", "alle akzeptieren", "zustimmen", "akzeptieren", "zustimmen & weiter"):
+                        b.click(timeout=1200)
+                        time.sleep(1.0)
+                        break
+            except Exception:
+                pass
+
             html = page.content()
         finally:
             context.close()

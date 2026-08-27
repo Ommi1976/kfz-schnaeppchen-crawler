@@ -188,7 +188,10 @@ class MobileDe(BasePortal):
     def _to_int(value) -> Optional[int]:
         if value is None:
             return None
-        digits = re.sub(r"[^\d]", "", str(value))
+        text = str(value)
+        if "€" in text:
+            text = text.split("€")[0]
+        digits = re.sub(r"[^0-9]", "", text)
         return int(digits) if digits else None
 
     @staticmethod
