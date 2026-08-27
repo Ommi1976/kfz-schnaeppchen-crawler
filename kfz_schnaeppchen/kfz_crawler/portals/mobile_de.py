@@ -129,14 +129,27 @@ class MobileDe(BasePortal):
         import logging
         logger = logging.getLogger(__name__)
 
-        # Maximal 8 Detailseiten pro Durchlauf, um Rate-Limits zu vermeiden
-        detail_urls = [l.url.split("&searchId")[0].split("&ref=")[0] for l in listings[:8]]
+        # Maximal 10 Detailseiten pro Durchlauf für E-Autos abrufen
+        detail_targets = {}
+        for l in listings[:10]:
+            lid = l.raw_id
+            if not lid and l.url:
+                m = re.search(r"id=(\d+)", l.url)
+                if m:
+                    lid = m.group(1)
+            if lid:
+                detail_url = f"https://suchen.mobile.de/auto-inserat/car/{lid}.html"
+                detail_targets[detail_url] = l
+
+        if not detail_targets:
+            return
+
         srp_url = self._build_url(query, 1)
 
         try:
             _, detail_htmls = fetch_rendered_batch(
                 srp_url=srp_url,
-                detail_urls=detail_urls,
+                detail_urls=list(detail_targets.keys()),
                 proxy=self.proxy,
                 engine="firefox",
             )
@@ -144,9 +157,8 @@ class MobileDe(BasePortal):
             logger.warning("Batch-Detailabruf fehlgeschlagen: %s", e)
             return
 
-        for listing in listings[:8]:
-            clean_url = listing.url.split("&searchId")[0].split("&ref=")[0]
-            html = detail_htmls.get(clean_url)
+        for d_url, listing in detail_targets.items():
+            html = detail_htmls.get(d_url)
             if not html:
                 continue
 
