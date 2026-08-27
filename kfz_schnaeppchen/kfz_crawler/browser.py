@@ -42,20 +42,9 @@ def fetch_rendered(
             engine_obj = getattr(p, engine, p.firefox)
             browser = engine_obj.launch(headless=True)
             try:
-                is_linux = sys.platform.startswith("linux")
-                if engine == "firefox":
-                    ua = ("Mozilla/5.0 (X11; Linux x86_64; rv:125.0) Gecko/20100101 Firefox/125.0"
-                          if is_linux else
-                          "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:125.0) Gecko/20100101 Firefox/125.0")
-                else:
-                    ua = ("Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
-                          if is_linux else
-                          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36")
-
                 ctx_args = {
                     "locale": "de-DE",
                     "timezone_id": "Europe/Berlin",
-                    "user_agent": ua,
                     "viewport": {"width": 1440, "height": 900},
                     "extra_http_headers": {
                         "Accept-Language": "de-DE,de;q=0.9,en-US;q=0.8,en;q=0.7",
