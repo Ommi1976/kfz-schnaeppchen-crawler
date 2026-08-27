@@ -18,9 +18,10 @@ _EV_RANGE_RE = re.compile(
     re.IGNORECASE,
 )
 _BATTERY_SOH_RE = re.compile(
-    r"\bsoh\s*[:=]?\s*(\d{2,3}(?:[.,]\d+)?)\s*%?|"
+    r"\bsoh\s*[:=)}\]]?\s*(\d{2,3}(?:[.,]\d+)?)\s*%?|"
     r"\b(?:batterie|akku)(?:-?\s*status|gesundheit|zustand|kapazit[aä]t)\D{0,30}(\d{2,3}(?:[.,]\d+)?)\s*%|"
     r"\b(?:batterie-information|batterie-status)\D{0,40}(\d{2,3}(?:[.,]\d+)?)\s*%|"
+    r"\bgesundheitszustand\s*\(?(?:soh)?\)?\s*[:=]?\s*(\d{2,3}(?:[.,]\d+)?)\s*%|"
     r"\b(\d{2,3}(?:[.,]\d+)?)\s*%\s*(?:sehr\s*gut|gut|ausgezeichnet)\b|"
     r"\bstate\s+of\s+health\s*[:=]?\s*(\d{2,3}(?:[.,]\d+)?)\s*%?",
     re.IGNORECASE,

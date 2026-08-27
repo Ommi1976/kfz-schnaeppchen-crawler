@@ -30,6 +30,11 @@ def test_extract_battery_soh():
     assert extract_battery_soh("Batterie-Information Batterie-Status 94.6% Sehr gut Reichweite (WLTP) 546 km") == 94.6
     assert extract_battery_soh("Batterie-Status: 94,8 %") == 94.8
     assert extract_battery_soh("94.6% Sehr gut") == 94.6
+    # AVILOO / DEKRA Batteriezertifikat (OCR-Text)
+    assert extract_battery_soh("GESUNDHEITSZUSTAND (SOH) 96,9 %") == 96.9
+    assert extract_battery_soh("Gesundheitszustand (SOH) 94.5 %") == 94.5
+    assert extract_battery_soh("GESUNDHEITSZUSTAND (SOH) 96,9 % ENERGIE 75kWh | 77kWh") == 96.9
+    assert extract_battery_soh("SOH) 96,9 %") == 96.9  # OCR kann Klammer verschlucken
     assert extract_battery_soh("Auto mit 10 % SoH") is None  # Unter 50% unplausibel
     assert extract_battery_soh(None) is None
 

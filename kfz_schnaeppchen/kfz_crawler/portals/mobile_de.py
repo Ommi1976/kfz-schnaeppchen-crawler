@@ -157,7 +157,7 @@ class MobileDe(BasePortal):
             soh = extract_battery_soh(full_text)
             if soh is not None:
                 listing.battery_soh = soh
-                logger.info("SoH=%.1f%% aus Detailseite: %s", soh, listing.title[:60])
+                logger.info("SoH=%.1f%% aus Detailtext: %s", soh, listing.title[:60])
 
             # Reichweite aus Detailtext (z.B. "Reichweite (WLTP) 546 km")
             if listing.ev_range_km is None:
@@ -182,6 +182,17 @@ class MobileDe(BasePortal):
                 if img_url not in existing:
                     existing.append(img_url)
             listing.image_urls = existing
+
+            # OCR-Fallback: Zertifikatsbilder (AVILOO, DEKRA etc.) scannen
+            if listing.battery_soh is None and listing.image_urls:
+                try:
+                    from ..battery_analyzer import extract_soh_from_image_urls
+                    ocr_soh = extract_soh_from_image_urls(listing.image_urls, max_images=6)
+                    if ocr_soh is not None:
+                        listing.battery_soh = ocr_soh
+                        logger.info("SoH=%.1f%% per Bild-OCR (AVILOO/DEKRA): %s", ocr_soh, listing.title[:60])
+                except Exception as e:
+                    logger.debug("OCR-Fallback fehlgeschlagen für %s: %s", listing.title[:40], e)
 
     # ---- HTML-Karten-Parsing (server-gerendert, mit gültigen Cookies) --
     def _parse_cards(self, html: str) -> List[Listing]:
