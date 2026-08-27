@@ -290,6 +290,48 @@ _NON_PKW_PATTERNS = [
 ]
 
 
+_DEFECT_AND_RESTRICTION_PATTERNS = [
+    re.compile(p, re.IGNORECASE)
+    for p in [
+        r"\bdefekt\b",
+        r"\bbesch[aä]digt\b",
+        r"\bunfall(?!frei)",
+        r"\bmotorschad",
+        r"\bgetriebeschad",
+        r"\bmotor\s*defekt",
+        r"\bakkuschad",
+        r"\bbatteriedefekt",
+        r"\bbatterieschad",
+        r"\bhagelschad",
+        r"\bbastler",
+        r"\bteiletr[aä]ger",
+        r"\bersatzteilspender",
+        r"\bzum\s+ausschlachten",
+        r"\btotalschad",
+        r"\bsalvage\b",
+        r"\bl[aä]uft\s+nicht",
+        r"\bspringt\s+nicht\s+an",
+        r"\bohne\s+t[üu]v\b",
+        r"\bnicht\s+fahrbereit",
+        r"\bkarosserieschad",
+        r"\bkompressionsverlust\b",
+        # Reine Export/Import/Gewerbe-Klauseln:
+        r"\b(?:nur\s+(?:an|für)\s+)?export\b",
+        r"\b(?:nur\s+(?:an|für)\s+)?import\b",
+        r"\bimport(?:fahrzeug|wagen|auto)?\b",
+        r"\b(?:nur\s+(?:an|für)\s+)?gewerbe(?:kunden|treibende)?\b",
+        r"\b(?:nur\s+(?:an|für)\s+)?h[äa]ndler\b",
+        r"\bkein\s+verkauf\s+an\s+privat\b",
+        r"\breine(?:r)?\s+gewerbeverkauf\b",
+    ]
+]
+
+
+def is_defective_or_restricted(listing: "Listing") -> bool:
+    hay = f"{listing.title} {listing.body or ''}".lower()
+    return any(p.search(hay) for p in _DEFECT_AND_RESTRICTION_PATTERNS)
+
+
 def is_non_pkw(listing: "Listing") -> bool:
     hay = f"{listing.title} {listing.body or ''}".lower()
     return any(p.search(hay) for p in _NON_PKW_PATTERNS)
@@ -304,6 +346,11 @@ def matches_query(l: Listing, q: SearchQuery) -> bool:
     """
     # Kleinstfahrzeuge / Nicht-PKW grundsätzlich ausschließen (echte PKW-Suche).
     if is_non_pkw(l):
+        return False
+
+    # Defekte / Schäden / reine Import-Export-Fahrzeuge grundsätzlich ausschließen
+    # (außer include_damaged ist in der Suche explizit aktiviert).
+    if not q.include_damaged and is_defective_or_restricted(l):
         return False
 
     # Marke/Modell nur prüfen, wenn ein Titel vorliegt (Portale, die nicht

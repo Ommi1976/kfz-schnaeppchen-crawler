@@ -134,3 +134,19 @@ def test_matches_query_filtering():
     # 5. Zu wenig Leistung
     l5 = Listing(portal="AS24", title="VW Golf 7 TDI DSG Navi", url="http://x/5", price=15000, power_ps=116)
     assert matches_query(l5, q) is False
+
+    # 6. Defekt / Schaden / Motorschaden / Unfall
+    l6 = Listing(portal="AS24", title="VW Golf 7 TDI DSG Navi *Motorschaden*", url="http://x/6", price=8000, year=2019, mileage=85000, fuel="diesel", transmission="automatik", power_ps=150)
+    assert matches_query(l6, q) is False
+
+    # 7. Nur Export / Nur Händler
+    l7 = Listing(portal="AS24", title="VW Golf 7 TDI DSG Navi *Nur für Export*", url="http://x/7", price=9000, year=2019, mileage=85000, fuel="diesel", transmission="automatik", power_ps=150)
+    assert matches_query(l7, q) is False
+
+    # 8. Nur Import
+    l8 = Listing(portal="AS24", title="VW Golf 7 TDI DSG Navi *Nur für Import*", url="http://x/8", price=9000, year=2019, mileage=85000, fuel="diesel", transmission="automatik", power_ps=150)
+    assert matches_query(l8, q) is False
+
+    # 9. include_damaged = True erlaubt solche Fahrzeuge
+    q_damaged = SearchQuery(name="Schrottis", make="volkswagen", model="golf", include_damaged=True)
+    assert matches_query(l6, q_damaged) is True
