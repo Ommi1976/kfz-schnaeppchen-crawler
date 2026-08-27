@@ -29,7 +29,7 @@ def fetch_rendered(
     engine: str = "firefox",
     wait_until: str = "domcontentloaded",
     timeout_ms: int = 30000,
-    render_delay: float = 0.5,
+    render_delay: float = 1.0,
 ) -> str:
     """Lädt eine URL in Playwright Firefox/Chromium und liefert das gerenderte HTML."""
     try:
@@ -70,19 +70,26 @@ def fetch_rendered(
                 try:
                     page.goto(url, wait_until=wait_until, timeout=timeout_ms)
 
-                    # Gezieltes Warten auf Consent-Banner & Klick zur Freigabe der Inserate
-                    btn_sel = "button:has-text('Einverstanden'), button:has-text('Alle akzeptieren'), button:has-text('Zustimmen'), button:has-text('Akzeptieren')"
-                    try:
-                        page.wait_for_selector(btn_sel, timeout=7000)
-                        btn = page.locator(btn_sel).first
-                        if btn.is_visible():
-                            btn.click(timeout=1500)
-                            try:
-                                page.wait_for_selector("article a[href*='details.html']", timeout=10000)
-                            except Exception:
-                                time.sleep(2.0)
-                    except Exception:
-                        pass
+                    # Zuverlässiges Polling für Consent-Banner (über Hauptframe und Subframes)
+                    t0 = time.time()
+                    clicked = False
+                    while time.time() - t0 < 8.0:
+                        for frame in page.frames:
+                            for b in frame.locator("button").all():
+                                txt = (b.text_content() or "").strip().lower()
+                                if any(w in txt for w in ["einverstanden", "alle akzeptieren", "zustimmen", "akzeptieren"]):
+                                    try:
+                                        b.click(timeout=1500)
+                                        clicked = True
+                                        break
+                                    except Exception:
+                                        pass
+                            if clicked:
+                                break
+                        if clicked:
+                            time.sleep(2.0)
+                            break
+                        time.sleep(0.5)
 
                     if render_delay > 0:
                         time.sleep(render_delay)
