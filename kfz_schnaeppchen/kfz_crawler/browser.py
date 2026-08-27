@@ -29,7 +29,7 @@ def fetch_rendered(
     engine: str = "firefox",
     wait_until: str = "domcontentloaded",
     timeout_ms: int = 30000,
-    render_delay: float = 1.0,
+    render_delay: float = 1.5,
 ) -> str:
     """Lädt eine URL in Playwright Firefox/Chromium und liefert das gerenderte HTML."""
     try:
@@ -69,12 +69,6 @@ def fetch_rendered(
                 page = context.new_page()
                 try:
                     page.goto(url, wait_until=wait_until, timeout=timeout_ms)
-                    # Warten auf automatischen Akamai-Challenge-Reload & Inserate
-                    try:
-                        page.wait_for_selector("article, [data-testid='search-column'], [data-testid='result-list-header'], h1", timeout=15000)
-                    except Exception:
-                        pass
-
                     if render_delay > 0:
                         time.sleep(render_delay)
 
@@ -83,14 +77,14 @@ def fetch_rendered(
                         for b in page.locator("button").all():
                             txt = (b.text_content() or "").strip().lower()
                             if txt in ("einverstanden", "alle akzeptieren", "zustimmen", "akzeptieren", "zustimmen & weiter"):
-                                b.click(timeout=1200)
-                                time.sleep(1.0)
+                                b.click(timeout=1500)
+                                time.sleep(2.5)
                                 break
                     except Exception:
                         pass
 
                     html = page.content()
-                    if "sec-if-cpt-container" in html and len(html) < 30000:
+                    if len(html) < 30000:
                         time.sleep(2.5)
                         html = page.content()
                     return html
