@@ -71,34 +71,28 @@ class MobileDe(BasePortal):
     def _fetch(self, url: str) -> str:
         # 1. Primärer Weg: Autarker Playwright Firefox Abruf auf dem Server
         try:
-            from ..browser import fetch_rendered, BrowserBlocked, BrowserUnavailable
-            try:
-                return fetch_rendered(url, proxy=self.proxy, engine="firefox", wait_until="domcontentloaded", render_delay=1.5)
-            except BrowserBlocked as e:
-                pass  # Fallback versuchen
-        except (ImportError, Exception):
-            pass
-
-        # 2. Sekundärer Weg: curl_cffi mit hinterlegten Session-Cookies (falls vorhanden)
-        if self.cookies:
-            try:
-                from curl_cffi import requests as creq
-                headers = {
-                    "User-Agent": ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-                                   "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"),
-                    "Accept-Language": "de-DE,de;q=0.9,en;q=0.7",
-                    "Cookie": self.cookies,
-                    "Referer": "https://www.mobile.de/",
-                }
-                r = creq.get(url, headers=headers, impersonate="chrome124", timeout=25)
-                html = r.text or ""
-                low = html.lower()
-                if not ("behavioral-content" in low or "sec-if-cpt" in low or r.status_code in (403, 429)):
-                    return html
-            except Exception:
-                pass
-
-        raise PortalError("mobile.de: Abruf fehlgeschlagen. Playwright Firefox erforderlich.")
+            from ..browser import fetch_rendered
+            return fetch_rendered(url, proxy=self.proxy, engine="firefox", wait_until="domcontentloaded", render_delay=1.0)
+        except Exception as e:
+            # 2. Sekundärer Weg: curl_cffi mit hinterlegten Session-Cookies (falls vorhanden)
+            if self.cookies:
+                try:
+                    from curl_cffi import requests as creq
+                    headers = {
+                        "User-Agent": ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                                       "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"),
+                        "Accept-Language": "de-DE,de;q=0.9,en;q=0.7",
+                        "Cookie": self.cookies,
+                        "Referer": "https://www.mobile.de/",
+                    }
+                    r = creq.get(url, headers=headers, impersonate="chrome124", timeout=25)
+                    html = r.text or ""
+                    low = html.lower()
+                    if not ("behavioral-content" in low or "sec-if-cpt" in low or r.status_code in (403, 429)):
+                        return html
+                except Exception:
+                    pass
+            raise PortalError(f"mobile.de: Abruf fehlgeschlagen – {e}")
 
     def search(self, query: SearchQuery) -> List[Listing]:
         results: List[Listing] = []

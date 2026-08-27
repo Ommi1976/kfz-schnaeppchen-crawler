@@ -14,16 +14,6 @@ from typing import Optional
 
 _lock = threading.Lock()
 
-_BLOCK_MARKERS = (
-    "captcha-delivery.com",
-    "datadome",
-    "you have been blocked",
-    "access to this page has been denied",
-    "access denied",
-    "zugriff verweigert",
-    "unusual traffic",
-)
-
 
 class BrowserUnavailable(RuntimeError):
     """Playwright/Browser ist nicht installiert."""
@@ -81,7 +71,7 @@ def fetch_rendered(
                     page.goto(url, wait_until=wait_until, timeout=timeout_ms)
                     # Warten auf automatischen Akamai-Challenge-Reload & Inserate
                     try:
-                        page.wait_for_selector("article, [data-testid='search-column']", timeout=12000)
+                        page.wait_for_selector("article, [data-testid='search-column'], [data-testid='result-list-header'], h1", timeout=15000)
                     except Exception:
                         pass
 
@@ -100,12 +90,11 @@ def fetch_rendered(
                         pass
 
                     html = page.content()
+                    if "sec-if-cpt-container" in html and len(html) < 30000:
+                        time.sleep(2.5)
+                        html = page.content()
+                    return html
                 finally:
                     context.close()
             finally:
                 browser.close()
-
-    low = html.lower()
-    if any(m in low for m in _BLOCK_MARKERS):
-        raise BrowserBlocked("Zugriff durch Bot-Schutz verweigert.")
-    return html
