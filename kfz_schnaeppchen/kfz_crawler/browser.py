@@ -39,7 +39,7 @@ def fetch_rendered(
     engine: str = "firefox",
     wait_until: str = "domcontentloaded",
     timeout_ms: int = 30000,
-    render_delay: float = 1.5,
+    render_delay: float = 1.0,
 ) -> str:
     """Lädt eine URL in Playwright Firefox/Chromium und liefert das gerenderte HTML."""
     try:
@@ -79,6 +79,12 @@ def fetch_rendered(
                 page = context.new_page()
                 try:
                     page.goto(url, wait_until=wait_until, timeout=timeout_ms)
+                    # Warten auf automatischen Akamai-Challenge-Reload & Inserate
+                    try:
+                        page.wait_for_selector("article, [data-testid='search-column']", timeout=12000)
+                    except Exception:
+                        pass
+
                     if render_delay > 0:
                         time.sleep(render_delay)
 
