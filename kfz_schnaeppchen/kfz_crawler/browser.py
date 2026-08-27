@@ -29,7 +29,7 @@ def fetch_rendered(
     engine: str = "firefox",
     wait_until: str = "domcontentloaded",
     timeout_ms: int = 30000,
-    render_delay: float = 1.0,
+    render_delay: float = 0.5,
 ) -> str:
     """Lädt eine URL in Playwright Firefox/Chromium und liefert das gerenderte HTML."""
     try:
@@ -70,34 +70,33 @@ def fetch_rendered(
                 try:
                     page.goto(url, wait_until=wait_until, timeout=timeout_ms)
 
-                    # Zuverlässiges Polling für Consent-Banner (über Hauptframe und Subframes)
+                    # Consent-Banner Klick (mobile.de Einverstanden / Zustimmen)
                     t0 = time.time()
                     clicked = False
                     while time.time() - t0 < 8.0:
-                        for frame in page.frames:
-                            for b in frame.locator("button").all():
-                                txt = (b.text_content() or "").strip().lower()
-                                if any(w in txt for w in ["einverstanden", "alle akzeptieren", "zustimmen", "akzeptieren"]):
-                                    try:
-                                        b.click(timeout=1500)
-                                        clicked = True
-                                        break
-                                    except Exception:
-                                        pass
-                            if clicked:
-                                break
+                        for b in page.locator("button").all():
+                            txt = (b.text_content() or "").strip().lower()
+                            if any(w in txt for w in ["einverstanden", "alle akzeptieren", "zustimmen", "akzeptieren"]):
+                                try:
+                                    b.click(timeout=2000)
+                                    clicked = True
+                                    break
+                                except Exception:
+                                    pass
                         if clicked:
-                            time.sleep(2.0)
                             break
                         time.sleep(0.5)
+
+                    # Warten bis Inserate fertig gerendert sind
+                    try:
+                        page.wait_for_selector("article a[href*='details.html']", timeout=12000)
+                    except Exception:
+                        pass
 
                     if render_delay > 0:
                         time.sleep(render_delay)
 
                     html = page.content()
-                    if len(html) < 30000:
-                        time.sleep(2.0)
-                        html = page.content()
                     return html
                 finally:
                     context.close()
