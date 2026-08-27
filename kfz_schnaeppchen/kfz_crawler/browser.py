@@ -29,7 +29,7 @@ def fetch_rendered(
     engine: str = "firefox",
     wait_until: str = "domcontentloaded",
     timeout_ms: int = 30000,
-    render_delay: float = 2.0,
+    render_delay: float = 0.5,
 ) -> str:
     """Lädt eine URL in Playwright Firefox/Chromium und liefert das gerenderte HTML."""
     try:
@@ -57,24 +57,33 @@ def fetch_rendered(
                 context = browser.new_context(**ctx_args)
                 page = context.new_page()
                 try:
-                    page.goto(url, wait_until="domcontentloaded", timeout=timeout_ms)
-                    time.sleep(2.0)
+                    page.goto(url, wait_until=wait_until, timeout=timeout_ms)
 
-                    # Consent-Banner Klick (mobile.de Einverstanden / Zustimmen)
-                    for b in page.locator("button").all():
-                        try:
-                            txt = (b.text_content() or "").strip().lower()
-                        except Exception:
-                            continue
-                        if any(w in txt for w in ["einverstanden", "alle akzeptieren", "zustimmen", "akzeptieren"]):
+                    # Zuverlässiges Polling für Consent-Banner (erscheint meist nach 1.5 - 2.5s)
+                    t0 = time.time()
+                    clicked = False
+                    while time.time() - t0 < 10.0:
+                        for b in page.locator("button").all():
                             try:
-                                b.click(timeout=2000)
+                                txt = (b.text_content() or "").strip().lower()
                             except Exception:
-                                pass
-                            time.sleep(2.5)
+                                continue
+                            if any(w in txt for w in ["einverstanden", "alle akzeptieren", "zustimmen", "akzeptieren"]):
+                                try:
+                                    b.click(timeout=2000)
+                                except Exception:
+                                    pass
+                                time.sleep(2.5)
+                                clicked = True
+                                break
+                        if clicked:
                             break
+                        time.sleep(0.5)
 
                     html = page.content()
+                    if len(html) < 30000:
+                        time.sleep(2.0)
+                        html = page.content()
                     return html
                 finally:
                     context.close()
