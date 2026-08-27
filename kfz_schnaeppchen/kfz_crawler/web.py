@@ -326,19 +326,19 @@ async def deals(search: str | None = None, limit: int = 400, deals_only: bool = 
     rows = app.state.store.list_deals(
         limit=min(limit, 2000), search_name=search, deals_only=deals_only, portal=portal
     )
-    # Bereits gespeicherte Treffer stammen ggf. aus einer früheren Version der
-    # Suche. Bei einer nachträglich gesetzten Akku-Mindestgröße müssen sie
-    # ebenfalls geprüft werden, sonst bleiben kleinere Akkus sichtbar.
     specs = {s["name"]: SearchQuery.from_dict(s) for s in app.state.store.list_searches()}
     filtered = []
     for row in rows:
         query = specs.get(row.get("search_name"))
-        minimum = query.battery_from_kwh if query else None
-        if minimum:
-            battery = row.get("battery_kwh")
-            if battery is None:
-                battery = extract_battery_kwh(row.get("title"))
-            if battery is not None and battery < minimum:
+        if query:
+            kwh = row.get("battery_kwh")
+            rng = row.get("ev_range_km")
+            if query.battery_from_kwh and query.ev_range_from:
+                if kwh is not None and rng is not None and kwh < query.battery_from_kwh and rng < query.ev_range_from:
+                    continue
+            elif query.battery_from_kwh and kwh is not None and kwh < query.battery_from_kwh:
+                continue
+            elif query.ev_range_from and rng is not None and rng < query.ev_range_from:
                 continue
         filtered.append(row)
     rows = filtered
@@ -352,7 +352,12 @@ async def deals(search: str | None = None, limit: int = 400, deals_only: bool = 
         p = r.get("portal") or "Unbekannt"
         portal_counts[p] = portal_counts.get(p, 0) + 1
 
-    return {"count": len(rows), "deals": rows, "portal_counts": portal_counts}
+    return {
+        "count": len(rows),
+        "deals": rows,
+        "portal_counts": portal_counts,
+        "total_deals": sum(1 for r in rows if r.get("is_deal")),
+    }
 
 
 @app.post("/api/run")

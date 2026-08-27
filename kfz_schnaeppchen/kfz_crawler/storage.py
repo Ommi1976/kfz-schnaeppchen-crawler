@@ -51,6 +51,8 @@ class SeenStore:
                 is_deal       INTEGER DEFAULT 0,
                 is_suspicious INTEGER DEFAULT 0,
                 reasons       TEXT,
+                body          TEXT,
+                image_urls    TEXT,
                 first_seen    REAL
             )
             """
@@ -62,6 +64,8 @@ class SeenStore:
             "ALTER TABLE deals ADD COLUMN is_deal INTEGER DEFAULT 0",
             "ALTER TABLE deals ADD COLUMN is_suspicious INTEGER DEFAULT 0",
             "ALTER TABLE deals ADD COLUMN reasons TEXT",
+            "ALTER TABLE deals ADD COLUMN body TEXT",
+            "ALTER TABLE deals ADD COLUMN image_urls TEXT",
         ]:
             try:
                 self.conn.execute(ddl)
@@ -107,61 +111,70 @@ class SeenStore:
     def list_searches(self) -> List[dict]:
         with self._lock:
             cur = self.conn.execute(
-                "SELECT id, name, active, spec_json FROM searches "
-                "ORDER BY sort_order ASC, created ASC"
+                "SELECT * FROM searches ORDER BY sort_order ASC, created ASC"
             )
-            out = []
+            rows = []
             for r in cur.fetchall():
-                spec = json.loads(r["spec_json"] or "{}")
-                spec["id"] = r["id"]
-                spec["name"] = r["name"]
-                spec["active"] = bool(r["active"])
-                out.append(spec)
-            return out
+                d = json.loads(r["spec_json"])
+                d["id"] = r["id"]
+                d["name"] = r["name"]
+                d["active"] = bool(r["active"])
+                rows.append(d)
+            return rows
 
     def get_search(self, search_id: str) -> Optional[dict]:
         with self._lock:
             cur = self.conn.execute(
-                "SELECT id, name, active, spec_json FROM searches WHERE id = ?", (search_id,)
+                "SELECT * FROM searches WHERE id = ?", (search_id,)
             )
             r = cur.fetchone()
             if not r:
                 return None
-            spec = json.loads(r["spec_json"] or "{}")
-            spec["id"] = r["id"]
-            spec["name"] = r["name"]
-            spec["active"] = bool(r["active"])
-            return spec
+            d = json.loads(r["spec_json"])
+            d["id"] = r["id"]
+            d["name"] = r["name"]
+            d["active"] = bool(r["active"])
+            return d
 
     def create_search(self, spec: dict) -> dict:
-        sid = str(uuid.uuid4())[:8]
-        spec = dict(spec)
-        spec["id"] = sid
         with self._lock:
-            cur = self.conn.execute("SELECT COALESCE(MAX(sort_order), 0) AS m FROM searches")
-            order = int(cur.fetchone()["m"]) + 1
+            sid = spec.get("id") or str(uuid.uuid4())
+            name = spec.get("name") or "Unbenannt"
+            active = 1 if spec.get("active", True) else 0
+            cur = self.conn.execute("SELECT COALESCE(MAX(sort_order), -1) + 1 FROM searches")
+            order = cur.fetchone()[0]
+            clean_spec = dict(spec)
+            clean_spec["id"] = sid
+            clean_spec["name"] = name
+            clean_spec["active"] = bool(active)
             self.conn.execute(
-                "INSERT INTO searches (id, name, active, spec_json, sort_order, created) "
+                "INSERT OR REPLACE INTO searches (id, name, active, spec_json, sort_order, created) "
                 "VALUES (?, ?, ?, ?, ?, ?)",
-                (sid, spec.get("name", "Suche"), int(bool(spec.get("active", True))),
-                 json.dumps(spec, ensure_ascii=False), order, time.time()),
+                (sid, name, active, json.dumps(clean_spec, ensure_ascii=False), order, time.time()),
             )
             self.conn.commit()
-        return self.get_search(sid)
+            return clean_spec
 
-    def update_search(self, search_id: str, spec: dict) -> Optional[dict]:
+    def update_search(self, search_id: str, patch: dict) -> Optional[dict]:
         with self._lock:
-            if self.conn.execute("SELECT 1 FROM searches WHERE id = ?", (search_id,)).fetchone() is None:
+            cur = self.conn.execute(
+                "SELECT spec_json, active FROM searches WHERE id = ?", (search_id,)
+            )
+            r = cur.fetchone()
+            if not r:
                 return None
-            spec = dict(spec)
-            spec["id"] = search_id
+            data = json.loads(r["spec_json"])
+            data.update(patch)
+            data["id"] = search_id
+            name = data.get("name", "Unbenannt")
+            active = 1 if data.get("active", True) else 0
             self.conn.execute(
                 "UPDATE searches SET name = ?, active = ?, spec_json = ? WHERE id = ?",
-                (spec.get("name", "Suche"), int(bool(spec.get("active", True))),
-                 json.dumps(spec, ensure_ascii=False), search_id),
+                (name, active, json.dumps(data, ensure_ascii=False), search_id),
             )
             self.conn.commit()
-        return self.get_search(search_id)
+            data["active"] = bool(active)
+            return data
 
     def delete_search(self, search_id: str) -> bool:
         with self._lock:
@@ -179,6 +192,9 @@ class SeenStore:
             return
         for spec in specs:
             self.create_search(spec)
+
+    def init_default_searches(self, specs: List[dict]) -> None:
+        self.seed_searches(specs)
 
     def is_new(self, listing: Listing) -> bool:
         with self._lock:
@@ -207,17 +223,19 @@ class SeenStore:
     # ---- Inserate (für die Weboberfläche) -----------------------------
     def record_listing(self, search_name: str, listing: Listing) -> None:
         with self._lock:
+            imgs_json = json.dumps(listing.image_urls or [], ensure_ascii=False) if listing.image_urls else None
             self.conn.execute(
                 "INSERT INTO deals "
                 "(fingerprint, search_name, portal, title, url, price, market_price, "
-                " discount, year, mileage, fuel, battery_kwh, battery_soh, ev_range_km, is_deal, is_suspicious, reasons, first_seen) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+                " discount, year, mileage, fuel, battery_kwh, battery_soh, ev_range_km, is_deal, is_suspicious, reasons, body, image_urls, first_seen) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
                 " ON CONFLICT(fingerprint) DO UPDATE SET "
                 "search_name=excluded.search_name, portal=excluded.portal, title=excluded.title, "
                 "url=excluded.url, price=excluded.price, market_price=excluded.market_price, "
                 "discount=excluded.discount, year=excluded.year, mileage=excluded.mileage, "
                 "fuel=excluded.fuel, battery_kwh=excluded.battery_kwh, battery_soh=excluded.battery_soh, "
-                "ev_range_km=excluded.ev_range_km, is_deal=excluded.is_deal, is_suspicious=excluded.is_suspicious, reasons=excluded.reasons",
+                "ev_range_km=excluded.ev_range_km, is_deal=excluded.is_deal, is_suspicious=excluded.is_suspicious, "
+                "reasons=excluded.reasons, body=COALESCE(excluded.body, deals.body), image_urls=COALESCE(excluded.image_urls, deals.image_urls)",
                 (
                     listing.fingerprint,
                     search_name,
@@ -236,6 +254,8 @@ class SeenStore:
                     1 if listing.is_deal else 0,
                     1 if listing.is_suspicious else 0,
                     "; ".join(listing.suspicious_reasons or []),
+                    listing.body,
+                    imgs_json,
                     time.time(),
                 ),
             )

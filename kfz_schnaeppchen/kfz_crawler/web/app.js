@@ -235,7 +235,14 @@ async function loadDeals() {
   if (currentPortalFilter) params.push(`portal=${encodeURIComponent(currentPortalFilter)}`);
   const data = await getJSON(`${API}/deals${params.length ? "?" + params.join("&") : ""}`);
   
-  renderPortalFilters(data.portal_counts || {}, data.deals ? data.deals.filter(x => x.is_deal).length : 0);
+  const apiDealCount = data.total_deals ?? data.deals.filter(x => x.is_deal).length;
+  renderPortalFilters(data.portal_counts || {}, apiDealCount);
+
+  // Kachel synchron halten
+  const cDealsV = document.querySelector("#card-deals .v");
+  if (cDealsV) cDealsV.textContent = apiDealCount;
+  const cAllV = document.querySelector("#card-all .v");
+  if (cAllV) cAllV.textContent = data.count;
 
   const body = document.getElementById("deals-body");
   if (!data.deals.length) {

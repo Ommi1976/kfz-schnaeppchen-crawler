@@ -545,14 +545,16 @@ def matches_query(l: Listing, q: SearchQuery) -> bool:
     # Titel-Keyword-Abgleich würde korrekte Treffer fälschlich ausschließen
     # (z. B. „Golf Variant" ohne das Wort „Kombi"), daher hier kein Nachfilter.
     # E-Auto-Filter
-    if q.ev_range_from and l.ev_range_km is not None and l.ev_range_km < q.ev_range_from:
+    if q.ev_range_from and q.battery_from_kwh:
+        # Wenn BEIDES definiert ist, gilt ODER-Logik (z.B. Akku >= 65 kWh ODER Reichweite >= 450 km):
+        # Nur ausschließen, wenn beide Werte bekannt sind und beide unter der Mindestanforderung liegen.
+        if l.ev_range_km is not None and l.battery_kwh is not None:
+            if l.ev_range_km < q.ev_range_from and l.battery_kwh < q.battery_from_kwh:
+                return False
+    elif q.ev_range_from and l.ev_range_km is not None and l.ev_range_km < q.ev_range_from:
         return False
-    # Ein bekannter kleiner Akku wird immer ausgeschlossen. Fehlt die kWh-
-    # Angabe, wird das Inserat nicht verworfen (entsprechend Grundsatz:
-    # unbekannte optionale Werte schließen nicht aus).
-    if q.battery_from_kwh and l.battery_kwh is not None:
-        if l.battery_kwh < q.battery_from_kwh:
-            return False
+    elif q.battery_from_kwh and l.battery_kwh is not None and l.battery_kwh < q.battery_from_kwh:
+        return False
 
     # Ausstattung / Freitext: Stichwörter müssen ALLE vorkommen, Ausschluss keiner.
     hay = f"{l.title or ''} {l.body or ''}".lower()
