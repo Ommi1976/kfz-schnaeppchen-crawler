@@ -59,10 +59,20 @@ def fetch_rendered(
                 try:
                     page.goto(url, wait_until=wait_until, timeout=timeout_ms)
 
-                    # Zuverlässiges Polling für Consent-Banner (erscheint meist nach 1.5 - 2.5s)
+                    # Warten bis Akamai-Challenge-Reload abgeschlossen und die Seite gerendert ist (> 50KB)
                     t0 = time.time()
-                    clicked = False
-                    while time.time() - t0 < 10.0:
+                    html = page.content()
+                    while time.time() - t0 < 8.0:
+                        if len(html) > 50000:
+                            break
+                        time.sleep(0.5)
+                        try:
+                            html = page.content()
+                        except Exception:
+                            pass
+
+                    # Optionaler Consent-Klick
+                    try:
                         for b in page.locator("button").all():
                             try:
                                 txt = (b.text_content() or "").strip().lower()
@@ -70,20 +80,21 @@ def fetch_rendered(
                                 continue
                             if any(w in txt for w in ["einverstanden", "alle akzeptieren", "zustimmen", "akzeptieren"]):
                                 try:
-                                    b.click(timeout=2000)
+                                    b.click(timeout=1500)
                                 except Exception:
                                     pass
-                                time.sleep(2.5)
-                                clicked = True
+                                time.sleep(1.0)
                                 break
-                        if clicked:
-                            break
-                        time.sleep(0.5)
+                    except Exception:
+                        pass
 
-                    html = page.content()
-                    if len(html) < 30000:
-                        time.sleep(2.0)
+                    if render_delay > 0:
+                        time.sleep(render_delay)
+
+                    try:
                         html = page.content()
+                    except Exception:
+                        pass
                     return html
                 finally:
                     context.close()
