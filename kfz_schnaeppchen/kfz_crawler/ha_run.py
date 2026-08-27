@@ -37,19 +37,23 @@ DATA_DIR = os.environ.get("DATA_DIR", "/data")
 def load_options() -> dict:
     path = Path(OPTIONS_PATH)
     if not path.exists():
-        raise FileNotFoundError(f"Add-on-Optionen nicht gefunden: {path}")
-    return json.loads(path.read_text(encoding="utf-8")) or {}
+        return {}
+    try:
+        return json.loads(path.read_text(encoding="utf-8")) or {}
+    except Exception:
+        return {}
 
 
 def build_config(opts: dict) -> Config:
     # deal_threshold kommt als Prozentwert (z. B. 15) aus der UI -> in Anteil wandeln.
     threshold_pct = float(opts.get("deal_threshold", 15))
+    db_path = os.environ.get("KFZ_DB_PATH") or str(Path(DATA_DIR) / "seen.sqlite")
     settings = Settings(
         deal_threshold=threshold_pct / 100.0,
         min_comparables=int(opts.get("min_comparables", 5)),
         request_delay=float(opts.get("request_delay", 2.5)),
         max_pages=int(opts.get("max_pages", 2)),
-        db_path=str(Path(DATA_DIR) / "seen.sqlite"),
+        db_path=db_path,
         proxy=str(opts.get("proxy", "") or ""),
         use_browser=bool(opts.get("use_browser", False)),
         verify_details=bool(opts.get("verify_details", False)),

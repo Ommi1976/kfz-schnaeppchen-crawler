@@ -27,7 +27,8 @@ RUN apt-get update \
         gosu \
         netbase \
         ca-certificates \
-    && python3 -m pip install --no-cache-dir --break-system-packages rich PySocks fastapi uvicorn curl_cffi \
+    && python3 -m pip install --no-cache-dir --break-system-packages rich PySocks fastapi uvicorn curl_cffi playwright \
+    && playwright install --with-deps firefox \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 

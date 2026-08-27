@@ -51,40 +51,47 @@ class MobileDe(BasePortal):
             params.append(f"fu={FUEL_MAP[query.fuel]}")
         elif query.fuel == "elektro":
             params.append("fu=ELECTRICITY")
+        if query.zip_code:
+            params.append(f"ambc={quote_plus(query.zip_code)}")
+            if query.radius_km:
+                params.append(f"rad={query.radius_km}")
         term = " ".join(p for p in (query.make, query.model) if p)
         if term:
             params.append(f"q={quote_plus(term)}")
         return f"{self.BASE}/fahrzeuge/search.html?{'&'.join(params)}"
 
-    # ---- Abruf --------------------------------------------------------
+    # ---- Abruf (primär autark via Playwright Firefox, Fallback auf curl_cffi) ---
     def _fetch(self, url: str) -> str:
-        if not self.cookies:
-            raise CookiesExpired("mobile.de: keine Cookies hinterlegt.")
+        # 1. Primärer Weg: Autarker Playwright Firefox Abruf auf dem Server
         try:
-            from curl_cffi import requests as creq
-        except ImportError:
-            raise PortalError("mobile.de: curl_cffi nicht installiert.")
-        headers = {
-            "User-Agent": ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-                           "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"),
-            "Accept-Language": "de-DE,de;q=0.9,en;q=0.7",
-            "Cookie": self.cookies,
-            "Referer": "https://www.mobile.de/",
-        }
-        try:
-            r = creq.get(url, headers=headers, impersonate="chrome124", timeout=25)
-        except Exception as e:  # Netzwerk-/curl-Fehler
-            raise PortalError(f"mobile.de: Abruf fehlgeschlagen ({e}).")
-        html = r.text or ""
-        low = html.lower()
-        if ("behavioral-content" in low or "sec-if-cpt" in low
-                or "zugriff verweigert" in low or "access denied" in low
-                or r.status_code in (403, 429)):
-            raise CookiesExpired(
-                "mobile.de: Cookies abgelaufen oder ungültig – bitte im Browser "
-                "neu einloggen und Cookies aktualisieren."
-            )
-        return html
+            from ..browser import fetch_rendered, BrowserBlocked, BrowserUnavailable
+            try:
+                return fetch_rendered(url, proxy=self.proxy, engine="firefox", wait_until="domcontentloaded", render_delay=1.5)
+            except BrowserBlocked as e:
+                pass  # Fallback versuchen
+        except (ImportError, Exception):
+            pass
+
+        # 2. Sekundärer Weg: curl_cffi mit hinterlegten Session-Cookies (falls vorhanden)
+        if self.cookies:
+            try:
+                from curl_cffi import requests as creq
+                headers = {
+                    "User-Agent": ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                                   "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"),
+                    "Accept-Language": "de-DE,de;q=0.9,en;q=0.7",
+                    "Cookie": self.cookies,
+                    "Referer": "https://www.mobile.de/",
+                }
+                r = creq.get(url, headers=headers, impersonate="chrome124", timeout=25)
+                html = r.text or ""
+                low = html.lower()
+                if not ("behavioral-content" in low or "sec-if-cpt" in low or r.status_code in (403, 429)):
+                    return html
+            except Exception:
+                pass
+
+        raise PortalError("mobile.de: Abruf fehlgeschlagen. Playwright Firefox erforderlich.")
 
     def search(self, query: SearchQuery) -> List[Listing]:
         results: List[Listing] = []

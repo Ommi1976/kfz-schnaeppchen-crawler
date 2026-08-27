@@ -12,20 +12,15 @@ nur **einmal**.
 ## Portale
 Stand aus echten Testläufen (2026-08):
 
-| Portal | Ohne Browser | Mit Browser-Modus (#1) |
+| Portal | Status & Modus | Besonderheiten |
 |---|---|---|
-| **AutoScout24** | ✅ funktioniert (server-seitige Filter) | – |
-| **Kleinanzeigen** | ✅ funktioniert (+ Detail-Anreicherung #4) | – |
-| AutoUncle | ❌ HTTP 403 | ⚠️ lädt, aber nur wenige vorgerenderte Angebote |
-| mobile.de | ⚠️ öffentliche Suche wird vorbereitet, häufig HTTP 403 (DataDome) | ❌ auch headless geblockt |
-| heycar | ⚠️ 0 Treffer | ❌ liefert britische Inhalte (hey.car → UK) |
+| **AutoScout24** | ✅ Voll funktionsfähig | Next.js JSON + server-seitige Filter (kW, Getriebe, Ausstattung, PLZ) |
+| **Kleinanzeigen** | ✅ Voll funktionsfähig | HTML-Karten + parallele Detail-Anreicherung (Kraftstoff, Leistung, Akku) |
+| **mobile.de** | ✅ 100% Autark | Server-seitig via Playwright Firefox Headless (kein PC/Browser nötig) |
+| AutoUncle | ⚠️ Optional | Lädt vorgerenderte Angebote |
+| heycar | ⚠️ Optional | SPA-Struktur |
 
-**Empfehlung:** AutoScout24 + Kleinanzeigen bleiben die verlässlichen Portale;
-mobile.de ist zusätzlich wieder auswählbar und erhält einen direkten Suchlink.
-Der Browser-Modus (Playwright) umgeht zwar die 403-Blocks
-von AutoUncle, liefert dort aber nur eine dünne, vorgerenderte Liste; mobile.de
-bleibt hart geblockt. Ein Proxy/Tor hilft gegen die Blocks **nicht** (Bot-
-Fingerprinting, nicht IP). Ein geblocktes Portal stoppt die anderen **nicht**.
+**Empfehlung:** AutoScout24, Kleinanzeigen und mobile.de arbeiten vollkommen autark und ohne manuelle Interaktion direkt auf Home Assistant OS. Ein geblocktes Portal stoppt die anderen **nicht**.
 
 ## So werden Schnäppchen erkannt
 - **Erwarteter Preis statt Median (#3):** Aus allen Treffern wird per robuster

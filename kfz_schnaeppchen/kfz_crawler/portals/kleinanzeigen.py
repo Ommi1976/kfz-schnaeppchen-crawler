@@ -56,11 +56,13 @@ class Kleinanzeigen(BasePortal):
         # Rubrik "Autos" = c216. Suchbegriff aus Marke + Modell.
         term_parts = [p for p in (query.make, query.model) if p]
         term = "-".join(term_parts) if term_parts else "auto"
+        loc_seg = f"/{query.zip_code}" if query.zip_code else ""
         price = ""
         if query.price_from or query.price_to:
             price = f"/preis:{query.price_from or ''}:{query.price_to or ''}"
         page_seg = f"/seite:{page}" if page > 1 else ""
-        return f"{self.BASE}/s-autos{price}{page_seg}/{term}/k0c216"
+        qs = f"?radius={query.radius_km}" if (query.zip_code and query.radius_km) else ""
+        return f"{self.BASE}/s-autos{loc_seg}{price}{page_seg}/{term}/k0c216{qs}"
 
     def search(self, query: SearchQuery) -> List[Listing]:
         results: List[Listing] = []

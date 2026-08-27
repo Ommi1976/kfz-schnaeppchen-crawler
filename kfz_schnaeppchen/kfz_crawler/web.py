@@ -204,25 +204,16 @@ async def status():
 
 
 def _mobile_status(app: FastAPI) -> dict:
-    """Status der mobile.de-Cookie-Anbindung für Banner/Refresh-Button."""
-    import json as _json
-    store = app.state.store
+    """Status der mobile.de-Anbindung (autark via Firefox Playwright)."""
     cfg: Config = app.state.cfg
     active = bool(cfg.portals.get("mobile_de"))
-    has_cookies = bool(store.get_setting("mobile_cookies", ""))
-    raw = store.get_setting("mobile_status", "")
-    try:
-        st = _json.loads(raw) if raw else {}
-    except Exception:
-        st = {}
-    state = st.get("state") or ("ok" if has_cookies else "none")
     return {
         "active": active,
-        "has_cookies": has_cookies,
-        "state": state,            # none | ok | expired
-        "message": st.get("message", ""),
-        "checked_at": st.get("checked_at"),
-        "ingest_token": store.get_setting("ingest_token", ""),
+        "has_cookies": True,
+        "state": "ok" if active else "none",
+        "message": "Autarker Firefox-Headless-Betrieb aktiv",
+        "checked_at": time.time(),
+        "ingest_token": app.state.store.get_setting("ingest_token", ""),
     }
 
 

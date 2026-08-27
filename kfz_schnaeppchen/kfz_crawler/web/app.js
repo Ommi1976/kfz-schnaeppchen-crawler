@@ -137,6 +137,7 @@ function chips(spec) {
   if (spec.mileage_to) c.push(`≤${new Intl.NumberFormat("de-DE").format(spec.mileage_to)} km`);
   if (spec.power_from || spec.power_to) c.push(`${spec.power_from || 0}–${spec.power_to || "∞"} PS`);
   if (spec.seller) c.push(label(spec.seller));
+  if (spec.zip_code) c.push(`📍 ${spec.zip_code}${spec.radius_km ? ` (+${spec.radius_km} km)` : ""}`);
   if (spec.ev_range_from) c.push(`≥${spec.ev_range_from} km Reichw.`);
   if (spec.battery_from_kwh) {
     const fallback = spec.ev_range_from ? ` oder Reichw. ≥${spec.ev_range_from} km` : "";
@@ -176,7 +177,7 @@ function renderSearches(searches) {
   }).join("");
 }
 function chipsCount(s) {
-  return ["make","model","fuel","transmission","body_type","seller","doors","year_from","year_to",
+  return ["make","model","fuel","transmission","body_type","seller","doors","zip_code","radius_km","year_from","year_to",
     "price_from","price_to","mileage_from","mileage_to","power_from","power_to","ev_range_from","battery_from_kwh"]
     .filter((k) => s[k]).length + (s.exclude_makes||[]).length + (s.exclude_models||[]).length
     + (s.keywords||[]).length + (s.exclude_terms||[]).length + (s.equipment||[]).length;
@@ -190,6 +191,8 @@ function mobileSearchUrl(s) {
   span("p", s.price_from, s.price_to);
   span("fr", s.year_from, s.year_to);
   span("ml", s.mileage_from, s.mileage_to);
+  if (s.zip_code) params.set("ambc", s.zip_code);
+  if (s.radius_km) params.set("rad", String(s.radius_km));
   if (s.ev_range_from) params.set("re", String(Math.max(50, Math.floor(Number(s.ev_range_from) / 100) * 100)));
   if (s.battery_from_kwh) params.set("bc", String(Math.max(10, Math.floor(Number(s.battery_from_kwh) / 10) * 10)));
   if (s.make || s.model) params.set("q", [s.make, s.model].filter(Boolean).join(" "));
@@ -232,7 +235,7 @@ async function loadDeals() {
 }
 
 // ---------- Formular ----------
-const NUMS = ["year_from","year_to","price_from","price_to","mileage_from","mileage_to","power_from","power_to","ev_range_from","battery_from_kwh"];
+const NUMS = ["year_from","year_to","price_from","price_to","mileage_from","mileage_to","radius_km","power_from","power_to","ev_range_from","battery_from_kwh"];
 const SELS = ["make","model","fuel","transmission","body_type","seller","doors","emission_class","drivetrain"];
 
 function openForm(spec) {
@@ -242,6 +245,7 @@ function openForm(spec) {
   document.getElementById("f-name").value = spec ? spec.name : "";
   document.getElementById("f-active").checked = spec ? !!spec.active : true;
   document.getElementById("f-include_damaged").checked = spec ? !!spec.include_damaged : false;
+  document.getElementById("f-zip_code").value = (spec && spec.zip_code) || "";
   SELS.forEach((k) => { document.getElementById("f-" + k).value = (spec && spec[k]) || ""; });
   NUMS.forEach((k) => { document.getElementById("f-" + k).value = (spec && spec[k] != null) ? spec[k] : ""; });
   ["exclude_makes", "exclude_models"].forEach((k) => {
@@ -267,6 +271,7 @@ function collectForm() {
     exclude_makes: val("f-exclude_makes"), exclude_models: val("f-exclude_models"),
     fuel: val("f-fuel"), transmission: val("f-transmission"),
     body_type: val("f-body_type"), seller: val("f-seller"), doors: val("f-doors"),
+    zip_code: val("f-zip_code"),
     emission_class: val("f-emission_class"), drivetrain: val("f-drivetrain"),
     include_damaged: document.getElementById("f-include_damaged").checked,
     keywords: val("f-keywords"), exclude_terms: val("f-exclude_terms"),
@@ -307,13 +312,13 @@ function renderMobileBanner(m) {
   banner.classList.remove("ok", "warn");
   if (m.state === "ok") {
     banner.classList.add("ok");
-    txt.innerHTML = "✓ <b>mobile.de</b> aktiv – Cookies gültig.";
+    txt.innerHTML = "✓ <b>mobile.de</b> autark aktiv (Playwright Firefox Headless – kein PC-Browser nötig).";
   } else if (m.state === "expired") {
     banner.classList.add("warn");
-    txt.innerHTML = "⚠ <b>mobile.de</b>: Cookies abgelaufen/ungültig – bitte aktualisieren.";
+    txt.innerHTML = "⚠ <b>mobile.de</b>: Modus wird automatisch synchronisiert.";
   } else {
-    banner.classList.add("warn");
-    txt.innerHTML = "⚠ <b>mobile.de</b> ist aktiv, aber es sind keine Cookies hinterlegt.";
+    banner.classList.add("ok");
+    txt.innerHTML = "✓ <b>mobile.de</b> aktiv.";
   }
 }
 

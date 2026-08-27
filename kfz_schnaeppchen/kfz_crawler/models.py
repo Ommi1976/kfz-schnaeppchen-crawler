@@ -13,8 +13,8 @@ _BATTERY_KWH_RE = re.compile(
     re.IGNORECASE,
 )
 _EV_RANGE_RE = re.compile(
-    r"(?:reichweite|range)\D{0,24}(\d{2,4})\s*km|"
-    r"(\d{2,4})\s*km\D{0,24}(?:reichweite|range)",
+    r"(?<!gesamt)(?:reichweite|range)\D{0,24}(\d{2,4})\s*km|"
+    r"(\d{2,4})\s*km\D{0,24}(?<!gesamt)(?:reichweite|range)",
     re.IGNORECASE,
 )
 
@@ -143,6 +143,9 @@ class SearchQuery:
     power_to: Optional[int] = None       # Leistung bis … PS
     seller: str = ""                     # haendler | privat
     doors: str = ""                      # "" | "2/3" | "4/5"
+    # Standort & Umkreis:
+    zip_code: str = ""                   # 5-stellige PLZ (z. B. "66111")
+    radius_km: Optional[int] = None      # Umkreis in km (z. B. 50, 100, 200)
     # Zustand & Umwelt (Phase 2, server-seitig bei AutoScout24):
     emission_class: str = ""             # euro4 | euro5 | euro6 | euro6d | euro6e
     drivetrain: str = ""                 # allrad | front | heck
@@ -188,6 +191,9 @@ class SearchQuery:
         def s(key: str) -> str:
             return str(d.get(key, "") or "").strip().lower()
 
+        def raw_s(key: str) -> str:
+            return str(d.get(key, "") or "").strip()
+
         def i(key: str):
             v = d.get(key)
             if v in (None, "", "null"):
@@ -216,6 +222,8 @@ class SearchQuery:
             power_to=i("power_to"),
             seller=s("seller"),
             doors=s("doors"),
+            zip_code=raw_s("zip_code"),
+            radius_km=i("radius_km"),
             emission_class=s("emission_class"),
             drivetrain=s("drivetrain"),
             include_damaged=bool(d.get("include_damaged", False)),
@@ -241,6 +249,7 @@ class SearchQuery:
             "fuel": self.fuel, "transmission": self.transmission,
             "body_type": self.body_type, "power_from": self.power_from,
             "power_to": self.power_to, "seller": self.seller, "doors": self.doors,
+            "zip_code": self.zip_code, "radius_km": self.radius_km,
             "emission_class": self.emission_class, "drivetrain": self.drivetrain,
             "include_damaged": self.include_damaged,
             "ev_range_from": self.ev_range_from, "battery_from_kwh": self.battery_from_kwh,

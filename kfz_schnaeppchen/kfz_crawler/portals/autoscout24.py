@@ -93,6 +93,11 @@ class AutoScout24(BasePortal):
         # Nur wenn ausdrücklich gewünscht, wieder einschließen.
         if query.include_damaged:
             params.append("damaged_listing=include")
+        # Standort & Umkreis (zip / zipradius)
+        if query.zip_code:
+            params.append(f"zip={query.zip_code}")
+            if query.radius_km:
+                params.append(f"zipradius={query.radius_km}")
         # Ausstattung (eq=<id>,<id>,…)
         eq = [str(i) for i in (query.equipment or []) if i in VALID_EQUIPMENT_IDS]
         if eq:
