@@ -236,16 +236,21 @@ async function loadDeals() {
       const battInfo = d.battery_kwh != null
         ? `<span class="batt-badge" title="Akku-Kapazität">⚡ ${d.battery_kwh} kWh</span>`
         : "";
-      const evBadges = (sohBadge || battInfo) ? `<div class="ev-badges">${battInfo}${sohBadge}</div>` : "";
+      const rangeInfo = d.ev_range_km != null
+        ? `<span class="range-badge" title="Reichweite">🌐 ~${d.ev_range_km} km</span>`
+        : "";
+      const batteryCell = (battInfo || sohBadge || rangeInfo)
+        ? `<div class="battery-cell">${battInfo}${sohBadge}${rangeInfo}</div>`
+        : `<span class="muted">–</span>`;
 
       return `<tr class="${rowcls}">
         <td class="markcell">${mark}</td>
         <td><span class="portal-badge ${pcls}">${escapeHtml(d.portal || "")}</span></td>
         <td class="title">
           <div>${escapeHtml(d.title || "")}</div>
-          ${evBadges}
           ${d.is_suspicious ? `<div class="reason">${escapeHtml(d.reasons || "")}</div>` : ""}
         </td>
+        <td class="battery-col">${batteryCell}</td>
         <td class="num">${euro(d.price)}</td>
         <td class="num">${euro(d.market_price)}</td>
         <td class="num discount ${discountClass(d.discount)}">${disc}</td>

@@ -38,12 +38,26 @@ def test_extract_ev_range_km():
 
 
 def test_infer_battery_and_range():
-    l = Listing(portal="AS24", title="Kona Elektro 64 kWh 484 km Reichweite SoH: 95%", url="http://x")
-    infer_listing_battery(l)
-    infer_listing_range(l)
-    assert l.battery_kwh == 64.0
-    assert l.battery_soh == 95.0
-    assert l.ev_range_km == 484
+    # 1. Explizit im Text
+    l1 = Listing(portal="AS24", title="Kona Elektro 64 kWh 484 km Reichweite SoH: 95%", url="http://x")
+    infer_listing_battery(l1)
+    infer_listing_range(l1)
+    assert l1.battery_kwh == 64.0
+    assert l1.battery_soh == 95.0
+    assert l1.ev_range_km == 484
+
+    # 2. Aus Modell-Katalog abgeleitet (ohne explizite kWh-Nennung im Text)
+    l2 = Listing(portal="mobile.de", title="Volkswagen ID.3 Pure Performance LED ACC NAVI", url="http://x")
+    infer_listing_battery(l2)
+    infer_listing_range(l2)
+    assert l2.battery_kwh == 55.0
+    assert l2.ev_range_km == 350
+
+    l3 = Listing(portal="mobile.de", title="Volkswagen ID.4 Pro Performance Matrix IQ", url="http://x")
+    infer_listing_battery(l3)
+    infer_listing_range(l3)
+    assert l3.battery_kwh == 82.0
+    assert l3.ev_range_km == 520
 
 
 def test_is_non_pkw():

@@ -69,21 +69,111 @@ def extract_ev_range_km(text: str | None) -> Optional[int]:
     return None
 
 
+# Modell-Katalog bekannter Elektrofahrzeuge: (Regex, Akku brutto/netto kWh, Reichweite WLTP km)
+_KNOWN_EV_CATALOG = [
+    # VW ID.3
+    (re.compile(r"\bid\.?3\b.*?\b(?:pure\s+performance|pure)\b", re.I), 55.0, 350),
+    (re.compile(r"\bid\.?3\b.*?\b(?:pro\s*s|pro-s)\b", re.I), 82.0, 550),
+    (re.compile(r"\bid\.?3\b.*?\b(?:pro\s+performance|pro)\b", re.I), 62.0, 425),
+    (re.compile(r"\bid\.?3\b", re.I), 58.0, 420),
+    # VW ID.4 / ID.5
+    (re.compile(r"\bid\.?[45]\b.*?\b(?:pure)\b", re.I), 55.0, 360),
+    (re.compile(r"\bid\.?[45]\b.*?\b(?:pro\s*s|pro-s)\b", re.I), 82.0, 530),
+    (re.compile(r"\bid\.?[45]\b.*?\b(?:pro\s+performance|pro|gtx|1st)\b", re.I), 82.0, 520),
+    (re.compile(r"\bid\.?[45]\b", re.I), 77.0, 500),
+    # Cupra Born
+    (re.compile(r"\bborn\b.*?\b(?:77|e-boost\s*77)\b", re.I), 77.0, 548),
+    (re.compile(r"\bborn\b.*?\b(?:58|150\s*kw|170\s*kw)\b", re.I), 58.0, 424),
+    (re.compile(r"\bborn\b", re.I), 58.0, 424),
+    # Skoda Enyaq
+    (re.compile(r"\benyaq\b.*?\b(?:80|80x|85|rs|82)\b", re.I), 82.0, 535),
+    (re.compile(r"\benyaq\b.*?\b(?:60)\b", re.I), 62.0, 400),
+    (re.compile(r"\benyaq\b.*?\b(?:50)\b", re.I), 55.0, 350),
+    (re.compile(r"\benyaq\b", re.I), 77.0, 500),
+    # Audi Q4
+    (re.compile(r"\bq4\b.*?\b(?:35)\b", re.I), 55.0, 340),
+    (re.compile(r"\bq4\b.*?\b(?:40|45|50|55)\b", re.I), 82.0, 520),
+    (re.compile(r"\bq4\b", re.I), 77.0, 500),
+    # Tesla Model 3 / Y
+    (re.compile(r"\bmodel\s*3\b.*?\b(?:long\s*range|maximale\s*reichweite|dual\s*motor|performance)\b", re.I), 78.5, 602),
+    (re.compile(r"\bmodel\s*3\b.*?\b(?:standard|range\s*plus|sr\+|rwd)\b", re.I), 60.0, 491),
+    (re.compile(r"\bmodel\s*3\b", re.I), 60.0, 491),
+    (re.compile(r"\bmodel\s*y\b.*?\b(?:long\s*range|maximale\s*reichweite|dual\s*motor|performance)\b", re.I), 78.5, 533),
+    (re.compile(r"\bmodel\s*y\b.*?\b(?:standard|rwd)\b", re.I), 60.0, 455),
+    (re.compile(r"\bmodel\s*y\b", re.I), 75.0, 500),
+    # Mercedes EQ
+    (re.compile(r"\beqa\s*250\+", re.I), 70.5, 530),
+    (re.compile(r"\beqa\s*(?:250|300|350)\b", re.I), 66.5, 430),
+    (re.compile(r"\beqb\s*(?:250|300|350)\b", re.I), 66.5, 420),
+    (re.compile(r"\beqe\s*(?:300|350)\b", re.I), 89.0, 620),
+    (re.compile(r"\beqe\s*(?:43|53|500)\b", re.I), 90.6, 500),
+    (re.compile(r"\beqc\s*400\b", re.I), 80.0, 415),
+    # BMW
+    (re.compile(r"\bi3\s*s?\b.*?\b120\s*ah\b", re.I), 42.2, 305),
+    (re.compile(r"\bi3\s*s?\b.*?\b94\s*ah\b", re.I), 33.2, 255),
+    (re.compile(r"\bi3\s*s?\b.*?\b60\s*ah\b", re.I), 22.0, 190),
+    (re.compile(r"\bix3\b", re.I), 80.0, 460),
+    (re.compile(r"\bi4\b.*?\b(?:edrive35)\b", re.I), 70.2, 480),
+    (re.compile(r"\bi4\b.*?\b(?:edrive40|m50)\b", re.I), 83.9, 585),
+    (re.compile(r"\bix1\b", re.I), 64.7, 440),
+    # Hyundai / Kia
+    (re.compile(r"\bioniq\s*5\b.*?\b(?:77|77\.4|72\.6|84)\b", re.I), 77.4, 480),
+    (re.compile(r"\bioniq\s*5\b.*?\b(?:58)\b", re.I), 58.0, 384),
+    (re.compile(r"\bioniq\s*5\b", re.I), 72.6, 450),
+    (re.compile(r"\bioniq\s*6\b", re.I), 77.4, 614),
+    (re.compile(r"\bkona\b.*?\b(?:64|65\.4|150\s*kw|204\s*ps)\b", re.I), 64.0, 484),
+    (re.compile(r"\bkona\b.*?\b(?:39|39\.2|100\s*kw|136\s*ps)\b", re.I), 39.2, 305),
+    (re.compile(r"\bev6\b", re.I), 77.4, 528),
+    (re.compile(r"\be-niro\b|\bniro\s*ev\b", re.I), 64.8, 460),
+    # Renault / Fiat / Sonstige
+    (re.compile(r"\bmegane\b.*?\b(?:ev60|60\s*kwh|220\s*ps)\b", re.I), 60.0, 450),
+    (re.compile(r"\bmegane\b.*?\b(?:ev40|40\s*kwh|130\s*ps)\b", re.I), 40.0, 300),
+    (re.compile(r"\bzoe\b.*?\b(?:ze\s*50|r110|r135|52)\b", re.I), 52.0, 390),
+    (re.compile(r"\bzoe\b.*?\b(?:ze\s*40|41)\b", re.I), 41.0, 300),
+    (re.compile(r"\b500e\b|\bfiat\s*500\s*e\b", re.I), 42.0, 320),
+    (re.compile(r"\bsmart\s*#1\b", re.I), 66.0, 440),
+    (re.compile(r"\bsmart\s*eq\b|\bfortwo\s*eq\b|\bforfour\s*eq\b", re.I), 17.6, 135),
+    (re.compile(r"\bora\s*(?:03|funky\s*cat)\b.*?\b400\b", re.I), 63.0, 420),
+    (re.compile(r"\bora\s*(?:03|funky\s*cat)\b", re.I), 48.0, 310),
+    (re.compile(r"\bnissan\s*leaf\b.*?\b(?:e\+|62)\b", re.I), 62.0, 385),
+    (re.compile(r"\bnissan\s*leaf\b", re.I), 40.0, 270),
+    (re.compile(r"\bpeugeot\s*e-?208\b|\bopel\s*corsa-?e\b", re.I), 50.0, 360),
+    (re.compile(r"\bpeugeot\s*e-?2008\b|\bopel\s*mokka-?e\b", re.I), 50.0, 340),
+]
+
+
+def infer_ev_specs_from_model(text: str | None) -> tuple[Optional[float], Optional[int]]:
+    """Gibt (akku_kwh, reichweite_km) anhand bekannter E-Auto-Modellmuster zurück."""
+    if not text:
+        return None, None
+    for pattern, kwh, rng in _KNOWN_EV_CATALOG:
+        if pattern.search(text):
+            return kwh, rng
+    return None, None
+
+
 def infer_listing_battery(listing: "Listing") -> None:
-    """Füllt den Akkuwert und SoH aus Titel/Text nach, falls das Portal ihn nicht liefert."""
+    """Füllt den Akkuwert und SoH aus Titel/Text/Modellkatalog nach."""
     text = f"{listing.title or ''} {getattr(listing, 'body', '') or ''}"
     if listing.battery_kwh is None:
         listing.battery_kwh = extract_battery_kwh(text)
+        if listing.battery_kwh is None:
+            kwh, _ = infer_ev_specs_from_model(text)
+            if kwh is not None:
+                listing.battery_kwh = kwh
     if listing.battery_soh is None:
         listing.battery_soh = extract_battery_soh(text)
 
 
 def infer_listing_range(listing: "Listing") -> None:
-    """Füllt die elektrische Reichweite aus Titel/Text nach."""
-    if listing.ev_range_km is not None:
-        return
+    """Füllt die elektrische Reichweite aus Titel/Text/Modellkatalog nach."""
     text = f"{listing.title or ''} {getattr(listing, 'body', '') or ''}"
-    listing.ev_range_km = extract_ev_range_km(text)
+    if listing.ev_range_km is None:
+        listing.ev_range_km = extract_ev_range_km(text)
+        if listing.ev_range_km is None:
+            _, rng = infer_ev_specs_from_model(text)
+            if rng is not None:
+                listing.ev_range_km = rng
 
 
 @dataclass

@@ -73,9 +73,12 @@ class Kleinanzeigen(BasePortal):
 
     def search(self, query: SearchQuery) -> List[Listing]:
         results: List[Listing] = []
-        for page in range(1, self.max_pages + 1):
+        pages_to_fetch = max(self.max_pages, 4)
+        for page in range(1, pages_to_fetch + 1):
             url = self._build_url(query, page)
             resp = self._get(url)
+            if not resp or not resp.text:
+                break
             items = self._parse(resp.text, query)
             if not items:
                 break
