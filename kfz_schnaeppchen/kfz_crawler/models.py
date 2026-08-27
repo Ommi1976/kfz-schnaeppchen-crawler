@@ -19,7 +19,9 @@ _EV_RANGE_RE = re.compile(
 )
 _BATTERY_SOH_RE = re.compile(
     r"\bsoh\s*[:=]?\s*(\d{2,3}(?:[.,]\d+)?)\s*%?|"
-    r"\b(?:batterie|akku)(?:gesundheit|zustand|kapazit[aä]t)\s*[:=]?\s*(\d{2,3}(?:[.,]\d+)?)\s*%|"
+    r"\b(?:batterie|akku)(?:-?\s*status|gesundheit|zustand|kapazit[aä]t)\D{0,30}(\d{2,3}(?:[.,]\d+)?)\s*%|"
+    r"\b(?:batterie-information|batterie-status)\D{0,40}(\d{2,3}(?:[.,]\d+)?)\s*%|"
+    r"\b(\d{2,3}(?:[.,]\d+)?)\s*%\s*(?:sehr\s*gut|gut|ausgezeichnet)\b|"
     r"\bstate\s+of\s+health\s*[:=]?\s*(\d{2,3}(?:[.,]\d+)?)\s*%?",
     re.IGNORECASE,
 )
@@ -41,18 +43,18 @@ def extract_battery_kwh(text: str | None) -> Optional[float]:
 
 
 def extract_battery_soh(text: str | None) -> Optional[float]:
-    """Erkennt den State of Health (SoH in %) aus Texten, z. B. ``SOH 96%`` oder ``Batteriezustand 97%``."""
+    """Erkennt den State of Health (SoH in %) aus Texten, z. B. ``Batterie-Status 94.6%``, ``SOH 96%`` oder ``Batteriezustand 97%``."""
     if not text:
         return None
     for match in _BATTERY_SOH_RE.finditer(str(text)):
-        value = match.group(1) or match.group(2) or match.group(3)
-        if value:
-            try:
-                num = float(value.replace(",", "."))
-                if 50.0 <= num <= 100.0:
-                    return round(num, 1)
-            except ValueError:
-                continue
+        for val in match.groups():
+            if val:
+                try:
+                    num = float(val.replace(",", "."))
+                    if 50.0 <= num <= 100.0:
+                        return round(num, 1)
+                except ValueError:
+                    continue
     return None
 
 

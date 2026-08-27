@@ -26,6 +26,10 @@ def test_extract_battery_soh():
     assert extract_battery_soh("Nissan Leaf Batteriezustand 97%") == 97.0
     assert extract_battery_soh("VW ID.3 Akkugesundheit: 92%") == 92.0
     assert extract_battery_soh("Tesla Model 3 State of Health 98%") == 98.0
+    # mobile.de Batterie-Information Widget
+    assert extract_battery_soh("Batterie-Information Batterie-Status 94.6% Sehr gut Reichweite (WLTP) 546 km") == 94.6
+    assert extract_battery_soh("Batterie-Status: 94,8 %") == 94.8
+    assert extract_battery_soh("94.6% Sehr gut") == 94.6
     assert extract_battery_soh("Auto mit 10 % SoH") is None  # Unter 50% unplausibel
     assert extract_battery_soh(None) is None
 

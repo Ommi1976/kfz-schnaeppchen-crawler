@@ -7,8 +7,9 @@ import logging
 import re
 from typing import List, Optional
 import requests
+from bs4 import BeautifulSoup
 
-from kfz_crawler.models import Listing, extract_battery_soh
+from kfz_crawler.models import Listing, extract_battery_soh, extract_ev_range_km, extract_battery_kwh
 
 logger = logging.getLogger(__name__)
 
@@ -50,7 +51,7 @@ def extract_soh_from_image_urls(image_urls: List[str], max_images: int = 4, time
     sorted_urls = sorted(
         image_urls,
         key=lambda u: (
-            0 if any(k in u.lower() for k in ["cert", "test", "dok", "doc", "bericht", "aviloo", "dekra", "tacho"]) else 1
+            0 if any(k in u.lower() for k in ["cert", "test", "dok", "doc", "bericht", "aviloo", "dekra", "tacho", "batterie"]) else 1
         )
     )
 
@@ -76,6 +77,30 @@ def extract_soh_from_image_urls(image_urls: List[str], max_images: int = 4, time
             continue
 
     return None
+
+
+def parse_mobile_de_detail_html(html: str, listing: Listing) -> None:
+    """Extrahiert Batterie-Information, Detailtext und Galeriebilder aus der mobile.de Detailseite."""
+    if not html:
+        return
+    soup = BeautifulSoup(html, "lxml")
+    
+    full_text = soup.get_text(" ", strip=True)
+    if full_text:
+        listing.body = f"{getattr(listing, 'body', '') or ''} {full_text}".strip()
+        
+    imgs = [img.get("src") or img.get("data-src") for img in soup.select("img[src], img[data-src]")]
+    valid_imgs = [u for u in imgs if u and u.startswith("http") and not u.endswith(".svg")]
+    if valid_imgs:
+        existing = getattr(listing, "image_urls", []) or []
+        for img_url in valid_imgs:
+            if img_url not in existing:
+                existing.append(img_url)
+        listing.image_urls = existing
+        
+    from kfz_crawler.models import infer_listing_battery, infer_listing_range
+    infer_listing_battery(listing, check_images=True)
+    infer_listing_range(listing)
 
 
 def enrich_listing_battery_deep(listing: Listing, image_urls: Optional[List[str]] = None) -> bool:
