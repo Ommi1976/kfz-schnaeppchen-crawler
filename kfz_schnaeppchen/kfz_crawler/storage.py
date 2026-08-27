@@ -54,6 +54,7 @@ class SeenStore:
                 body          TEXT,
                 image_urls    TEXT,
                 warranty      TEXT,
+                location      TEXT,
                 location_zip  TEXT,
                 location_city TEXT,
                 distance_km   INTEGER,
@@ -71,6 +72,7 @@ class SeenStore:
             "ALTER TABLE deals ADD COLUMN body TEXT",
             "ALTER TABLE deals ADD COLUMN image_urls TEXT",
             "ALTER TABLE deals ADD COLUMN warranty TEXT",
+            "ALTER TABLE deals ADD COLUMN location TEXT",
             "ALTER TABLE deals ADD COLUMN location_zip TEXT",
             "ALTER TABLE deals ADD COLUMN location_city TEXT",
             "ALTER TABLE deals ADD COLUMN distance_km INTEGER",
@@ -236,8 +238,8 @@ class SeenStore:
                 "INSERT INTO deals "
                 "(fingerprint, search_name, portal, title, url, price, market_price, "
                 " discount, year, mileage, fuel, battery_kwh, battery_soh, ev_range_km, is_deal, is_suspicious, "
-                " reasons, body, image_urls, warranty, location_zip, location_city, distance_km, first_seen) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+                " reasons, body, image_urls, warranty, location, location_zip, location_city, distance_km, first_seen) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
                 " ON CONFLICT(fingerprint) DO UPDATE SET "
                 "search_name=excluded.search_name, portal=excluded.portal, title=excluded.title, "
                 "url=excluded.url, price=excluded.price, market_price=excluded.market_price, "
@@ -247,6 +249,7 @@ class SeenStore:
                 "reasons=excluded.reasons, body=COALESCE(excluded.body, deals.body), "
                 "image_urls=COALESCE(excluded.image_urls, deals.image_urls), "
                 "warranty=COALESCE(excluded.warranty, deals.warranty), "
+                "location=COALESCE(excluded.location, deals.location), "
                 "location_zip=COALESCE(excluded.location_zip, deals.location_zip), "
                 "location_city=COALESCE(excluded.location_city, deals.location_city), "
                 "distance_km=COALESCE(excluded.distance_km, deals.distance_km)",
@@ -271,6 +274,7 @@ class SeenStore:
                     listing.body,
                     imgs_json,
                     listing.warranty,
+                    listing.location,
                     listing.location_zip,
                     listing.location_city,
                     listing.distance_km,
