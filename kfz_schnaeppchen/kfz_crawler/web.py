@@ -154,10 +154,19 @@ async def lifespan(app: FastAPI):
         app.state.store.close()
 
 
+class NoCacheStaticFiles(StaticFiles):
+    async def get_response(self, path: str, scope):
+        response = await super().get_response(path, scope)
+        response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+        response.headers["Pragma"] = "no-cache"
+        response.headers["Expires"] = "0"
+        return response
+
+
 app = FastAPI(title="KFZ Schnäppchen Crawler", version=__version__, lifespan=lifespan)
 
 if WEB_DIR.exists():
-    app.mount("/static", StaticFiles(directory=WEB_DIR), name="static")
+    app.mount("/static", NoCacheStaticFiles(directory=WEB_DIR), name="static")
 
 
 @app.get("/", response_class=HTMLResponse)
