@@ -51,13 +51,13 @@ def test_infer_battery_and_range():
     infer_listing_battery(l2)
     infer_listing_range(l2)
     assert l2.battery_kwh == 55.0
-    assert l2.ev_range_km == 350
+    assert l2.ev_range_km == 352
 
     l3 = Listing(portal="mobile.de", title="Volkswagen ID.4 Pro Performance Matrix IQ", url="http://x")
     infer_listing_battery(l3)
     infer_listing_range(l3)
     assert l3.battery_kwh == 82.0
-    assert l3.ev_range_km == 520
+    assert l3.ev_range_km == 522
 
 
 def test_is_non_pkw():

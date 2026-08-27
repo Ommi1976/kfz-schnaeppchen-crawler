@@ -153,14 +153,25 @@ def infer_ev_specs_from_model(text: str | None) -> tuple[Optional[float], Option
 
 
 def infer_listing_battery(listing: "Listing", check_images: bool = False) -> None:
-    """Füllt den Akkuwert und SoH aus Titel/Text/Modellkatalog und optional OCR nach."""
+    """Füllt den Akkuwert und SoH nach:
+    1. Priorität (im Zweifel): Expliziter Wert aus dem Inseratstext/Titel.
+    2. Priorität: Interne Referenzdatenbank (ev_database).
+    """
     text = f"{listing.title or ''} {getattr(listing, 'body', '') or ''}"
-    if listing.battery_kwh is None:
-        listing.battery_kwh = extract_battery_kwh(text)
-        if listing.battery_kwh is None:
+    explicit_kwh = extract_battery_kwh(text)
+    if explicit_kwh is not None:
+        listing.battery_kwh = explicit_kwh
+    elif listing.battery_kwh is None:
+        try:
+            from kfz_crawler.ev_database import lookup_ev_spec
+            spec = lookup_ev_spec(listing.title, getattr(listing, "body", ""))
+            if spec:
+                listing.battery_kwh = spec.battery_gross_kwh
+        except Exception:
             kwh, _ = infer_ev_specs_from_model(text)
             if kwh is not None:
                 listing.battery_kwh = kwh
+
     if listing.battery_soh is None:
         listing.battery_soh = extract_battery_soh(text)
         if listing.battery_soh is None and check_images and getattr(listing, "image_urls", None):
@@ -172,11 +183,21 @@ def infer_listing_battery(listing: "Listing", check_images: bool = False) -> Non
 
 
 def infer_listing_range(listing: "Listing") -> None:
-    """Füllt die elektrische Reichweite aus Titel/Text/Modellkatalog nach."""
+    """Füllt die elektrische Reichweite nach:
+    1. Priorität (im Zweifel): Expliziter Wert aus dem Inseratstext/Titel.
+    2. Priorität: Interne Referenzdatenbank (ev_database).
+    """
     text = f"{listing.title or ''} {getattr(listing, 'body', '') or ''}"
-    if listing.ev_range_km is None:
-        listing.ev_range_km = extract_ev_range_km(text)
-        if listing.ev_range_km is None:
+    explicit_rng = extract_ev_range_km(text)
+    if explicit_rng is not None:
+        listing.ev_range_km = explicit_rng
+    elif listing.ev_range_km is None:
+        try:
+            from kfz_crawler.ev_database import lookup_ev_spec
+            spec = lookup_ev_spec(listing.title, getattr(listing, "body", ""))
+            if spec:
+                listing.ev_range_km = spec.wltp_range_km
+        except Exception:
             _, rng = infer_ev_specs_from_model(text)
             if rng is not None:
                 listing.ev_range_km = rng

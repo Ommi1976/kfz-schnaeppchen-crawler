@@ -1,0 +1,40 @@
+﻿from kfz_crawler.models import Listing, infer_listing_battery, infer_listing_range
+from kfz_crawler.ev_database import lookup_ev_spec
+
+def test_ev_database_lookup():
+    spec1 = lookup_ev_spec("Volkswagen ID.3 Pure Performance 110 kW LED NAVI")
+    assert spec1 is not None
+    assert spec1.model == "ID.3"
+    assert spec1.battery_gross_kwh == 55.0
+    assert spec1.wltp_range_km == 352
+
+    spec2 = lookup_ev_spec("Tesla Model 3 Long Range AWD")
+    assert spec2 is not None
+    assert spec2.model == "Model 3"
+    assert spec2.battery_gross_kwh == 78.5
+    assert spec2.wltp_range_km == 602
+
+    spec3 = lookup_ev_spec("Mercedes EQB 300 4MATIC")
+    assert spec3 is not None
+    assert spec3.battery_gross_kwh == 66.5
+
+def test_priority_listing_overrides_database():
+    # Inserat hat abweichenden/speziellen Akkuwert im Text -> Inseratswert hat Vorrang!
+    l = Listing(
+        portal="mobile.de",
+        title="Volkswagen ID.3 Pro mit speziellem 60 kWh Akku",
+        url="http://x",
+    )
+    infer_listing_battery(l)
+    assert l.battery_kwh == 60.0  # 60 kWh aus dem Inserat, nicht die 62 kWh aus DB
+
+def test_fallback_database_when_no_text_kwh():
+    l = Listing(
+        portal="mobile.de",
+        title="Volkswagen ID.4 Pro Performance Matrix",
+        url="http://x",
+    )
+    infer_listing_battery(l)
+    infer_listing_range(l)
+    assert l.battery_kwh == 82.0
+    assert l.ev_range_km == 522
