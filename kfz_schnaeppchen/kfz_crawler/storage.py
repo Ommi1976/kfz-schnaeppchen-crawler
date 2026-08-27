@@ -53,6 +53,10 @@ class SeenStore:
                 reasons       TEXT,
                 body          TEXT,
                 image_urls    TEXT,
+                warranty      TEXT,
+                location_zip  TEXT,
+                location_city TEXT,
+                distance_km   INTEGER,
                 first_seen    REAL
             )
             """
@@ -66,6 +70,10 @@ class SeenStore:
             "ALTER TABLE deals ADD COLUMN reasons TEXT",
             "ALTER TABLE deals ADD COLUMN body TEXT",
             "ALTER TABLE deals ADD COLUMN image_urls TEXT",
+            "ALTER TABLE deals ADD COLUMN warranty TEXT",
+            "ALTER TABLE deals ADD COLUMN location_zip TEXT",
+            "ALTER TABLE deals ADD COLUMN location_city TEXT",
+            "ALTER TABLE deals ADD COLUMN distance_km INTEGER",
         ]:
             try:
                 self.conn.execute(ddl)
@@ -227,15 +235,21 @@ class SeenStore:
             self.conn.execute(
                 "INSERT INTO deals "
                 "(fingerprint, search_name, portal, title, url, price, market_price, "
-                " discount, year, mileage, fuel, battery_kwh, battery_soh, ev_range_km, is_deal, is_suspicious, reasons, body, image_urls, first_seen) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+                " discount, year, mileage, fuel, battery_kwh, battery_soh, ev_range_km, is_deal, is_suspicious, "
+                " reasons, body, image_urls, warranty, location_zip, location_city, distance_km, first_seen) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
                 " ON CONFLICT(fingerprint) DO UPDATE SET "
                 "search_name=excluded.search_name, portal=excluded.portal, title=excluded.title, "
                 "url=excluded.url, price=excluded.price, market_price=excluded.market_price, "
                 "discount=excluded.discount, year=excluded.year, mileage=excluded.mileage, "
                 "fuel=excluded.fuel, battery_kwh=excluded.battery_kwh, battery_soh=excluded.battery_soh, "
                 "ev_range_km=excluded.ev_range_km, is_deal=excluded.is_deal, is_suspicious=excluded.is_suspicious, "
-                "reasons=excluded.reasons, body=COALESCE(excluded.body, deals.body), image_urls=COALESCE(excluded.image_urls, deals.image_urls)",
+                "reasons=excluded.reasons, body=COALESCE(excluded.body, deals.body), "
+                "image_urls=COALESCE(excluded.image_urls, deals.image_urls), "
+                "warranty=COALESCE(excluded.warranty, deals.warranty), "
+                "location_zip=COALESCE(excluded.location_zip, deals.location_zip), "
+                "location_city=COALESCE(excluded.location_city, deals.location_city), "
+                "distance_km=COALESCE(excluded.distance_km, deals.distance_km)",
                 (
                     listing.fingerprint,
                     search_name,
@@ -256,6 +270,10 @@ class SeenStore:
                     "; ".join(listing.suspicious_reasons or []),
                     listing.body,
                     imgs_json,
+                    listing.warranty,
+                    listing.location_zip,
+                    listing.location_city,
+                    listing.distance_km,
                     time.time(),
                 ),
             )

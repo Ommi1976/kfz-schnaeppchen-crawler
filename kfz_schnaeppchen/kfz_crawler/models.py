@@ -206,6 +206,51 @@ def infer_listing_range(listing: "Listing") -> None:
                 listing.ev_range_km = rng
 
 
+_WARRANTY_PATTERNS = [
+    re.compile(r"\b(\d{1,2}\s*(?:Jahre?|J\.)\s*/\s*(?:\d{2,3}(?:\.000|\s*tkm|\s*k)?\s*km))\b", re.I),
+    re.compile(r"\b(?:batterie-?garantie|herstellergarantie|werksgarantie)\s*[:=]?\s*([^\n\r<,;]{3,35})", re.I),
+    re.compile(r"\b(garantie\s+bis\s+\d{2}/\d{4})\b", re.I),
+    re.compile(r"\b(\d{1,2}\s*Monate?\s*(?:Gebrauchtwagen-?|Hersteller-?|Werks-?)?Garantie)\b", re.I),
+    re.compile(r"\b(\d{1,2}\s*Jahre?\s*(?:Gebrauchtwagen-?|Hersteller-?|Werks-?)?Garantie)\b", re.I),
+    re.compile(r"\b(12\s*Monate\s*Garantie|24\s*Monate\s*Garantie|36\s*Monate\s*Garantie)\b", re.I),
+    re.compile(r"\b(Herstellergarantie|Werksgarantie|Gebrauchtwagengarantie)\b", re.I),
+]
+
+
+def extract_warranty(text: str | None) -> Optional[str]:
+    """Erkennt Batterie- oder Fahrzeuggarantien aus Texten."""
+    if not text:
+        return None
+    for pat in _WARRANTY_PATTERNS:
+        m = pat.search(str(text))
+        if m:
+            val = m.group(1).strip()
+            if "nicht" in val.lower() or "kein" in val.lower() or len(val) < 3:
+                continue
+            return val
+    return None
+
+
+def infer_listing_details(listing: "Listing", query_zip: Optional[str] = None) -> None:
+    """Extrahiert Garantie, Standort-PLZ, Stadt und Distanz."""
+    text = f"{listing.title or ''} {getattr(listing, 'body', '') or ''}"
+    if listing.warranty is None:
+        listing.warranty = extract_warranty(text)
+
+    if listing.location:
+        try:
+            from kfz_crawler.geo import parse_location, calculate_distance_km
+            zip_code, city = parse_location(listing.location)
+            if zip_code:
+                listing.location_zip = zip_code
+            if city:
+                listing.location_city = city
+            if query_zip and listing.location_zip:
+                listing.distance_km = calculate_distance_km(query_zip, listing.location_zip)
+        except Exception:
+            pass
+
+
 @dataclass
 class Listing:
     """Ein einzelnes Fahrzeug-Inserat, portal-übergreifend normalisiert."""
@@ -227,6 +272,10 @@ class Listing:
     ev_range_km: Optional[int] = None     # elektrische Reichweite (km)
     battery_kwh: Optional[float] = None   # Batteriekapazität (kWh)
     battery_soh: Optional[float] = None   # Batteriezustand / State of Health (%)
+    warranty: Optional[str] = None       # Garantie (z. B. "8 Jahre / 160.000 km", "12 Monate")
+    location_zip: Optional[str] = None   # Postleitzahl des Standorts
+    location_city: Optional[str] = None  # Stadt des Standorts
+    distance_km: Optional[int] = None    # Entfernung in km zum Suchstandort
     image_urls: list[str] = field(default_factory=list, compare=False)
 
     # Wird vom DealFinder gefüllt:

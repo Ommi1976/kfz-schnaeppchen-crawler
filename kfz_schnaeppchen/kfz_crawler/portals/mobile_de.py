@@ -195,11 +195,15 @@ class MobileDe(BasePortal):
                     existing.append(img_url)
             listing.image_urls = existing
 
+            # Garantie & Standort anreichern
+            from ..models import infer_listing_details
+            infer_listing_details(listing, getattr(query, "zip_code", None))
+
             # OCR-Fallback: Zertifikatsbilder (AVILOO, DEKRA etc.) scannen
             if listing.battery_soh is None and listing.image_urls:
                 try:
                     from ..battery_analyzer import extract_soh_from_image_urls
-                    ocr_soh = extract_soh_from_image_urls(listing.image_urls, max_images=6)
+                    ocr_soh = extract_soh_from_image_urls(listing.image_urls, max_images=8)
                     if ocr_soh is not None:
                         listing.battery_soh = ocr_soh
                         logger.info("SoH=%.1f%% per Bild-OCR (AVILOO/DEKRA): %s", ocr_soh, listing.title[:60])
@@ -232,7 +236,8 @@ class MobileDe(BasePortal):
             full_card_text = art.get_text(" ", strip=True)
             imgs = [img.get("src") or img.get("data-src") for img in art.select("img[src], img[data-src]")]
             image_urls = [u for u in imgs if u and u.startswith("http") and not u.endswith(".svg")]
-            listings.append(Listing(
+            loc = snode.get_text(" ", strip=True)[:60] if snode else None
+            l = Listing(
                 portal=self.name,
                 title=title[:120],
                 url=url,
@@ -241,11 +246,14 @@ class MobileDe(BasePortal):
                 mileage=det["mileage"],
                 fuel=det["fuel"],
                 power_ps=det["power_ps"],
-                location=snode.get_text(" ", strip=True)[:60] if snode else None,
+                location=loc,
                 body=full_card_text,
                 image_urls=image_urls,
                 raw_id=lid,
-            ))
+            )
+            from ..models import infer_listing_details
+            infer_listing_details(l)
+            listings.append(l)
         return listings
 
     @staticmethod

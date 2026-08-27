@@ -279,11 +279,23 @@ async function loadDeals() {
         ? `<div class="battery-cell">${battInfo}${sohBadge}${rangeInfo}</div>`
         : `<span class="muted">–</span>`;
 
+      const locText = d.location_city || d.location || "";
+      const locBadge = locText
+        ? `<span class="badge-loc" title="${escapeHtml(d.location || '')}">📍 ${escapeHtml(locText)}${d.distance_km ? ` · ${d.distance_km} km` : ''}</span>`
+        : "";
+      const warrantyBadge = d.warranty
+        ? `<span class="badge-warranty" title="${escapeHtml(d.warranty)}">🛡️ ${escapeHtml(d.warranty)}</span>`
+        : "";
+      const subInfo = (locBadge || warrantyBadge)
+        ? `<div class="sub-info">${locBadge}${warrantyBadge}</div>`
+        : "";
+
       return `<tr class="${rowcls}">
         <td class="markcell">${mark}</td>
         <td><span class="portal-badge ${pcls}">${escapeHtml(d.portal || "")}</span></td>
         <td class="title">
           <div class="t-main">${escapeHtml(d.title || "")}</div>
+          ${subInfo}
           ${d.is_suspicious ? `<div class="reason">${escapeHtml(d.reasons || "")}</div>` : ""}
         </td>
         <td class="battery-col">${batteryCell}</td>

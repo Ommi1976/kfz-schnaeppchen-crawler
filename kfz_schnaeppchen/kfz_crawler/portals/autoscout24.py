@@ -155,24 +155,27 @@ class AutoScout24(BasePortal):
                     or v.get("firstRegistration")
                     or ""
                 )
-                listings.append(
-                    Listing(
-                        portal=self.name,
-                        title=self._title(it),
-                        url=self._url(it),
-                        price=price,
-                        year=self._extract_year(first_registration),
-                        mileage=self._to_int(tr.get("mileage")),
-                        fuel=v.get("fuelType"),
-                        location=(it.get("location") or {}).get("city"),
-                        transmission=self._norm_gear(v.get("transmissionType") or tr.get("transmission")),
-                        power_ps=power_ps,
-                        body=f"{v.get('bodyType') or ''} {detail_text}".strip() or None,
-                        ev_range_km=extract_ev_range_km(detail_text),
-                        image_urls=[img for img in it.get("images", []) if isinstance(img, str)],
-                        raw_id=str(it.get("id") or ""),
-                    )
+                loc = it.get("location") or {}
+                loc_str = f"{loc.get('zip', '')} {loc.get('city', '')}".strip() or loc.get("city")
+                l = Listing(
+                    portal=self.name,
+                    title=self._title(it),
+                    url=self._url(it),
+                    price=price,
+                    year=self._extract_year(first_registration),
+                    mileage=self._to_int(tr.get("mileage")),
+                    fuel=v.get("fuelType"),
+                    location=loc_str,
+                    transmission=self._norm_gear(v.get("transmissionType") or tr.get("transmission")),
+                    power_ps=power_ps,
+                    body=f"{v.get('bodyType') or ''} {detail_text}".strip() or None,
+                    ev_range_km=extract_ev_range_km(detail_text),
+                    image_urls=[img for img in it.get("images", []) if isinstance(img, str)],
+                    raw_id=str(it.get("id") or ""),
                 )
+                from ..models import infer_listing_details
+                infer_listing_details(l)
+                listings.append(l)
             except Exception:
                 continue
         return listings

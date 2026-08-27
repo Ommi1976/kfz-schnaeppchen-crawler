@@ -115,6 +115,8 @@ class Kleinanzeigen(BasePortal):
                 image_urls=image_urls,
                 raw_id=art.get("data-adid"),
             )
+            from ..models import infer_listing_details
+            infer_listing_details(listing, getattr(query, "zip_code", None))
             if self._matches(listing, query):
                 listings.append(listing)
         return listings
