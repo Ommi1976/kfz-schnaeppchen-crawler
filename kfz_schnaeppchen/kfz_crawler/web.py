@@ -197,6 +197,7 @@ async def status():
         "deal_threshold": cfg.settings.deal_threshold,
         "total_deals": app.state.store.deal_count(deals_only=True),
         "total_listings": app.state.store.total_count(),
+        "portal_counts": app.state.store.count_deals_by_portal(),
         "searches": searches,
         "last_report": app.state.last_report,
         "mobile": _mobile_status(app),
@@ -312,9 +313,9 @@ async def run_one(search_id: str):
 
 
 @app.get("/api/deals")
-async def deals(search: str | None = None, limit: int = 400, deals_only: bool = False):
+async def deals(search: str | None = None, limit: int = 400, deals_only: bool = False, portal: str | None = None):
     rows = app.state.store.list_deals(
-        limit=min(limit, 2000), search_name=search, deals_only=deals_only
+        limit=min(limit, 2000), search_name=search, deals_only=deals_only, portal=portal
     )
     # Bereits gespeicherte Treffer stammen ggf. aus einer früheren Version der
     # Suche. Bei einer nachträglich gesetzten Akku-Mindestgröße müssen sie
@@ -332,7 +333,17 @@ async def deals(search: str | None = None, limit: int = 400, deals_only: bool = 
                 continue
         filtered.append(row)
     rows = filtered
-    return {"count": len(rows), "deals": rows}
+
+    # Portal-Aufteilung für die aktuelle Suche & Deals-Filterung berechnen
+    portal_counts = {}
+    all_filtered_rows = app.state.store.list_deals(
+        limit=min(limit, 2000), search_name=search, deals_only=deals_only
+    )
+    for r in all_filtered_rows:
+        p = r.get("portal") or "Unbekannt"
+        portal_counts[p] = portal_counts.get(p, 0) + 1
+
+    return {"count": len(rows), "deals": rows, "portal_counts": portal_counts}
 
 
 @app.post("/api/run")

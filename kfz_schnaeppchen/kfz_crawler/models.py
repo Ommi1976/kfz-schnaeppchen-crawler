@@ -17,6 +17,12 @@ _EV_RANGE_RE = re.compile(
     r"(\d{2,4})\s*km\D{0,24}(?<!gesamt)(?:reichweite|range)",
     re.IGNORECASE,
 )
+_BATTERY_SOH_RE = re.compile(
+    r"\bsoh\s*[:=]?\s*(\d{2,3}(?:[.,]\d+)?)\s*%?|"
+    r"\b(?:batterie|akku)(?:gesundheit|zustand|kapazit[aä]t)\s*[:=]?\s*(\d{2,3}(?:[.,]\d+)?)\s*%|"
+    r"\bstate\s+of\s+health\s*[:=]?\s*(\d{2,3}(?:[.,]\d+)?)\s*%?",
+    re.IGNORECASE,
+)
 
 
 def extract_battery_kwh(text: str | None) -> Optional[float]:
@@ -34,6 +40,22 @@ def extract_battery_kwh(text: str | None) -> Optional[float]:
     return max(values) if values else None
 
 
+def extract_battery_soh(text: str | None) -> Optional[float]:
+    """Erkennt den State of Health (SoH in %) aus Texten, z. B. ``SOH 96%`` oder ``Batteriezustand 97%``."""
+    if not text:
+        return None
+    for match in _BATTERY_SOH_RE.finditer(str(text)):
+        value = match.group(1) or match.group(2) or match.group(3)
+        if value:
+            try:
+                num = float(value.replace(",", "."))
+                if 50.0 <= num <= 100.0:
+                    return round(num, 1)
+            except ValueError:
+                continue
+    return None
+
+
 def extract_ev_range_km(text: str | None) -> Optional[int]:
     """Erkennt eine elektrische Reichweite aus Texten wie ``455 km Reichweite``."""
     if not text:
@@ -48,11 +70,12 @@ def extract_ev_range_km(text: str | None) -> Optional[int]:
 
 
 def infer_listing_battery(listing: "Listing") -> None:
-    """Füllt den Akkuwert aus Titel/Text nach, falls das Portal ihn nicht liefert."""
-    if listing.battery_kwh is not None:
-        return
+    """Füllt den Akkuwert und SoH aus Titel/Text nach, falls das Portal ihn nicht liefert."""
     text = f"{listing.title or ''} {getattr(listing, 'body', '') or ''}"
-    listing.battery_kwh = extract_battery_kwh(text)
+    if listing.battery_kwh is None:
+        listing.battery_kwh = extract_battery_kwh(text)
+    if listing.battery_soh is None:
+        listing.battery_soh = extract_battery_soh(text)
 
 
 def infer_listing_range(listing: "Listing") -> None:
@@ -83,6 +106,7 @@ class Listing:
     body: Optional[str] = None           # Karosserieform (Freitext/normalisiert)
     ev_range_km: Optional[int] = None     # elektrische Reichweite (km)
     battery_kwh: Optional[float] = None   # Batteriekapazität (kWh)
+    battery_soh: Optional[float] = None   # Batteriezustand / State of Health (%)
 
     # Wird vom DealFinder gefüllt:
     market_price: Optional[int] = field(default=None, compare=False)

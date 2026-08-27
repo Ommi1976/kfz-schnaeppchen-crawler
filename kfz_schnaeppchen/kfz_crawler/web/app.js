@@ -199,14 +199,27 @@ function mobileSearchUrl(s) {
   return "https://suchen.mobile.de/fahrzeuge/search.html?" + params.toString();
 }
 
+function sohClass(soh) {
+  if (soh == null) return "";
+  if (soh >= 90) return "soh-good";
+  if (soh >= 80) return "soh-mid";
+  return "soh-low";
+}
+
 // ---------- Deals ----------
+let currentPortalFilter = "";
+
 async function loadDeals() {
   const sel = document.getElementById("searchFilter");
   const dealsOnly = document.getElementById("dealsOnly").checked;
   const params = [];
   if (sel.value) params.push(`search=${sel.value}`);
   if (dealsOnly) params.push("deals_only=true");
+  if (currentPortalFilter) params.push(`portal=${encodeURIComponent(currentPortalFilter)}`);
   const data = await getJSON(`${API}/deals${params.length ? "?" + params.join("&") : ""}`);
+  
+  renderPortalFilters(data.portal_counts || {});
+
   const body = document.getElementById("deals-body");
   if (!data.deals.length) {
     body.innerHTML = `<tr><td colspan="10" class="empty">Noch keine Treffer. Lege eine Suche an und klick „Suchen".</td></tr>`;
@@ -216,10 +229,23 @@ async function loadDeals() {
       let mark = "", rowcls = "";
       if (d.is_deal) { mark = `<span class="mark deal" title="Schnäppchen">★</span>`; rowcls = "row-deal"; }
       else if (d.is_suspicious) { mark = `<span class="mark susp" title="${escapeHtml(d.reasons || "verdächtig")}">⚠</span>`; rowcls = "row-susp"; }
+      const pcls = "portal-" + (d.portal || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+      const sohBadge = d.battery_soh != null 
+        ? `<span class="soh-badge ${sohClass(d.battery_soh)}" title="Batteriezustand (State of Health)">🔋 ${d.battery_soh} % SoH</span>`
+        : "";
+      const battInfo = d.battery_kwh != null
+        ? `<span class="batt-badge" title="Akku-Kapazität">⚡ ${d.battery_kwh} kWh</span>`
+        : "";
+      const evBadges = (sohBadge || battInfo) ? `<div class="ev-badges">${battInfo}${sohBadge}</div>` : "";
+
       return `<tr class="${rowcls}">
         <td class="markcell">${mark}</td>
-        <td><span class="portal-badge">${escapeHtml(d.portal || "")}</span></td>
-        <td class="title">${escapeHtml(d.title || "")}${d.is_suspicious ? `<div class="reason">${escapeHtml(d.reasons || "")}</div>` : ""}</td>
+        <td><span class="portal-badge ${pcls}">${escapeHtml(d.portal || "")}</span></td>
+        <td class="title">
+          <div>${escapeHtml(d.title || "")}</div>
+          ${evBadges}
+          ${d.is_suspicious ? `<div class="reason">${escapeHtml(d.reasons || "")}</div>` : ""}
+        </td>
         <td class="num">${euro(d.price)}</td>
         <td class="num">${euro(d.market_price)}</td>
         <td class="num discount ${discountClass(d.discount)}">${disc}</td>
@@ -231,7 +257,37 @@ async function loadDeals() {
     }).join("");
   }
   document.getElementById("footer-info").textContent =
-    `${data.count} Treffer angezeigt${dealsOnly ? " (nur Schnäppchen)" : ""} · Auto-Aktualisierung alle 20 s`;
+    `${data.count} Treffer angezeigt${dealsOnly ? " (nur Schnäppchen)" : ""}${currentPortalFilter ? ` · Filter: ${currentPortalFilter}` : ""} · Auto-Aktualisierung alle 20 s`;
+}
+
+function renderPortalFilters(counts) {
+  const box = document.getElementById("portal-filters");
+  if (!box) return;
+  const portals = ["mobile.de", "AutoScout24", "Kleinanzeigen"];
+  let totalAll = 0;
+  for (const k in counts) totalAll += counts[k];
+
+  const items = [
+    { id: "", label: "Alle Portale", count: totalAll }
+  ];
+  for (const p of portals) {
+    items.push({ id: p, label: p, count: counts[p] || 0 });
+  }
+
+  box.innerHTML = items.map((it) => {
+    const active = currentPortalFilter === it.id ? "active" : "";
+    return `<button type="button" class="portal-pill ${active}" data-portal="${escapeHtml(it.id)}">
+      <span class="p-name">${escapeHtml(it.label)}</span>
+      <span class="p-count">${it.count}</span>
+    </button>`;
+  }).join("");
+
+  box.querySelectorAll(".portal-pill").forEach((btn) => {
+    btn.onclick = () => {
+      currentPortalFilter = btn.dataset.portal;
+      loadDeals();
+    };
+  });
 }
 
 // ---------- Formular ----------

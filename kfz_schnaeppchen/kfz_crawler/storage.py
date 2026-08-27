@@ -46,6 +46,7 @@ class SeenStore:
                 mileage       INTEGER,
                 fuel          TEXT,
                 battery_kwh   REAL,
+                battery_soh   REAL,
                 ev_range_km   INTEGER,
                 is_deal       INTEGER DEFAULT 0,
                 is_suspicious INTEGER DEFAULT 0,
@@ -56,6 +57,7 @@ class SeenStore:
         )
         for ddl in [
             "ALTER TABLE deals ADD COLUMN battery_kwh REAL",
+            "ALTER TABLE deals ADD COLUMN battery_soh REAL",
             "ALTER TABLE deals ADD COLUMN ev_range_km INTEGER",
             "ALTER TABLE deals ADD COLUMN is_deal INTEGER DEFAULT 0",
             "ALTER TABLE deals ADD COLUMN is_suspicious INTEGER DEFAULT 0",
@@ -208,14 +210,14 @@ class SeenStore:
             self.conn.execute(
                 "INSERT INTO deals "
                 "(fingerprint, search_name, portal, title, url, price, market_price, "
-                " discount, year, mileage, fuel, battery_kwh, ev_range_km, is_deal, is_suspicious, reasons, first_seen) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+                " discount, year, mileage, fuel, battery_kwh, battery_soh, ev_range_km, is_deal, is_suspicious, reasons, first_seen) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
                 " ON CONFLICT(fingerprint) DO UPDATE SET "
                 "search_name=excluded.search_name, portal=excluded.portal, title=excluded.title, "
                 "url=excluded.url, price=excluded.price, market_price=excluded.market_price, "
                 "discount=excluded.discount, year=excluded.year, mileage=excluded.mileage, "
-                "fuel=excluded.fuel, battery_kwh=excluded.battery_kwh, ev_range_km=excluded.ev_range_km, "
-                "is_deal=excluded.is_deal, is_suspicious=excluded.is_suspicious, reasons=excluded.reasons",
+                "fuel=excluded.fuel, battery_kwh=excluded.battery_kwh, battery_soh=excluded.battery_soh, "
+                "ev_range_km=excluded.ev_range_km, is_deal=excluded.is_deal, is_suspicious=excluded.is_suspicious, reasons=excluded.reasons",
                 (
                     listing.fingerprint,
                     search_name,
@@ -229,6 +231,7 @@ class SeenStore:
                     listing.mileage,
                     listing.fuel,
                     listing.battery_kwh,
+                    listing.battery_soh,
                     listing.ev_range_km,
                     1 if listing.is_deal else 0,
                     1 if listing.is_suspicious else 0,
@@ -264,7 +267,7 @@ class SeenStore:
         return False
 
     def list_deals(self, limit: int = 300, search_name: str | None = None,
-                   deals_only: bool = False) -> List[dict]:
+                   deals_only: bool = False, portal: str | None = None) -> List[dict]:
         with self._lock:
             where = []
             params: list = []
@@ -273,6 +276,9 @@ class SeenStore:
                 params.append(search_name)
             if deals_only:
                 where.append("is_deal = 1")
+            if portal:
+                where.append("portal = ?")
+                params.append(portal)
             wsql = (" WHERE " + " AND ".join(where)) if where else ""
             # Deals zuerst, dann nach Rabatt, dann neueste.
             params.append(limit)
@@ -282,6 +288,23 @@ class SeenStore:
                 params,
             )
             return [dict(r) for r in cur.fetchall()]
+
+    def count_deals_by_portal(self, search_name: str | None = None,
+                              deals_only: bool = False) -> dict:
+        with self._lock:
+            where = []
+            params: list = []
+            if search_name:
+                where.append("search_name = ?")
+                params.append(search_name)
+            if deals_only:
+                where.append("is_deal = 1")
+            wsql = (" WHERE " + " AND ".join(where)) if where else ""
+            cur = self.conn.execute(
+                f"SELECT portal, COUNT(*) as c FROM deals{wsql} GROUP BY portal",
+                params,
+            )
+            return {r["portal"]: int(r["c"]) for r in cur.fetchall()}
 
     def deal_count(self, deals_only: bool = True) -> int:
         with self._lock:

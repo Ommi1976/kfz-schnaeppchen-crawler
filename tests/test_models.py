@@ -3,6 +3,7 @@ from kfz_crawler.models import (
     Listing,
     SearchQuery,
     extract_battery_kwh,
+    extract_battery_soh,
     extract_ev_range_km,
     infer_listing_battery,
     infer_listing_range,
@@ -19,6 +20,16 @@ def test_extract_battery_kwh():
     assert extract_battery_kwh("Auto mit 500 kWh") is None  # Unplausibel
 
 
+def test_extract_battery_soh():
+    assert extract_battery_soh("Mercedes EQB 300 Progressive SOH96") == 96.0
+    assert extract_battery_soh("BMW i3 120Ah SoH: 94.5% Batteriezertifikat") == 94.5
+    assert extract_battery_soh("Nissan Leaf Batteriezustand 97%") == 97.0
+    assert extract_battery_soh("VW ID.3 Akkugesundheit: 92%") == 92.0
+    assert extract_battery_soh("Tesla Model 3 State of Health 98%") == 98.0
+    assert extract_battery_soh("Auto mit 10 % SoH") is None  # Unter 50% unplausibel
+    assert extract_battery_soh(None) is None
+
+
 def test_extract_ev_range_km():
     assert extract_ev_range_km("Reichweite bis zu 450 km nach WLTP") == 450
     assert extract_ev_range_km("Elektroauto 520 km Reichweite Top") == 520
@@ -27,10 +38,11 @@ def test_extract_ev_range_km():
 
 
 def test_infer_battery_and_range():
-    l = Listing(portal="AS24", title="Kona Elektro 64 kWh 484 km Reichweite", url="http://x")
+    l = Listing(portal="AS24", title="Kona Elektro 64 kWh 484 km Reichweite SoH: 95%", url="http://x")
     infer_listing_battery(l)
     infer_listing_range(l)
     assert l.battery_kwh == 64.0
+    assert l.battery_soh == 95.0
     assert l.ev_range_km == 484
 
 
