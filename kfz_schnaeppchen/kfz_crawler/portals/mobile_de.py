@@ -50,8 +50,6 @@ class MobileDe(BasePortal):
         pw_from = round(query.power_from / PS_TO_KW) if query.power_from else None
         pw_to = round(query.power_to / PS_TO_KW) if query.power_to else None
         span("pw", pw_from, pw_to)
-        if query.ev_range_from:
-            params.append(f"re={max(50, (query.ev_range_from // 100) * 100)}")
         if query.fuel and query.fuel in FUEL_MAP and query.fuel != "elektro":
             params.append(f"fu={FUEL_MAP[query.fuel]}")
         elif query.fuel == "elektro":

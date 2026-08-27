@@ -83,7 +83,6 @@ def test_mobile_de_url_builder():
     assert "fu=PETROL" in url
     assert "ambc=10115" in url
     assert "rad=100" in url
-    assert "re=300" in url
     assert "q=bmw+320" in url
 
 
