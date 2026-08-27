@@ -74,8 +74,15 @@ def fetch_rendered(
                     t0 = time.time()
                     clicked = False
                     while time.time() - t0 < 8.0:
-                        for b in page.locator("button").all():
-                            txt = (b.text_content() or "").strip().lower()
+                        try:
+                            buttons = page.locator("button").all()
+                        except Exception:
+                            buttons = []
+                        for b in buttons:
+                            try:
+                                txt = (b.text_content() or "").strip().lower()
+                            except Exception:
+                                continue
                             if any(w in txt for w in ["einverstanden", "alle akzeptieren", "zustimmen", "akzeptieren"]):
                                 try:
                                     b.click(timeout=2000)
