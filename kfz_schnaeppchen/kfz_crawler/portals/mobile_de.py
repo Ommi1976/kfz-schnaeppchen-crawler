@@ -59,7 +59,7 @@ class MobileDe(BasePortal):
         if query.transmission and query.transmission in GEAR_MAP:
             params.append(f"tr={GEAR_MAP[query.transmission]}")
         if query.seller and query.seller in SELLER_MAP:
-            params.append(f"cust={SELLER_MAP[query.seller]}")
+            params.append(f"c={SELLER_MAP[query.seller]}")
         if query.zip_code:
             params.append(f"ambc={quote_plus(query.zip_code)}")
             if query.radius_km:
