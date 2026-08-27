@@ -29,7 +29,7 @@ def fetch_rendered(
     engine: str = "firefox",
     wait_until: str = "domcontentloaded",
     timeout_ms: int = 30000,
-    render_delay: float = 1.0,
+    render_delay: float = 0.5,
 ) -> str:
     """Lädt eine URL in Playwright Firefox/Chromium und liefert das gerenderte HTML."""
     try:
@@ -70,14 +70,17 @@ def fetch_rendered(
                 try:
                     page.goto(url, wait_until=wait_until, timeout=timeout_ms)
 
-                    # Warten auf Consent-Banner oder bereits gerenderte Inserate
+                    # Gezieltes Warten auf Consent-Banner & Klick zur Freigabe der Inserate
                     btn_sel = "button:has-text('Einverstanden'), button:has-text('Alle akzeptieren'), button:has-text('Zustimmen'), button:has-text('Akzeptieren')"
                     try:
-                        page.wait_for_selector(f"{btn_sel}, article, [data-testid='search-column']", timeout=8000)
+                        page.wait_for_selector(btn_sel, timeout=7000)
                         btn = page.locator(btn_sel).first
                         if btn.is_visible():
                             btn.click(timeout=1500)
-                            time.sleep(2.0)
+                            try:
+                                page.wait_for_selector("article a[href*='details.html']", timeout=10000)
+                            except Exception:
+                                time.sleep(2.0)
                     except Exception:
                         pass
 
