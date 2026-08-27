@@ -29,7 +29,7 @@ def fetch_rendered(
     engine: str = "firefox",
     wait_until: str = "domcontentloaded",
     timeout_ms: int = 30000,
-    render_delay: float = 2.0,
+    render_delay: float = 3.0,
 ) -> str:
     """Lädt eine URL in Playwright Firefox/Chromium und liefert das gerenderte HTML."""
     try:
@@ -42,20 +42,11 @@ def fetch_rendered(
             engine_obj = getattr(p, engine, p.firefox)
             browser = engine_obj.launch(headless=True)
             try:
-                ctx_args = {
-                    "locale": "de-DE",
-                    "timezone_id": "Europe/Berlin",
-                    "viewport": {"width": 1440, "height": 900},
-                    "extra_http_headers": {
-                        "Accept-Language": "de-DE,de;q=0.9,en-US;q=0.8,en;q=0.7",
-                    },
-                }
-                if proxy:
-                    server = proxy.replace("socks5h://", "socks5://")
-                    ctx_args["proxy"] = {"server": server}
-
-                context = browser.new_context(**ctx_args)
-                page = context.new_page()
+                page = browser.new_page(
+                    locale="de-DE",
+                    timezone_id="Europe/Berlin",
+                    viewport={"width": 1440, "height": 900},
+                )
                 try:
                     # Akamai Session Warmup auf Startseite
                     if "mobile.de" in url:
@@ -69,26 +60,9 @@ def fetch_rendered(
                     if render_delay > 0:
                         time.sleep(render_delay)
 
-                    # Consent-Klick falls Overlay aktiv
-                    try:
-                        for b in page.locator("button").all():
-                            try:
-                                txt = (b.text_content() or "").strip().lower()
-                            except Exception:
-                                continue
-                            if any(w in txt for w in ["einverstanden", "alle akzeptieren", "zustimmen", "akzeptieren"]):
-                                try:
-                                    b.click(timeout=1500)
-                                    time.sleep(2.0)
-                                except Exception:
-                                    pass
-                                break
-                    except Exception:
-                        pass
-
                     html = page.content()
                     return html
                 finally:
-                    context.close()
+                    page.close()
             finally:
                 browser.close()
