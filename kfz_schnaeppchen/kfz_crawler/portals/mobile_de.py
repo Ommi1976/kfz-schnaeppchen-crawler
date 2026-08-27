@@ -110,7 +110,78 @@ class MobileDe(BasePortal):
                 new += 1
             if new == 0:
                 break
+
+        # Detail-Abruf für E-Autos: Batterie-Status aus der Detailseite extrahieren
+        ev_listings = [l for l in results if l.fuel == "elektro" and l.battery_soh is None and l.url]
+        if ev_listings:
+            self._enrich_battery_from_details(ev_listings, query)
+
         return results
+
+    def _enrich_battery_from_details(self, listings: List[Listing], query: SearchQuery) -> None:
+        """Ruft Detailseiten für E-Autos in einer Batch-Session ab und extrahiert Batterie-Status."""
+        try:
+            from ..browser import fetch_rendered_batch
+        except ImportError:
+            return
+
+        from ..models import extract_battery_soh, extract_ev_range_km, extract_battery_kwh
+        import logging
+        logger = logging.getLogger(__name__)
+
+        # Maximal 8 Detailseiten pro Durchlauf, um Rate-Limits zu vermeiden
+        detail_urls = [l.url.split("&searchId")[0].split("&ref=")[0] for l in listings[:8]]
+        srp_url = self._build_url(query, 1)
+
+        try:
+            _, detail_htmls = fetch_rendered_batch(
+                srp_url=srp_url,
+                detail_urls=detail_urls,
+                proxy=self.proxy,
+                engine="firefox",
+            )
+        except Exception as e:
+            logger.warning("Batch-Detailabruf fehlgeschlagen: %s", e)
+            return
+
+        for listing in listings[:8]:
+            clean_url = listing.url.split("&searchId")[0].split("&ref=")[0]
+            html = detail_htmls.get(clean_url)
+            if not html:
+                continue
+
+            soup = BeautifulSoup(html, "lxml")
+            full_text = soup.get_text(" ", strip=True)
+
+            # SoH aus Detailtext extrahieren
+            soh = extract_battery_soh(full_text)
+            if soh is not None:
+                listing.battery_soh = soh
+                logger.info("SoH=%.1f%% aus Detailseite: %s", soh, listing.title[:60])
+
+            # Reichweite aus Detailtext (z.B. "Reichweite (WLTP) 546 km")
+            if listing.ev_range_km is None:
+                rng = extract_ev_range_km(full_text)
+                if rng is not None:
+                    listing.ev_range_km = rng
+
+            # kWh aus Detailtext
+            if listing.battery_kwh is None:
+                kwh = extract_battery_kwh(full_text)
+                if kwh is not None:
+                    listing.battery_kwh = kwh
+
+            # Detailtext als body speichern
+            listing.body = f"{listing.body or ''} {full_text}".strip()[:2000]
+
+            # Zusätzliche Bilder aus Detailseite
+            imgs = [img.get("src") or img.get("data-src") for img in soup.select("img[src], img[data-src]")]
+            valid_imgs = [u for u in imgs if u and u.startswith("http") and not u.endswith(".svg")]
+            existing = listing.image_urls or []
+            for img_url in valid_imgs:
+                if img_url not in existing:
+                    existing.append(img_url)
+            listing.image_urls = existing
 
     # ---- HTML-Karten-Parsing (server-gerendert, mit gültigen Cookies) --
     def _parse_cards(self, html: str) -> List[Listing]:

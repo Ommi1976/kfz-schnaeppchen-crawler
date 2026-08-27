@@ -7,11 +7,13 @@ Sperren (Status 200) passiert.
 
 from __future__ import annotations
 
+import logging
 import sys
 import threading
 import time
-from typing import Optional
+from typing import Dict, List, Optional, Tuple
 
+logger = logging.getLogger(__name__)
 _lock = threading.Lock()
 
 
@@ -66,3 +68,68 @@ def fetch_rendered(
                     page.close()
             finally:
                 browser.close()
+
+
+def fetch_rendered_batch(
+    srp_url: str,
+    detail_urls: List[str],
+    proxy: Optional[str] = None,
+    engine: str = "firefox",
+    timeout_ms: int = 25000,
+    srp_delay: float = 2.0,
+    detail_delay: float = 2.5,
+) -> Tuple[str, Dict[str, str]]:
+    """Lädt die SRP und anschließend Detailseiten in EINER Browser-Session.
+
+    Gibt (srp_html, {detail_url: detail_html, ...}) zurück.
+    """
+    try:
+        from playwright.sync_api import sync_playwright
+    except ImportError as e:
+        raise BrowserUnavailable("Playwright nicht installiert.") from e
+
+    with _lock:
+        with sync_playwright() as p:
+            engine_obj = getattr(p, engine, p.firefox)
+            browser = engine_obj.launch(headless=True)
+            try:
+                page = browser.new_page(
+                    locale="de-DE",
+                    timezone_id="Europe/Berlin",
+                    viewport={"width": 1440, "height": 900},
+                )
+                try:
+                    # 1. Warmup auf Startseite
+                    try:
+                        page.goto("https://www.mobile.de/", wait_until="domcontentloaded", timeout=15000)
+                        time.sleep(1.5)
+                    except Exception:
+                        pass
+
+                    # 2. SRP abrufen (etabliert Akamai-Session)
+                    page.goto(srp_url, wait_until="domcontentloaded", timeout=timeout_ms)
+                    time.sleep(srp_delay)
+                    srp_html = page.content()
+
+                    # 3. Detail-URLs in derselben Session abrufen
+                    details: Dict[str, str] = {}
+                    for url in detail_urls:
+                        try:
+                            page.goto(url, wait_until="domcontentloaded", timeout=timeout_ms)
+                            time.sleep(detail_delay)
+                            html = page.content()
+                            if "zugriff verweigert" not in html.lower()[:500]:
+                                details[url] = html
+                                logger.debug("Detail OK: %s (%d bytes)", url, len(html))
+                            else:
+                                logger.warning("Detail blocked: %s", url)
+                        except Exception as e:
+                            logger.debug("Detail-Fehler %s: %s", url, e)
+                            continue
+
+                    return srp_html, details
+                finally:
+                    page.close()
+            finally:
+                browser.close()
+
