@@ -99,6 +99,12 @@ async def _do_run(app: FastAPI, only_id: str | None = None) -> None:
         try:
             report = await asyncio.to_thread(_run_all, app, only_id)
             app.state.last_report = report
+            # Asynchrone Hintergrund-Bildanalyse für SoH anstoßen (blockiert die UI/Suche nicht)
+            try:
+                from kfz_crawler.battery_analyzer import run_background_image_enrichment
+                asyncio.create_task(asyncio.to_thread(run_background_image_enrichment, app.state.store))
+            except Exception:
+                pass
         finally:
             app.state.running = False
             app.state.last_finished_at = _now_iso()

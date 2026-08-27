@@ -34,3 +34,16 @@ def test_upgrade_image_url_to_highres():
     assert upgrade_image_url_to_highres("https://img.classistatic.de/api/v1/mo-prod/images/xx/xx_27.jpg") == "https://img.classistatic.de/api/v1/mo-prod/images/xx/xx_20.jpg"
     assert upgrade_image_url_to_highres("https://prod.pictures.autoscout24.net/listing-images/xx/250x188.jpg") == "https://prod.pictures.autoscout24.net/listing-images/xx/1280x960.jpg"
     assert upgrade_image_url_to_highres("https://i.ebayimg.com/00/s/MTIwMFgxNjAw/z/xx/$_2.JPG") == "https://i.ebayimg.com/00/s/MTIwMFgxNjAw/z/xx/$_57.JPG"
+
+
+def test_is_potential_document_or_screen():
+    from PIL import Image
+    from kfz_crawler.battery_analyzer import is_potential_document_or_screen
+    
+    # 1. URL mit 'cert' oder 'aviloo' -> True
+    dummy = Image.new("RGB", (100, 100), color=(128, 128, 128))
+    assert is_potential_document_or_screen(dummy, url="http://example.com/aviloo_report.jpg") is True
+    
+    # 2. Helles Dokument (Weiß mit Kontrast) -> True
+    doc = Image.new("RGB", (200, 200), color=(250, 250, 250))
+    assert is_potential_document_or_screen(doc) is True
