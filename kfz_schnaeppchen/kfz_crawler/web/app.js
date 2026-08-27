@@ -101,15 +101,32 @@ async function loadStatus() {
 
   const nextIn = s.next_run_at ? Math.max(0, Math.round((s.next_run_at - Date.now() / 1000) / 60)) : null;
   const cards = [
-    { k: "Schnäppchen", v: s.total_deals ?? "–" },
-    { k: "Inserate gesamt", v: s.total_listings ?? "–" },
-    { k: "Suchen", v: (s.searches || []).length },
-    { k: "Letzter Lauf", v: fmtClock(s.last_finished_at || s.last_run_at) },
-    { k: "Nächster Lauf", v: nextIn == null ? "–" : `in ${nextIn} min` },
-    { k: "Schwelle", v: Math.round((s.deal_threshold || 0) * 100) + " %" },
+    { k: "Schnäppchen", v: s.total_deals ?? "–", id: "card-deals", cls: "card card-deals clickable" },
+    { k: "Inserate gesamt", v: s.total_listings ?? "–", id: "card-all", cls: "card card-all clickable" },
+    { k: "Suchen", v: (s.searches || []).length, cls: "card" },
+    { k: "Letzter Lauf", v: fmtClock(s.last_finished_at || s.last_run_at), cls: "card" },
+    { k: "Nächster Lauf", v: nextIn == null ? "–" : `in ${nextIn} min`, cls: "card" },
+    { k: "Schwelle", v: Math.round((s.deal_threshold || 0) * 100) + " %", cls: "card" },
   ];
   document.getElementById("stats").innerHTML = cards
-    .map((c) => `<div class="card"><div class="k">${c.k}</div><div class="v">${c.v}</div></div>`).join("");
+    .map((c) => `<div class="${c.cls || 'card'}" id="${c.id || ''}"><div class="k">${c.k}</div><div class="v">${c.v}</div></div>`).join("");
+
+  const cDeals = document.getElementById("card-deals");
+  if (cDeals) {
+    cDeals.onclick = () => {
+      document.getElementById("dealsOnly").checked = true;
+      currentPortalFilter = "";
+      loadDeals();
+    };
+  }
+  const cAll = document.getElementById("card-all");
+  if (cAll) {
+    cAll.onclick = () => {
+      document.getElementById("dealsOnly").checked = false;
+      currentPortalFilter = "";
+      loadDeals();
+    };
+  }
 
   const sel = document.getElementById("searchFilter");
   const cur = sel.value;
@@ -218,17 +235,29 @@ async function loadDeals() {
   if (currentPortalFilter) params.push(`portal=${encodeURIComponent(currentPortalFilter)}`);
   const data = await getJSON(`${API}/deals${params.length ? "?" + params.join("&") : ""}`);
   
-  renderPortalFilters(data.portal_counts || {});
+  renderPortalFilters(data.portal_counts || {}, data.deals ? data.deals.filter(x => x.is_deal).length : 0);
 
   const body = document.getElementById("deals-body");
   if (!data.deals.length) {
-    body.innerHTML = `<tr><td colspan="10" class="empty">Noch keine Treffer. Lege eine Suche an und klick „Suchen".</td></tr>`;
+    body.innerHTML = `<tr><td colspan="11" class="empty">Noch keine Treffer. Lege eine Suche an und klick „Suchen".</td></tr>`;
   } else {
     body.innerHTML = data.deals.map((d) => {
-      const disc = d.discount == null ? "" : `${d.discount < 0 ? "+" : "-"}${Math.abs(Math.round(d.discount * 100))} %`;
-      let mark = "", rowcls = "";
-      if (d.is_deal) { mark = `<span class="mark deal" title="Schnäppchen">★</span>`; rowcls = "row-deal"; }
-      else if (d.is_suspicious) { mark = `<span class="mark susp" title="${escapeHtml(d.reasons || "verdächtig")}">⚠</span>`; rowcls = "row-susp"; }
+      const discPct = d.discount == null ? null : Math.abs(Math.round(d.discount * 100));
+      const discText = d.discount == null ? "" : `${d.discount < 0 ? "+" : "-"}${discPct} %`;
+      let mark = "", rowcls = "", discBadge = "";
+
+      if (d.is_deal) {
+        mark = `<span class="mark deal" title="Schnäppchen (≥ 15 % unter Markt)">★</span>`;
+        rowcls = "row-deal";
+        discBadge = `<span class="deal-badge" title="Schnäppchen: ${discPct} % unter Marktwert!">🔥 -${discPct} %</span>`;
+      } else if (d.is_suspicious) {
+        mark = `<span class="mark susp" title="${escapeHtml(d.reasons || "verdächtig")}">⚠</span>`;
+        rowcls = "row-susp";
+        discBadge = `<span class="disc-normal ${discountClass(d.discount)}">${discText}</span>`;
+      } else {
+        discBadge = `<span class="disc-normal ${discountClass(d.discount)}">${discText}</span>`;
+      }
+
       const pcls = "portal-" + (d.portal || "").toLowerCase().replace(/[^a-z0-9]/g, "");
       const sohBadge = d.battery_soh != null 
         ? `<span class="soh-badge ${sohClass(d.battery_soh)}" title="Batteriezustand (State of Health)">🔋 ${d.battery_soh} % SoH</span>`
@@ -247,13 +276,13 @@ async function loadDeals() {
         <td class="markcell">${mark}</td>
         <td><span class="portal-badge ${pcls}">${escapeHtml(d.portal || "")}</span></td>
         <td class="title">
-          <div>${escapeHtml(d.title || "")}</div>
+          <div class="t-main">${escapeHtml(d.title || "")}</div>
           ${d.is_suspicious ? `<div class="reason">${escapeHtml(d.reasons || "")}</div>` : ""}
         </td>
         <td class="battery-col">${batteryCell}</td>
-        <td class="num">${euro(d.price)}</td>
-        <td class="num">${euro(d.market_price)}</td>
-        <td class="num discount ${discountClass(d.discount)}">${disc}</td>
+        <td class="num font-bold">${euro(d.price)}</td>
+        <td class="num muted">${euro(d.market_price)}</td>
+        <td class="num discount-cell">${discBadge}</td>
         <td class="num">${d.year || "–"}</td>
         <td class="num">${km(d.mileage)}</td>
         <td>${timeAgo(d.first_seen)}</td>
@@ -265,14 +294,18 @@ async function loadDeals() {
     `${data.count} Treffer angezeigt${dealsOnly ? " (nur Schnäppchen)" : ""}${currentPortalFilter ? ` · Filter: ${currentPortalFilter}` : ""} · Auto-Aktualisierung alle 20 s`;
 }
 
-function renderPortalFilters(counts) {
+function renderPortalFilters(counts, dealCount) {
   const box = document.getElementById("portal-filters");
   if (!box) return;
   const portals = ["mobile.de", "AutoScout24", "Kleinanzeigen"];
   let totalAll = 0;
   for (const k in counts) totalAll += counts[k];
 
+  const dealsOnly = document.getElementById("dealsOnly").checked;
+  const dCount = dealCount ?? statusCache?.total_deals ?? 0;
+
   const items = [
+    { id: "DEALS_ONLY", label: "🔥 Nur Schnäppchen", count: dCount, isDeal: true },
     { id: "", label: "Alle Portale", count: totalAll }
   ];
   for (const p of portals) {
@@ -280,8 +313,14 @@ function renderPortalFilters(counts) {
   }
 
   box.innerHTML = items.map((it) => {
-    const active = currentPortalFilter === it.id ? "active" : "";
-    return `<button type="button" class="portal-pill ${active}" data-portal="${escapeHtml(it.id)}">
+    let active = "";
+    if (it.isDeal) {
+      active = dealsOnly ? "active deal-active" : "";
+    } else {
+      active = (!dealsOnly && currentPortalFilter === it.id) ? "active" : "";
+    }
+    const extraCls = it.isDeal ? "pill-deals" : "";
+    return `<button type="button" class="portal-pill ${extraCls} ${active}" data-portal="${escapeHtml(it.id)}">
       <span class="p-name">${escapeHtml(it.label)}</span>
       <span class="p-count">${it.count}</span>
     </button>`;
@@ -289,7 +328,14 @@ function renderPortalFilters(counts) {
 
   box.querySelectorAll(".portal-pill").forEach((btn) => {
     btn.onclick = () => {
-      currentPortalFilter = btn.dataset.portal;
+      const pid = btn.dataset.portal;
+      if (pid === "DEALS_ONLY") {
+        document.getElementById("dealsOnly").checked = true;
+        currentPortalFilter = "";
+      } else {
+        document.getElementById("dealsOnly").checked = false;
+        currentPortalFilter = pid;
+      }
       loadDeals();
     };
   });
