@@ -328,15 +328,8 @@ async def deals(search: str | None = None, limit: int = 400, deals_only: bool = 
             battery = row.get("battery_kwh")
             if battery is None:
                 battery = extract_battery_kwh(row.get("title"))
-            if battery is not None:
-                if battery < minimum:
-                    continue
-            else:
-                range_km = row.get("ev_range_km") or extract_ev_range_km(row.get("title"))
-                range_ok = bool(query.ev_range_from and range_km and range_km >= query.ev_range_from)
-                as24_server_checked = bool(query.ev_range_from and row.get("portal") == "AutoScout24")
-                if not (range_ok or as24_server_checked):
-                    continue
+            if battery is not None and battery < minimum:
+                continue
         filtered.append(row)
     rows = filtered
     return {"count": len(rows), "deals": rows}
