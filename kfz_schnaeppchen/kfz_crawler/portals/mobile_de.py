@@ -20,12 +20,15 @@ from ..models import Listing, SearchQuery
 from .base import BasePortal, CookiesExpired, PortalError
 
 FUEL_MAP = {"benzin": "PETROL", "diesel": "DIESEL", "elektro": "ELECTRICITY", "hybrid": "HYBRID"}
+GEAR_MAP = {"schaltgetriebe": "MANUAL_GEAR", "automatik": "AUTOMATIC_GEAR"}
+SELLER_MAP = {"haendler": "DEALER", "händler": "DEALER", "privat": "PRIVATE"}
+PS_TO_KW = 1.35962
 
 
 class MobileDe(BasePortal):
     name = "mobile.de"
     BASE = "https://suchen.mobile.de"
-    PREFERS_BROWSER = False  # kein Browser – curl_cffi + importierte Cookies
+    PREFERS_BROWSER = True  # Autarker Playwright Firefox Abruf
 
     def __init__(self, *args, cookies: str = "", **kwargs):
         super().__init__(*args, **kwargs)
@@ -44,13 +47,19 @@ class MobileDe(BasePortal):
         span("p", query.price_from, query.price_to)
         span("fr", query.year_from, query.year_to)
         span("ml", query.mileage_from, query.mileage_to)
-        span("pw", query.power_from, query.power_to)
+        pw_from = round(query.power_from / PS_TO_KW) if query.power_from else None
+        pw_to = round(query.power_to / PS_TO_KW) if query.power_to else None
+        span("pw", pw_from, pw_to)
         if query.ev_range_from:
             params.append(f"re={max(50, (query.ev_range_from // 100) * 100)}")
         if query.fuel and query.fuel in FUEL_MAP and query.fuel != "elektro":
             params.append(f"fu={FUEL_MAP[query.fuel]}")
         elif query.fuel == "elektro":
             params.append("fu=ELECTRICITY")
+        if query.transmission and query.transmission in GEAR_MAP:
+            params.append(f"tr={GEAR_MAP[query.transmission]}")
+        if query.seller and query.seller in SELLER_MAP:
+            params.append(f"cust={SELLER_MAP[query.seller]}")
         if query.zip_code:
             params.append(f"ambc={quote_plus(query.zip_code)}")
             if query.radius_km:
