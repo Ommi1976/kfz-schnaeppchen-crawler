@@ -29,7 +29,7 @@ def fetch_rendered(
     engine: str = "firefox",
     wait_until: str = "domcontentloaded",
     timeout_ms: int = 30000,
-    render_delay: float = 1.5,
+    render_delay: float = 1.0,
 ) -> str:
     """Lädt eine URL in Playwright Firefox/Chromium und liefert das gerenderte HTML."""
     try:
@@ -69,23 +69,24 @@ def fetch_rendered(
                 page = context.new_page()
                 try:
                     page.goto(url, wait_until=wait_until, timeout=timeout_ms)
-                    if render_delay > 0:
-                        time.sleep(render_delay)
 
-                    # Auto-Dismiss Consent-Banner (z. B. mobile.de "Einverstanden")
+                    # Warten auf Consent-Banner oder bereits gerenderte Inserate
+                    btn_sel = "button:has-text('Einverstanden'), button:has-text('Alle akzeptieren'), button:has-text('Zustimmen'), button:has-text('Akzeptieren')"
                     try:
-                        for b in page.locator("button").all():
-                            txt = (b.text_content() or "").strip().lower()
-                            if txt in ("einverstanden", "alle akzeptieren", "zustimmen", "akzeptieren", "zustimmen & weiter"):
-                                b.click(timeout=1500)
-                                time.sleep(2.5)
-                                break
+                        page.wait_for_selector(f"{btn_sel}, article, [data-testid='search-column']", timeout=8000)
+                        btn = page.locator(btn_sel).first
+                        if btn.is_visible():
+                            btn.click(timeout=1500)
+                            time.sleep(2.0)
                     except Exception:
                         pass
 
+                    if render_delay > 0:
+                        time.sleep(render_delay)
+
                     html = page.content()
                     if len(html) < 30000:
-                        time.sleep(2.5)
+                        time.sleep(2.0)
                         html = page.content()
                     return html
                 finally:
