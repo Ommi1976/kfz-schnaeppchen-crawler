@@ -12,9 +12,8 @@ ENV DEBIAN_FRONTEND=noninteractive
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1
 
-# Abhängigkeiten möglichst über apt (keine Kompilierung nötig -> schneller,
-# stabiler Build). lxml/bs4/requests/yaml kommen als Debian-Pakete; rich und
-# PySocks sind reine Python-Wheels und werden per pip nachgezogen.
+ENV PLAYWRIGHT_BROWSERS_PATH=/opt/playwright-browsers
+
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         python3 \
@@ -28,7 +27,9 @@ RUN apt-get update \
         netbase \
         ca-certificates \
     && python3 -m pip install --no-cache-dir --break-system-packages rich PySocks fastapi uvicorn curl_cffi playwright \
+    && mkdir -p /opt/playwright-browsers \
     && playwright install --with-deps firefox \
+    && chmod -R a+rx /opt/playwright-browsers \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 

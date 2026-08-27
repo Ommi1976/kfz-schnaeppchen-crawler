@@ -4,6 +4,7 @@ set -euo pipefail
 export TZ="Europe/Berlin"
 export PYTHONUNBUFFERED=1
 export DATA_DIR=/data
+export PLAYWRIGHT_BROWSERS_PATH=/opt/playwright-browsers
 
 # Home Assistant mountet /data als root:root. Einmal beim Start korrigieren,
 # danach läuft die App ohne Root-Rechte.
