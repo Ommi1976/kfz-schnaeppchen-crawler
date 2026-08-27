@@ -29,7 +29,7 @@ def fetch_rendered(
     engine: str = "firefox",
     wait_until: str = "domcontentloaded",
     timeout_ms: int = 30000,
-    render_delay: float = 0.5,
+    render_delay: float = 2.0,
 ) -> str:
     """Lädt eine URL in Playwright Firefox/Chromium und liefert das gerenderte HTML."""
     try:
@@ -57,21 +57,19 @@ def fetch_rendered(
                 context = browser.new_context(**ctx_args)
                 page = context.new_page()
                 try:
-                    page.goto(url, wait_until=wait_until, timeout=timeout_ms)
-
-                    # Warten bis Akamai-Challenge-Reload abgeschlossen und die Seite gerendert ist (> 50KB)
-                    t0 = time.time()
-                    html = page.content()
-                    while time.time() - t0 < 8.0:
-                        if len(html) > 50000:
-                            break
-                        time.sleep(0.5)
+                    # Akamai Session Warmup auf Startseite
+                    if "mobile.de" in url:
                         try:
-                            html = page.content()
+                            page.goto("https://www.mobile.de/", wait_until="domcontentloaded", timeout=15000)
+                            time.sleep(1.5)
                         except Exception:
                             pass
 
-                    # Optionaler Consent-Klick
+                    page.goto(url, wait_until=wait_until, timeout=timeout_ms)
+                    if render_delay > 0:
+                        time.sleep(render_delay)
+
+                    # Consent-Klick falls Overlay aktiv
                     try:
                         for b in page.locator("button").all():
                             try:
@@ -81,20 +79,14 @@ def fetch_rendered(
                             if any(w in txt for w in ["einverstanden", "alle akzeptieren", "zustimmen", "akzeptieren"]):
                                 try:
                                     b.click(timeout=1500)
+                                    time.sleep(2.0)
                                 except Exception:
                                     pass
-                                time.sleep(1.0)
                                 break
                     except Exception:
                         pass
 
-                    if render_delay > 0:
-                        time.sleep(render_delay)
-
-                    try:
-                        html = page.content()
-                    except Exception:
-                        pass
+                    html = page.content()
                     return html
                 finally:
                     context.close()
