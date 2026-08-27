@@ -25,8 +25,6 @@ _BLOCK_MARKERS = (
     "access denied",
     "zugriff verweigert",
     "unusual traffic",
-    "sec-if-cpt",
-    "behavioral-content",
 )
 
 
@@ -89,12 +87,18 @@ def fetch_rendered(
     render_delay: float = 1.5,
 ) -> str:
     """Lädt eine URL in Playwright Firefox/Chromium und liefert das gerenderte HTML."""
+    import sys
     with _lock:
         browser = _ensure_browser(engine)
+        is_linux = sys.platform.startswith("linux")
         if engine == "firefox":
-            ua = "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:125.0) Gecko/20100101 Firefox/125.0"
+            ua = ("Mozilla/5.0 (X11; Linux x86_64; rv:125.0) Gecko/20100101 Firefox/125.0"
+                  if is_linux else
+                  "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:125.0) Gecko/20100101 Firefox/125.0")
         else:
-            ua = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+            ua = ("Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+                  if is_linux else
+                  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36")
 
         ctx_args = {
             "locale": "de-DE",
