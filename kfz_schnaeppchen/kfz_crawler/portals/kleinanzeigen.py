@@ -106,6 +106,7 @@ class Kleinanzeigen(BasePortal):
                 year=self._extract_year(listing_text),
                 ev_range_km=extract_ev_range_km(listing_text),
                 location=location,
+                body=listing_text,
                 raw_id=art.get("data-adid"),
             )
             if self._matches(listing, query):

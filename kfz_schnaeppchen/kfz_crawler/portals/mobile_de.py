@@ -50,6 +50,8 @@ class MobileDe(BasePortal):
         pw_from = round(query.power_from / PS_TO_KW) if query.power_from else None
         pw_to = round(query.power_to / PS_TO_KW) if query.power_to else None
         span("pw", pw_from, pw_to)
+        if not query.include_damaged:
+            params.append("dam=0")
         if query.fuel and query.fuel in FUEL_MAP:
             params.append(f"ft={FUEL_MAP[query.fuel]}")
         if query.transmission and query.transmission in GEAR_MAP:
@@ -133,6 +135,7 @@ class MobileDe(BasePortal):
                      or art.select_one("[data-testid='listing-details']"))
             det = self._parse_details(dnode.get_text(" ", strip=True) if dnode else "")
             snode = art.select_one("[data-testid='seller-info']")
+            full_card_text = art.get_text(" ", strip=True)
             listings.append(Listing(
                 portal=self.name,
                 title=title[:120],
@@ -143,7 +146,7 @@ class MobileDe(BasePortal):
                 fuel=det["fuel"],
                 power_ps=det["power_ps"],
                 location=snode.get_text(" ", strip=True)[:60] if snode else None,
-                body=("Unfallfahrzeug" if det["damaged"] else None),
+                body=full_card_text,
                 raw_id=lid,
             ))
         return listings
@@ -171,7 +174,7 @@ class MobileDe(BasePortal):
                 break
         if out["fuel"] is None and ("autogas" in low or "lpg" in low):
             out["fuel"] = "lpg"
-        if "unfallfahrzeug" in low or ("unfall" in low and "unfallfrei" not in low):
+        if "unfallfahrzeug" in low or ("unfall" in low and "unfallfrei" not in low) or ("beschädigt" in low and "unbeschädigt" not in low):
             out["damaged"] = True
         return out
 

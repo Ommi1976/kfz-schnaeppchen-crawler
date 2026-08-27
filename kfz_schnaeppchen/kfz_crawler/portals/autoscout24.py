@@ -167,7 +167,7 @@ class AutoScout24(BasePortal):
                         location=(it.get("location") or {}).get("city"),
                         transmission=self._norm_gear(v.get("transmissionType") or tr.get("transmission")),
                         power_ps=power_ps,
-                        body=v.get("bodyType"),
+                        body=f"{v.get('bodyType') or ''} {detail_text}".strip() or None,
                         ev_range_km=extract_ev_range_km(detail_text),
                         raw_id=str(it.get("id") or ""),
                     )
