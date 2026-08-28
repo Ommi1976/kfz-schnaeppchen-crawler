@@ -17,9 +17,31 @@ $ErrorActionPreference = "Stop"
 
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 $source = (Resolve-Path (Join-Path $repoRoot "kfz_schnaeppchen")).Path
-$versionLine = Select-String -Path (Join-Path $source "config.yaml") -Pattern '^version:\s*"([^"]+)"$'
-if (-not $versionLine) { throw "Version in config.yaml fehlt." }
-$version = $versionLine.Matches[0].Groups[1].Value
+$configPath = Join-Path $source "config.yaml"
+$configContent = [System.IO.File]::ReadAllText($configPath, [System.Text.Encoding]::UTF8)
+
+if ($configContent -match 'version:\s*"(\d+)\.(\d+)\.(\d+)"') {
+    $major = $matches[1]
+    $minor = $matches[2]
+    $patch = [int]$matches[3] + 1
+    $version = "$major.$minor.$patch"
+    
+    # 1. config.yaml aktualisieren
+    $configContent = $configContent -replace 'version:\s*"\d+\.\d+\.\d+"', "version: `"$version`""
+    [System.IO.File]::WriteAllText($configPath, $configContent, [System.Text.Encoding]::UTF8)
+    
+    # 2. index.html Cache-Buster aktualisieren
+    $indexPath = Join-Path $source "kfz_crawler/web/index.html"
+    if (Test-Path -LiteralPath $indexPath) {
+        $indexContent = [System.IO.File]::ReadAllText($indexPath, [System.Text.Encoding]::UTF8)
+        $indexContent = $indexContent -replace '\?v=\d+\.\d+\.\d+', "?v=$version"
+        [System.IO.File]::WriteAllText($indexPath, $indexContent, [System.Text.Encoding]::UTF8)
+    }
+    
+    Write-Host "Inkrementiere Version auf: $version" -ForegroundColor Cyan
+} else {
+    throw "Version im Format 'X.Y.Z' in config.yaml nicht gefunden."
+}
 
 if (-not (Test-Path -LiteralPath $KeyPath -PathType Leaf)) {
     throw "SSH-Key nicht gefunden: $KeyPath"
