@@ -30,7 +30,15 @@ if ($configContent -match 'version:\s*"(\d+)\.(\d+)\.(\d+)"') {
     $configContent = $configContent -replace 'version:\s*"\d+\.\d+\.\d+"', "version: `"$version`""
     [System.IO.File]::WriteAllText($configPath, $configContent, [System.Text.Encoding]::UTF8)
     
-    # 2. index.html Cache-Buster aktualisieren
+    # 2. kfz_crawler/__init__.py aktualisieren
+    $initPyPath = Join-Path $source "kfz_crawler/__init__.py"
+    if (Test-Path -LiteralPath $initPyPath) {
+        $initContent = [System.IO.File]::ReadAllText($initPyPath, [System.Text.Encoding]::UTF8)
+        $initContent = $initContent -replace '__version__\s*=\s*"\d+\.\d+\.\d+"', "__version__ = `"$version`""
+        [System.IO.File]::WriteAllText($initPyPath, $initContent, [System.Text.Encoding]::UTF8)
+    }
+
+    # 3. index.html Cache-Buster aktualisieren
     $indexPath = Join-Path $source "kfz_crawler/web/index.html"
     if (Test-Path -LiteralPath $indexPath) {
         $indexContent = [System.IO.File]::ReadAllText($indexPath, [System.Text.Encoding]::UTF8)
