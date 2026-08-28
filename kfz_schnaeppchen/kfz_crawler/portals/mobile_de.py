@@ -113,16 +113,22 @@ class MobileDe(BasePortal):
         import logging
         logger = logging.getLogger(__name__)
 
-        # Maximal 10 Detailseiten pro Durchlauf für E-Autos abrufen
+        # Maximal 10 Detailseiten pro Durchlauf für E-Autos abrufen.
+        # WICHTIG: die kanonische Karten-URL (…/fahrzeuge/details.html?id=…)
+        # nutzen – die SEO-Form /auto-inserat/car/{id}.html wird von Akamai
+        # geblockt ("Zugriff verweigert") und liefert damit nie einen SoH.
         detail_targets = {}
         for l in listings[:10]:
-            lid = l.raw_id
-            if not lid and l.url:
-                m = re.search(r"id=(\d+)", l.url)
-                if m:
-                    lid = m.group(1)
-            if lid:
-                detail_url = f"https://suchen.mobile.de/auto-inserat/car/{lid}.html"
+            detail_url = l.url or ""
+            if not detail_url or "details.html" not in detail_url:
+                lid = l.raw_id
+                if not lid and l.url:
+                    m = re.search(r"id=(\d+)", l.url)
+                    if m:
+                        lid = m.group(1)
+                if lid:
+                    detail_url = f"https://suchen.mobile.de/fahrzeuge/details.html?id={lid}"
+            if detail_url:
                 detail_targets[detail_url] = l
 
         if not detail_targets:
