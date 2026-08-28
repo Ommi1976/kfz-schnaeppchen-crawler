@@ -23,6 +23,7 @@ class Settings:
     verify_details: bool = False     # #4: Kleinanzeigen-Detailseiten anreichern
     suspicious_discount: float = 0.6  # #5: ab diesem Rabatt gilt ein Inserat als verdächtig
     home_zip: str = "68766"          # eigene PLZ – Basis für die Entfernungsanzeige
+    max_parallel_searches: int = 2   # wie viele Suchen gleichzeitig laufen (CPU-Deckel)
 
 
 @dataclass
@@ -75,6 +76,7 @@ class Config:
             verify_details=bool(s.get("verify_details", False)),
             suspicious_discount=float(s.get("suspicious_discount", 0.6)),
             home_zip=str(s.get("home_zip", "68766") or "68766").strip(),
+            max_parallel_searches=max(1, int(s.get("max_parallel_searches", 2))),
         )
 
         portals = data.get("portals", {}) or {}

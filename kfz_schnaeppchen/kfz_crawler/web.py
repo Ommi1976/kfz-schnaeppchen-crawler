@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from pathlib import Path
@@ -54,18 +55,53 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def _interval_minutes() -> int:
+    """Intervall aus den Add-on-Optionen (mind. 5 Min), robust gegen Fehler."""
+    try:
+        return max(5, int(load_options().get("interval_minutes", 30)))
+    except Exception:
+        return 30
+
+
+def _schedule_next(app: FastAPI) -> None:
+    """Setzt den Zeitpunkt des nächsten geplanten Laufs (Epoch-Sekunden)."""
+    app.state.next_run_at = datetime.now(timezone.utc).timestamp() + _interval_minutes() * 60
+
+
 def _load_cfg() -> Config:
     """Optionen frisch laden, damit Änderungen ohne Neustart greifen."""
     return build_config(load_options())
 
 
+def _run_one_search(cfg: Config, store: SeenStore, spec: dict) -> tuple[str, int]:
+    """Führt eine einzelne Suche aus (thread-safe: Store nutzt intern ein Lock)."""
+    query = SearchQuery.from_dict(spec)
+    try:
+        deals = run_search(cfg, query, store)
+        # Neue Schnäppchen an Home Assistant / Telegram melden.
+        if deals:
+            try:
+                notify_all(cfg.notify, query.name, deals)
+            except Exception:
+                logger.exception("Benachrichtigung fehlgeschlagen")
+        return query.name, len(deals)
+    except Exception as e:  # eine Suche darf die anderen nicht stoppen
+        logger.exception("Suche '%s' fehlgeschlagen: %s", query.name, e)
+        return query.name, -1
+
+
 def _run_all(app: FastAPI, only_id: str | None = None) -> dict:
-    """Führt die (aktiven) Suchen aus der DB aus (blockierend -> via to_thread)."""
+    """Führt die (aktiven) Suchen aus der DB aus – parallel und CPU-gedeckelt.
+
+    Suchen laufen jetzt nebenläufig (bounded über max_parallel_searches). Der
+    Store ist thread-sicher (RLock) und das Browser-Backend serialisiert Firefox
+    global, sodass mobile.de nicht mehrfach gleichzeitig rendert.
+    """
     cfg = _load_cfg()  # globale Einstellungen/Portale/Benachrichtigung
     store: SeenStore = app.state.store
     app.state.cfg = cfg
-    summary = {}
-    total = 0
+
+    specs = []
     for spec in store.list_searches():
         if only_id and spec.get("id") != only_id:
             continue
@@ -73,20 +109,26 @@ def _run_all(app: FastAPI, only_id: str | None = None) -> dict:
         # expliziter Einzellauf über den „Suchen"-Button (only_id) führt sie aus.
         if not only_id and not spec.get("active", True):
             continue
-        query = SearchQuery.from_dict(spec)
-        try:
-            deals = run_search(cfg, query, store)
-            summary[query.name] = len(deals)
-            total += len(deals)
-            # Neue Schnäppchen an Home Assistant / Telegram melden.
-            if deals:
-                try:
-                    notify_all(cfg.notify, query.name, deals)
-                except Exception:
-                    logger.exception("Benachrichtigung fehlgeschlagen")
-        except Exception as e:  # eine Suche darf die anderen nicht stoppen
-            logger.exception("Suche '%s' fehlgeschlagen: %s", query.name, e)
-            summary[query.name] = -1
+        specs.append(spec)
+
+    summary: dict = {}
+    total = 0
+    if not specs:
+        return {"total": 0, "per_search": summary}
+
+    workers = max(1, min(int(getattr(cfg.settings, "max_parallel_searches", 2)), len(specs)))
+    if workers == 1:
+        for spec in specs:
+            name, count = _run_one_search(cfg, store, spec)
+            summary[name] = count
+            total += max(0, count)
+    else:
+        with ThreadPoolExecutor(max_workers=workers) as ex:
+            futures = [ex.submit(_run_one_search, cfg, store, spec) for spec in specs]
+            for fut in as_completed(futures):
+                name, count = fut.result()
+                summary[name] = count
+                total += max(0, count)
     return {"total": total, "per_search": summary}
 
 
@@ -106,6 +148,9 @@ async def _do_run(app: FastAPI, only_id: str | None = None) -> None:
         finally:
             app.state.running = False
             app.state.last_finished_at = _now_iso()
+            # Nach JEDEM Lauf (auch manuell) den nächsten Zeitpunkt fortschreiben,
+            # damit die UI „nächster Lauf" nie leer bleibt.
+            _schedule_next(app)
 
 
 async def _scheduler(app: FastAPI) -> None:
@@ -118,14 +163,8 @@ async def _scheduler(app: FastAPI) -> None:
             raise
         except Exception:
             logger.exception("Scheduler-Durchlauf fehlgeschlagen")
-        interval = max(1, int(getattr(app.state.cfg.settings, "interval_minutes", 30))) \
-            if hasattr(app.state, "cfg") else 30
-        # interval_minutes steckt in den Optionen, nicht in Settings -> neu lesen.
-        try:
-            interval = max(5, int(load_options().get("interval_minutes", 30)))
-        except Exception:
-            interval = 30
-        app.state.next_run_at = datetime.now(timezone.utc).timestamp() + interval * 60
+        interval = _interval_minutes()
+        _schedule_next(app)
         await asyncio.sleep(interval * 60)
 
 
@@ -140,7 +179,9 @@ async def lifespan(app: FastAPI):
     app.state.running = False
     app.state.last_run_at = None
     app.state.last_finished_at = None
-    app.state.next_run_at = None
+    # Direkt einen Erst-Zeitpunkt setzen (Vorlauf 5 s + Intervall), damit die UI
+    # sofort „nächster Lauf" anzeigt und nicht erst nach dem ersten Durchlauf.
+    _schedule_next(app)
     app.state.last_report = {}
     app.state.scheduler = asyncio.create_task(_scheduler(app))
     try:

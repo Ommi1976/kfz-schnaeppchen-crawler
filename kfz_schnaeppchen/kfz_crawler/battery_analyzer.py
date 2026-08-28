@@ -33,7 +33,41 @@ except ImportError:
     HAS_OCR = False
 
 # Tesseract Whitelist für maximale Geschwindigkeit (bis zu 5x schneller)
-_TESS_CONFIG = "--psm 6 -c tessedit_char_whitelist=0123456789%.,ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz:-()/äöüÄÖÜß "
+_TESS_WHITELIST = "0123456789%.,ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz:-()/äöüÄÖÜß "
+
+
+def _tess_cfg(psm: int) -> str:
+    return f"--psm {psm} -c tessedit_char_whitelist={_TESS_WHITELIST}"
+
+
+_OCR_LANG: Optional[str] = None
+
+
+def _resolve_ocr_lang() -> str:
+    """Ermittelt einmalig die verfügbare OCR-Sprache (deu+eng > eng > default)."""
+    global _OCR_LANG
+    if _OCR_LANG is not None:
+        return _OCR_LANG
+    lang = "eng"
+    try:
+        available = set(pytesseract.get_languages(config=""))
+        if "deu" in available and "eng" in available:
+            lang = "deu+eng"
+        elif "deu" in available:
+            lang = "deu"
+        elif "eng" in available:
+            lang = "eng"
+    except Exception:
+        lang = "eng"
+    _OCR_LANG = lang
+    return lang
+
+
+# Negativ/Positiv-Cache pro Bild-URL: verhindert wiederholtes Herunterladen und
+# OCR-en desselben Bildes über mehrere Inserate und Hintergrund-Durchläufe.
+_URL_SOH_CACHE: dict = {}
+_URL_CACHE_LOCK = threading.Lock()
+_URL_CACHE_MAX = 5000
 
 
 def upgrade_image_url_to_highres(url: str) -> str:
@@ -55,33 +89,33 @@ def upgrade_image_url_to_highres(url: str) -> str:
 
 
 def is_potential_document_or_screen(img: Image.Image, url: str = "") -> bool:
-    """Blitzschneller Vorfilter (< 1.5 ms), um normale Autobilder (Felgen, Lack, Sitze) sofort zu überspringen."""
-    # 1. URL-Hinweise prüfen
+    """Vorfilter, der nur eindeutige Auto-Fotos verwirft und im Zweifel OCR zulässt.
+
+    Zertifikate (AVILOO/DEKRA/TÜV) und Diagnose-Screens sind vielfältig: weiße
+    Dokumente, farbige Gauge-Charts auf dunklem Grund, Bordcomputer-Anzeigen.
+    Ein reines Auto-Foto (Lack, Felgen, Sitze) hat dagegen eine ausgewogene
+    Mitten-Helligkeit UND geringe Kontrast-Streuung. Nur DIESE Kombination wird
+    verworfen – alles andere geht in die OCR (der Early-Exit begrenzt die Kosten).
+    """
+    # 1. URL-Hinweise: klar dokumentartig -> immer prüfen
     u_low = (url or "").lower()
     if any(k in u_low for k in ["cert", "test", "dok", "doc", "bericht", "aviloo", "dekra", "tuev", "tüv", "tacho", "batterie", "soh", "diag", "screen", "check"]):
         return True
 
     try:
-        # 2. Extrem kleiner Thumbnail für < 1ms Heuristik
-        thumb = img.resize((32, 32), Image.Resampling.NEAREST).convert("L")
+        thumb = img.resize((48, 48), Image.Resampling.NEAREST).convert("L")
         stat = ImageStat.Stat(thumb)
         mean_val = stat.mean[0]
         stddev_val = stat.stddev[0]
 
-        # Sehr helle Bilder / weiße Dokumente (AVILOO, DEKRA, TÜV)
-        if mean_val > 175:
-            return True
-        # Helles Dokument mit Text & Tabellen
-        if mean_val > 140 and stddev_val > 15:
-            return True
-        # Diagnose-Screenshots / Bordcomputer: Dunkler Screen mit hellem Text
-        if mean_val < 90 and stddev_val > 20:
-            return True
-        # Hohe Varianz (Text-Tabellen)
-        if stddev_val > 55:
-            return True
+        # Reines Auto-Foto: mittlere Helligkeit (95..165) UND niedriger Kontrast
+        # (stddev < 42). Nur solche Bilder werden übersprungen.
+        if 95 <= mean_val <= 165 and stddev_val < 42:
+            return False
 
-        return False
+        # Alles andere (helle Dokumente, dunkle Screens, kontrastreiche Charts)
+        # kommt in die OCR.
+        return True
     except Exception:
         return True
 
@@ -108,32 +142,69 @@ def ocr_image_bytes(image_bytes: bytes, url: str = "") -> Optional[str]:
             img.thumbnail((2000, 2000), Image.Resampling.BILINEAR)
 
         # Graustufen & Kontrast
-        gray = img.convert("L")
-        gray = ImageOps.autocontrast(gray, cutoff=1)
-        enhancer = ImageEnhance.Contrast(gray)
-        enhanced = enhancer.enhance(1.8)
+        gray = ImageOps.autocontrast(img.convert("L"), cutoff=1)
+        enhanced = ImageEnhance.Contrast(gray).enhance(1.8)
 
-        # Schnelle Tesseract-Erkennung mit Whitelist
-        text = pytesseract.image_to_string(enhanced, lang="deu+eng", config=_TESS_CONFIG)
-        return text
+        # Varianten: normal + (bei dunklem Bild) invertiert. Dunkle Diagnose-
+        # Screens haben hellen Text auf dunklem Grund – Tesseract braucht das
+        # Gegenteil, deshalb zusätzlich invertiert erkennen.
+        variants = [enhanced]
+        try:
+            if ImageStat.Stat(gray).mean[0] < 115:
+                variants.append(ImageOps.invert(enhanced))
+        except Exception:
+            pass
+
+        lang = _resolve_ocr_lang()
+        collected: List[str] = []
+        # Zwei PSM-Modi: 6 = Textblock (Tabellen/Zertifikate),
+        # 11 = verstreute Zeichen (große Gauge-/Tacho-Zahlen).
+        for var in variants:
+            for psm in (6, 11):
+                try:
+                    t = pytesseract.image_to_string(var, lang=lang, config=_tess_cfg(psm))
+                except Exception:
+                    t = ""
+                if t and t.strip():
+                    collected.append(t)
+                    # Early-Exit, sobald ein plausibler SoH gefunden ist.
+                    if extract_battery_soh(t) is not None:
+                        return "\n".join(collected)
+
+        return "\n".join(collected) if collected else None
     except Exception as e:
         logger.debug("OCR-Fehler bei Bildanalyse: %s", e)
         return None
 
 
+def _cache_get(url: str):
+    with _URL_CACHE_LOCK:
+        return _URL_SOH_CACHE.get(url, "miss")
+
+
+def _cache_put(url: str, value: Optional[float]) -> None:
+    with _URL_CACHE_LOCK:
+        if len(_URL_SOH_CACHE) >= _URL_CACHE_MAX:
+            _URL_SOH_CACHE.clear()
+        _URL_SOH_CACHE[url] = value
+
+
 def _fetch_and_ocr_single_image(url: str, sess: requests.Session, timeout: float = 4.0) -> Tuple[str, Optional[float]]:
     """Lädt ein einzelnes Bild herunter und führt blitzschnelle OCR durch."""
+    # Cache: dasselbe Bild nicht erneut laden/OCR-en (auch None wird gemerkt).
+    cached = _cache_get(url)
+    if cached != "miss":
+        return url, cached
     try:
         hd_url = upgrade_image_url_to_highres(url)
         resp = sess.get(hd_url, timeout=timeout)
         if resp.status_code != 200 or not resp.content:
+            _cache_put(url, None)
             return url, None
 
         text = ocr_image_bytes(resp.content, url=url)
-        if not text:
-            return url, None
-
-        soh = extract_battery_soh(text)
+        soh = extract_battery_soh(text) if text else None
+        _cache_put(url, soh)
         return url, soh
     except Exception as e:
         logger.debug("Fehler beim OCR-Abruf von %s: %s", url, e)
@@ -157,7 +228,9 @@ def extract_soh_from_image_urls(image_urls: List[str], max_images: int = 15, tim
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
     })
 
-    with ThreadPoolExecutor(max_workers=6) as executor:
+    # Nur 3 Worker: die OCR ist CPU-lastig und läuft im Hintergrund – so bleibt
+    # die Box benutzbar, während der Early-Exit die Latenz kurz hält.
+    with ThreadPoolExecutor(max_workers=3) as executor:
         futures = {executor.submit(_fetch_and_ocr_single_image, u, sess, timeout): u for u in sorted_urls}
         for fut in as_completed(futures):
             try:
@@ -171,8 +244,15 @@ def extract_soh_from_image_urls(image_urls: List[str], max_images: int = 15, tim
     return None
 
 
-def run_background_image_enrichment(store) -> int:
-    """Scannt im Hintergrund alle bestehenden E-Auto-Inserate ohne SoH."""
+# Bereits erfolglos geprüfte Inserate (pro Prozess), damit hoffnungslose
+# Inserate nicht bei jedem Hintergrund-Lauf erneut heruntergeladen/OCR-t werden.
+_OCR_TRIED_FP: set = set()
+# Obergrenze an Inseraten pro Hintergrund-Durchlauf – hält die CPU-Last gedeckelt.
+_BG_MAX_LISTINGS_PER_PASS = 40
+
+
+def run_background_image_enrichment(store, max_listings: int = _BG_MAX_LISTINGS_PER_PASS) -> int:
+    """Scannt im Hintergrund E-Auto-Inserate ohne SoH (CPU-schonend, gedeckelt)."""
     if not HAS_OCR:
         return 0
 
@@ -181,8 +261,13 @@ def run_background_image_enrichment(store) -> int:
     ).fetchall()
 
     found = 0
+    processed = 0
     for r in rows:
         fp = r["fingerprint"]
+        if fp in _OCR_TRIED_FP:
+            continue
+        if processed >= max_listings:
+            break
         title = r["title"]
         imgs_json = r["image_urls"]
         if not imgs_json:
@@ -191,6 +276,10 @@ def run_background_image_enrichment(store) -> int:
             urls = json.loads(imgs_json) if isinstance(imgs_json, str) else imgs_json
             if not urls:
                 continue
+            processed += 1
+            if len(_OCR_TRIED_FP) > 20000:
+                _OCR_TRIED_FP.clear()
+            _OCR_TRIED_FP.add(fp)
             soh = extract_soh_from_image_urls(urls, max_images=10)
             if soh:
                 store.conn.execute("UPDATE deals SET battery_soh = ? WHERE fingerprint = ?", (soh, fp))
@@ -223,7 +312,8 @@ def parse_mobile_de_detail_html(html: str, listing: Listing) -> None:
         listing.image_urls = existing
 
     from kfz_crawler.models import infer_listing_battery, infer_listing_range
-    infer_listing_battery(listing, check_images=True)
+    # Nur Text-Auswertung im Suchpfad – Bild-OCR erledigt der Hintergrund-Daemon.
+    infer_listing_battery(listing, check_images=False)
     infer_listing_range(listing)
 
 

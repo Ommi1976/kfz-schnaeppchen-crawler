@@ -37,6 +37,18 @@ def test_extract_battery_soh():
     assert extract_battery_soh("SOH) 96,9 %") == 96.9  # OCR kann Klammer verschlucken
     assert extract_battery_soh("Auto mit 10 % SoH") is None  # Unter 50% unplausibel
     assert extract_battery_soh(None) is None
+    # Erweiterte Erkennung (v1.0.2): Ziffern (Datum) zwischen Stichwort und Wert,
+    # weitere Formulierungen, sowie robuste Negativfälle (kWh ist kein SoH).
+    assert extract_battery_soh("Batteriezustand lt. AVILOO-Test vom 12.03.2024: 92 %") == 92.0
+    assert extract_battery_soh("Restkapazität 90%") == 90.0
+    assert extract_battery_soh("verbleibende Kapazität 86%") == 86.0
+    assert extract_battery_soh("Batteriezertifikat: 89 %") == 89.0
+    assert extract_battery_soh("Batteriegesundheit 97 %") == 97.0
+    assert extract_battery_soh("94,6 % (SoH)") == 94.6
+    assert extract_battery_soh("SOH: 96") == 96.0  # ohne Prozentzeichen
+    assert extract_battery_soh("Batteriekapazität 62 kWh") is None  # kWh ≠ SoH
+    assert extract_battery_soh("Akku 62 kWh, Reichweite 400 km") is None
+    assert extract_battery_soh("Finanzierung mit 0% Anzahlung") is None
 
 
 def test_extract_ev_range_km():

@@ -47,8 +47,11 @@ def _search_one_portal(cfg: Config, key: str, query: SearchQuery, store=None) ->
         if hasattr(portal, "enrich"):
             found = portal.enrich(found, query, force=cfg.settings.verify_details)
         # Viele Portale liefern die Akku-Kapazität nur im Titel (z. B. "62 kWh").
+        # WICHTIG: hier NUR Text-Auswertung (billig). Die teure Bild-OCR läuft
+        # asynchron im Hintergrund-Daemon (run_background_image_enrichment) und
+        # blockiert damit weder den Suchlauf noch die CPU während der Suche.
         for listing in found:
-            infer_listing_battery(listing, check_images=True)
+            infer_listing_battery(listing, check_images=False)
             infer_listing_range(listing)
         console.print(f"  [dim]{portal.name}: {len(found)} Treffer[/dim]")
         return found

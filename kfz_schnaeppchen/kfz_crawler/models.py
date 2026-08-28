@@ -17,13 +17,28 @@ _EV_RANGE_RE = re.compile(
     r"(\d{2,4})\s*km\D{0,24}(?<!gesamt)(?:reichweite|range)",
     re.IGNORECASE,
 )
+# Stichwörter, die eindeutig den Akku-Gesundheitszustand meinen (auch ohne %
+# verwertbar, weil sie nie eine kWh/km-Angabe bezeichnen).
+_SOH_STRONG = r"(?:soh|state\s+of\s+health|batteriegesundheit|akkugesundheit|gesundheitszustand)"
+# Alle Stichwörter inkl. der mehrdeutigen (Kapazität/Status): hier ist ein
+# nachfolgendes % nötig, damit keine kWh-Angabe fälschlich als SoH gilt.
+_SOH_ANY = (
+    r"(?:soh|state\s+of\s+health"
+    r"|batterie(?:-?\s*(?:status|information|gesundheit|zustand|zertifikat|kapazit[aä]t))"
+    r"|akku(?:-?\s*(?:status|gesundheit|zustand|kapazit[aä]t))"
+    r"|gesundheitszustand|restkapazit[aä]t|verbleibende\s+kapazit[aä]t"
+    r"|zertifizierte\s+(?:rest)?kapazit[aä]t)"
+)
 _BATTERY_SOH_RE = re.compile(
-    r"\bsoh\s*[:=)}\]]?\s*(\d{2,3}(?:[.,]\d+)?)\s*%?|"
-    r"\b(?:batterie|akku)(?:-?\s*status|gesundheit|zustand|kapazit[aä]t)\D{0,30}(\d{2,3}(?:[.,]\d+)?)\s*%|"
-    r"\b(?:batterie-information|batterie-status)\D{0,40}(\d{2,3}(?:[.,]\d+)?)\s*%|"
-    r"\bgesundheitszustand\s*\(?(?:soh)?\)?\s*[:=]?\s*(\d{2,3}(?:[.,]\d+)?)\s*%|"
-    r"\b(\d{2,3}(?:[.,]\d+)?)\s*%\s*(?:sehr\s*gut|gut|ausgezeichnet)\b|"
-    r"\bstate\s+of\s+health\s*[:=]?\s*(\d{2,3}(?:[.,]\d+)?)\s*%?",
+    # 1) Stichwort … Zahl % (Ziffern im Zwischenraum, z. B. Datum, erlaubt)
+    _SOH_ANY + r"[\s\S]{0,40}?(\d{2,3}(?:[.,]\d+)?)\s*%"
+    # 2) Zahl % … Stichwort (umgekehrte Reihenfolge, z. B. "92,4 % (SoH)")
+    r"|(\d{2,3}(?:[.,]\d+)?)\s*%[\s\S]{0,25}?" + _SOH_ANY +
+    # 3) eindeutiges Stichwort ohne % (z. B. "SoH 92", "SoH: 96") – aber nicht,
+    #    wenn direkt eine Einheit folgt (kWh/kW/km/PS/€).
+    r"|" + _SOH_STRONG + r"\s*[:=)\]}]?\s*(\d{2,3}(?:[.,]\d+)?)(?!\s*(?:%|k?wh|kw|km|ps|€|eur))"
+    # 4) Zahl % + Qualitätswort (Fallback)
+    r"|(\d{2,3}(?:[.,]\d+)?)\s*%\s*(?:sehr\s*gut|gut|ausgezeichnet|top)\b",
     re.IGNORECASE,
 )
 
