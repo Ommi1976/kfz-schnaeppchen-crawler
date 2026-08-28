@@ -178,7 +178,14 @@ class Kleinanzeigen(BasePortal):
                         l.fuel = norm
                         break
             elif "leistung" in key:
-                l.power_ps = self._to_int(value) or l.power_ps
+                m_ps = re.search(r"(\d+)\s*(?:ps|hp)", value, re.I)
+                m_kw = re.search(r"(\d+)\s*kw", value, re.I)
+                if m_ps:
+                    l.power_ps = int(m_ps.group(1))
+                elif m_kw:
+                    l.power_ps = round(int(m_kw.group(1)) * 1.35962)
+                else:
+                    l.power_ps = self._to_int(value) or l.power_ps
             elif "getriebe" in key:
                 for token, norm in _GEAR_NORM.items():
                     if token in v:
