@@ -134,15 +134,12 @@ class Kleinanzeigen(BasePortal):
     # ---- Detailseiten-Anreicherung (Homogenisierung) ------------------
     def enrich(self, listings: List[Listing], query: SearchQuery,
                force: bool = False) -> List[Listing]:
-        """Lädt Detailseiten nach, um Kraftstoff/Getriebe/Leistung/EZ/km/Türen
+        """Lädt Detailseiten nach, um Kraftstoff/Getriebe/Leistung/EZ/km/Türen/Akku
         strukturiert zu ermitteln – damit der gemeinsame Filtersatz auch bei
         Kleinanzeigen greift (die Trefferliste liefert diese Felder nicht).
-
-        Läuft automatisch, sobald die Suche eines dieser Felder nutzt; `force`
-        erzwingt die Anreicherung auch ohne solche Filter.
         """
         needs = force or any([query.fuel, query.transmission, query.power_from,
-                              query.power_to, query.doors])
+                              query.power_to, query.doors, query.battery_from_kwh, query.ev_range_from])
         if not needs:
             return listings
         targets = listings[:DETAIL_LIMIT]
@@ -191,12 +188,17 @@ class Kleinanzeigen(BasePortal):
                 # Zustand in body ablegen -> Betrugsfilter (#5) kann greifen.
                 l.body = (l.body + " " if l.body else "") + value
 
-        # Akku und Reichweite stehen bei Kleinanzeigen häufig im
-        # Beschreibungstext statt in den strukturierten Detailzeilen.
-        if l.battery_kwh is None:
-            l.battery_kwh = extract_battery_kwh(full_text)
-        if l.ev_range_km is None:
-            l.ev_range_km = extract_ev_range_km(full_text)
+        # Akku und Reichweite
+        kwh = extract_battery_kwh(full_text)
+        if kwh is not None:
+            l.battery_kwh = kwh
+        rng = extract_ev_range_km(full_text)
+        if rng is not None:
+            l.ev_range_km = rng
+
+        from ..models import infer_listing_battery, infer_listing_range
+        infer_listing_battery(l, check_images=False)
+        infer_listing_range(l)
 
     # ---- Heuristiken --------------------------------------------------
     @staticmethod

@@ -1,4 +1,4 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="de">
 <head>
   <meta charset="utf-8">
@@ -16,6 +16,7 @@
       </div>
     </div>
     <div class="actions">
+      <button id="btn-sync-mobile" class="btn small" title="mobile.de Akamai Session-Sync">🍪 mobile.de Sync</button>
       <button id="run" class="btn primary">Alle jetzt suchen</button>
       <button id="refresh" class="btn">Aktualisieren</button>
     </div>
@@ -154,6 +155,37 @@
           <button type="submit" class="btn primary">Speichern</button>
         </div>
       </form>
+    </div>
+  </div>
+
+  <!-- Modal: mobile.de Cookie Sync -->
+  <div id="modal-cookies" class="modal-backdrop hidden">
+    <div class="modal card" style="max-width: 550px;">
+      <div class="modal-head">
+        <h2>🍪 mobile.de Session-Synchronisation</h2>
+        <button id="cookies-close" class="btn small">✕</button>
+      </div>
+      <div style="padding: 10px 0; font-size: 13px; color: var(--muted); line-height: 1.5;">
+        <p>Um die Akamai-Bot-Sperre auf mobile.de dauerhaft zu umgehen, übertrage einfach deine mobile.de Browser-Cookies:</p>
+        
+        <div style="background: rgba(255,255,255,0.05); padding: 12px; border-radius: 8px; margin: 12px 0;">
+          <strong>Option 1 (Empfohlen: 1-Klick Lesezeichen):</strong>
+          <p style="margin: 6px 0 8px 0; font-size: 12px;">Ziehe diesen Button in deine Lesezeichenleiste. Wenn du auf <a href="https://suchen.mobile.de" target="_blank" style="color: var(--accent2);">mobile.de</a> bist, klicke einfach darauf:</p>
+          <a id="cookie-bookmarklet" href="#" class="btn primary small" style="display: inline-block; cursor: grab;">🚗 KFZ mobile.de Sync</a>
+        </div>
+
+        <div style="margin-top: 12px;">
+          <strong>Option 2 (Manuell):</strong>
+          <textarea id="cookies-input" rows="3" style="width: 100%; margin-top: 6px; font-family: monospace; font-size: 11px; padding: 8px; border-radius: 6px; background: var(--bg); color: var(--text); border: 1px solid var(--border);" placeholder="Füge hier document.cookie oder _abck=... ein"></textarea>
+        </div>
+        <div id="cookies-status-text" style="margin-top: 8px; font-weight: 500;"></div>
+      </div>
+      <div class="modal-actions">
+        <button type="button" id="cookies-delete" class="btn small danger">Cookies löschen</button>
+        <span class="spacer"></span>
+        <button type="button" id="cookies-cancel" class="btn">Schließen</button>
+        <button type="button" id="cookies-save" class="btn primary">Speichern</button>
+      </div>
     </div>
   </div>
 

@@ -351,3 +351,28 @@ async def run_now():
 async def clear():
     deleted = app.state.store.clear_deals()
     return {"deleted": deleted}
+
+
+@app.get("/api/mobile-cookies/status")
+async def mobile_cookies_status():
+    from .cookie_storage import get_mobile_cookies_status
+    return get_mobile_cookies_status()
+
+
+@app.post("/api/mobile-cookies")
+async def save_mobile_cookies_endpoint(payload: dict = Body(...)):
+    from .cookie_storage import save_mobile_cookies
+    raw = payload.get("cookies") or payload.get("cookie") or payload
+    saved = save_mobile_cookies(raw)
+    return {"status": "ok", "saved_count": len(saved)}
+
+
+@app.delete("/api/mobile-cookies")
+async def delete_mobile_cookies():
+    from .cookie_storage import COOKIE_FILE
+    if COOKIE_FILE.exists():
+        try:
+            COOKIE_FILE.unlink()
+        except Exception:
+            pass
+    return {"status": "deleted"}
