@@ -18,16 +18,23 @@ _EV_RANGE_RE = re.compile(
     re.IGNORECASE,
 )
 # Stichwörter, die eindeutig den Akku-Gesundheitszustand meinen
-_SOH_STRONG = r"(?:soh|state\s+of\s+health|health\s+state|battery\s+health|batteriegesundheit|akkugesundheit|gesundheitszustand|batteriezustand|akkuzustand|aviloo|dekra)"
-# Alle Stichwörter inkl. der mehrdeutigen (Kapazität/Status)
+_SOH_STRONG = (
+    r"(?:soh|state\s+of\s+health|health\s+state|battery\s+health|batteriegesundheit|akkugesundheit"
+    r"|gesundheitszustand|batteriezustand|akkuzustand|hv\s*-\s*batteriezustand|hv\s*-\s*batteriegesundheit"
+    r"|soh\s*-\s*wert|soh\s*-\s*score|zertifikatswert|battery\s+degradation"
+    r"|aviloo|dekra|t[üu]v\s+(?:rheinland|s[üu]d|nord|batterietest))"
+)
+# Alle Stichwörter inkl. der mehrdeutigen (Kapazität/Status/Check)
 _SOH_ANY = (
-    r"(?:soh|state\s+of\s+health|health\s+state|battery\s+health"
-    r"|batterie(?:-?\s*(?:status|information|gesundheit|zustand|zertifikat|test|kapazit[aä]t))"
-    r"|akku(?:-?\s*(?:status|gesundheit|zustand|zertifikat|test|kapazit[aä]t))"
-    r"|gesundheitszustand|restkapazit[aä]t|verbleibende\s+kapazit[aä]t"
+    r"(?:soh|state\s+of\s+health|health\s+state|battery\s+health|battery\s+degradation"
+    r"|batterie(?:-?\s*(?:status|information|gesundheit|zustand|zertifikat|test|check|kapazit[aä]t))"
+    r"|akku(?:-?\s*(?:status|gesundheit|zustand|zertifikat|test|check|kapazit[aä]t))"
+    r"|hv\s*-\s*batterie(?:-?\s*(?:status|gesundheit|zustand|zertifikat|test|check))"
+    r"|gesundheitszustand|restkapazit[aä]t|verbleibende\s+kapazit[aä]t|zertifikatswert|soh\s*-\s*wert"
     r"|zertifizierte\s+(?:rest)?kapazit[aä]t"
-    r"|aviloo(?:\s*-\s*score|\s+score|\s+zertifikat|\s+test|\s+flash)?"
-    r"|dekra(?:\s+batterietest|\s+zertifikat|\s+test|\s+siegel)?)"
+    r"|aviloo(?:\s*-\s*score|\s+score|\s+zertifikat|\s+test|\s+flash|\s+premium)?"
+    r"|dekra(?:\s+batterietest|\s+zertifikat|\s+test|\s+siegel)?"
+    r"|t[üu]v(?:\s+rheinland|\s+s[üu]d|\s+nord)?(?:\s+batterietest|\s+battery\s+quick\s+check|\s+zertifikat|\s+test)?)"
 )
 _BATTERY_SOH_RE = re.compile(
     # 1) Stichwort … Zahl % (z.B. "Batteriezustand lt. Test vom 12.03.2024: 92 %", "SoH: 94.6 %")
@@ -37,7 +44,7 @@ _BATTERY_SOH_RE = re.compile(
     # 3) Eindeutiges Stichwort / Aviloo Score ohne % (z. B. "SoH 92", "Aviloo Score: 96", "Aviloo: 98/100")
     r"|" + _SOH_STRONG + r"(?:\s*-\s*score|\s+score)?\s*[:=)\]}]?\s*(\d{2,3}(?:[.,]\d+)?)(?:\s*/\s*100)?(?!\s*(?:k?wh|kw|km|ps|€|eur))"
     # 4) Akku bei/noch XX %
-    r"|(?:akku|batterie)\s+(?:liegt\s+)?(?:bei|mit|noch)\s+(\d{2,3}(?:[.,]\d+)?)\s*%"
+    r"|(?:akku|batterie|hv\s*-\s*batterie)\s+(?:liegt\s+)?(?:bei|mit|noch)\s+(\d{2,3}(?:[.,]\d+)?)\s*%"
     # 5) Zahl % + Qualitätswort (mobile.de Widget Fallback)
     r"|(\d{2,3}(?:[.,]\d+)?)\s*%\s*(?:sehr\s*gut|gut|ausgezeichnet|top)\b",
     re.IGNORECASE,
@@ -611,10 +618,17 @@ def matches_query(l: Listing, q: SearchQuery) -> bool:
     # (z. B. „Golf Variant" ohne das Wort „Kombi"), daher hier kein Nachfilter.
     # E-Auto-Filter
     if q.ev_range_from and q.battery_from_kwh:
-        # Wenn BEIDES definiert ist, gilt ODER-Logik (z.B. Akku >= 65 kWh ODER Reichweite >= 450 km):
-        # Nur ausschließen, wenn beide Werte bekannt sind und beide unter der Mindestanforderung liegen.
-        if l.ev_range_km is not None and l.battery_kwh is not None:
-            if l.ev_range_km < q.ev_range_from and l.battery_kwh < q.battery_from_kwh:
+        # ODER-Logik (z.B. Akku >= 65 kWh ODER Reichweite >= 450 km):
+        range_ok = l.ev_range_km is not None and l.ev_range_km >= q.ev_range_from
+        battery_ok = l.battery_kwh is not None and l.battery_kwh >= q.battery_from_kwh
+        if not (range_ok or battery_ok):
+            range_under = l.ev_range_km is not None and l.ev_range_km < q.ev_range_from
+            battery_under = l.battery_kwh is not None and l.battery_kwh < q.battery_from_kwh
+            if range_under and battery_under:
+                return False
+            if range_under and l.battery_kwh is None:
+                return False
+            if battery_under and l.ev_range_km is None:
                 return False
     elif q.ev_range_from and l.ev_range_km is not None and l.ev_range_km < q.ev_range_from:
         return False

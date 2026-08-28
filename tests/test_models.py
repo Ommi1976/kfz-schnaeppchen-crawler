@@ -202,3 +202,17 @@ def test_matches_query_filtering():
     # 9. include_damaged = True erlaubt solche Fahrzeuge
     q_damaged = SearchQuery(name="Schrottis", make="volkswagen", model="golf", include_damaged=True)
     assert matches_query(l6, q_damaged) is True
+
+    # 10. E-Auto Filter mit ODER-Logik (z.B. Akku >= 65 kWh ODER Reichweite >= 450 km)
+    q_ev = SearchQuery(name="E-Autos", fuel="elektro", battery_from_kwh=65.0, ev_range_from=450)
+    # GWM mit 310 km Reichweite und ohne 65+ kWh Akku muss abgewiesen werden
+    l_gwm = Listing(portal="AS24", title="GWM Sonstige", url="http://x/gwm", fuel="elektro", ev_range_km=310, battery_kwh=None)
+    assert matches_query(l_gwm, q_ev) is False
+
+    # ID.4 mit 522 km und 82 kWh muss akzeptiert werden
+    l_id4 = Listing(portal="AS24", title="VW ID.4", url="http://x/id4", fuel="elektro", ev_range_km=522, battery_kwh=82.0)
+    assert matches_query(l_id4, q_ev) is True
+
+    # ID.3 mit 420 km aber 58 kWh (beides unter 450 km / 65 kWh) muss abgewiesen werden
+    l_id3_small = Listing(portal="AS24", title="VW ID.3", url="http://x/id3", fuel="elektro", ev_range_km=420, battery_kwh=58.0)
+    assert matches_query(l_id3_small, q_ev) is False
