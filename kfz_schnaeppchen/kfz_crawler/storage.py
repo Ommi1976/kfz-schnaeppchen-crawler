@@ -76,6 +76,7 @@ class SeenStore:
             "ALTER TABLE deals ADD COLUMN location_zip TEXT",
             "ALTER TABLE deals ADD COLUMN location_city TEXT",
             "ALTER TABLE deals ADD COLUMN distance_km INTEGER",
+            "ALTER TABLE deals ADD COLUMN last_seen REAL",
         ]:
             try:
                 self.conn.execute(ddl)
@@ -234,12 +235,13 @@ class SeenStore:
     def record_listing(self, search_name: str, listing: Listing) -> None:
         with self._lock:
             imgs_json = json.dumps(listing.image_urls or [], ensure_ascii=False) if listing.image_urls else None
+            now = time.time()
             self.conn.execute(
                 "INSERT INTO deals "
                 "(fingerprint, search_name, portal, title, url, price, market_price, "
                 " discount, year, mileage, fuel, battery_kwh, battery_soh, ev_range_km, is_deal, is_suspicious, "
-                " reasons, body, image_urls, warranty, location, location_zip, location_city, distance_km, first_seen) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+                " reasons, body, image_urls, warranty, location, location_zip, location_city, distance_km, first_seen, last_seen) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
                 " ON CONFLICT(fingerprint) DO UPDATE SET "
                 "search_name=excluded.search_name, portal=excluded.portal, title=excluded.title, "
                 "url=excluded.url, price=excluded.price, market_price=excluded.market_price, "
@@ -252,7 +254,8 @@ class SeenStore:
                 "location=COALESCE(excluded.location, deals.location), "
                 "location_zip=COALESCE(excluded.location_zip, deals.location_zip), "
                 "location_city=COALESCE(excluded.location_city, deals.location_city), "
-                "distance_km=COALESCE(excluded.distance_km, deals.distance_km)",
+                "distance_km=COALESCE(excluded.distance_km, deals.distance_km), "
+                "last_seen=excluded.last_seen",
                 (
                     listing.fingerprint,
                     search_name,
@@ -278,7 +281,8 @@ class SeenStore:
                     listing.location_zip,
                     listing.location_city,
                     listing.distance_km,
-                    time.time(),
+                    now,
+                    now,
                 ),
             )
             self.conn.commit()
@@ -408,6 +412,39 @@ class SeenStore:
                 self.conn.execute(f"DELETE FROM deals WHERE fingerprint IN ({placeholders})", to_delete)
                 self.conn.commit()
         return len(to_delete)
+
+    def sync_active_deals(
+        self,
+        search_name: str,
+        portal_active_fps: Dict[str, Set[str]],
+    ) -> int:
+        """Entfernt Inserate aus der Datenbank, die auf dem jeweiligen Portal nicht mehr existieren.
+
+        Sicherheitsgarantie: Nur Portale, die im aktuellen Lauf erfolgreich Treffer
+        geliefert haben, werden bereinigt (schützt vor Datenverlust bei temporären Portal-Ausfällen).
+        """
+        deleted_count = 0
+        with self._lock:
+            for portal, active_fps in portal_active_fps.items():
+                if not active_fps:
+                    # Keine aktiven Treffer gemeldet (z. B. Portal geblockt) -> bestehende Einträge schützen
+                    continue
+                cur = self.conn.execute(
+                    "SELECT fingerprint FROM deals WHERE search_name = ? AND portal = ?",
+                    (search_name, portal),
+                )
+                db_fps = {row["fingerprint"] for row in cur.fetchall()}
+                stale_fps = list(db_fps - active_fps)
+                if stale_fps:
+                    placeholders = ",".join("?" * len(stale_fps))
+                    self.conn.execute(
+                        f"DELETE FROM deals WHERE search_name = ? AND portal = ? AND fingerprint IN ({placeholders})",
+                        [search_name, portal, *stale_fps],
+                    )
+                    deleted_count += len(stale_fps)
+            if deleted_count > 0:
+                self.conn.commit()
+        return deleted_count
 
     def close(self) -> None:
         try:

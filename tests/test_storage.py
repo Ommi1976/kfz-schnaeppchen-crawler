@@ -75,3 +75,30 @@ def test_settings_storage(store):
     assert store.get_setting("token") == "secret123"
     store.set_setting("token", "secret456")
     assert store.get_setting("token") == "secret456"
+
+
+def test_sync_active_deals(store):
+    l1 = Listing(portal="AS24", title="Car 1", url="http://x/1", price=10000, year=2020, mileage=50000)
+    l2 = Listing(portal="AS24", title="Car 2", url="http://x/2", price=12000, year=2020, mileage=60000)
+    l3 = Listing(portal="mobile.de", title="Car 3", url="http://x/3", price=15000, year=2021, mileage=30000)
+
+    store.record_listing("Suche 1", l1)
+    store.record_listing("Suche 1", l2)
+    store.record_listing("Suche 1", l3)
+    assert store.total_count() == 3
+
+    # Simuliere Folgelauf: l1 ist noch aktiv, l2 wurde auf AS24 gelöscht
+    # mobile.de hatte in diesem Lauf 0 Treffer (z.B. Block) -> l3 bleibt geschützt
+    portal_active = {
+        "AS24": {l1.fingerprint},
+        "mobile.de": set(),  # leer -> keine Bereinigung für mobile.de
+    }
+
+    deleted = store.sync_active_deals("Suche 1", portal_active)
+    assert deleted == 1  # l2 gelöscht
+    assert store.total_count() == 2
+
+    remaining_titles = {d["title"] for d in store.list_deals()}
+    assert "Car 1" in remaining_titles
+    assert "Car 3" in remaining_titles
+    assert "Car 2" not in remaining_titles

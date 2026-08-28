@@ -134,7 +134,14 @@ def run_search(cfg: Config, query: SearchQuery, store: SeenStore) -> List[Listin
     # is_deal markiert. Der seen-Store steuert nur Benachrichtigungen, nicht die
     # Anzeige: bekannte Fahrzeuge werden bei jedem Lauf aktualisiert.
     new_deals = []
+    portal_active_fps: Dict[str, Set[str]] = {}
+    for p_name, raw_list in portal_raw.items():
+        if raw_list:
+            portal_active_fps[p_name] = set()
+
     for l in result.priced:
+        if l.portal in portal_active_fps:
+            portal_active_fps[l.portal].add(l.fingerprint)
         is_new = store.is_new(l)
         # Cross-Lauf-Dublette nur für neue Inserate unterdrücken; bekannte
         # Inserate werden trotzdem für die aktuelle UI-Anzeige aktualisiert.
@@ -149,6 +156,9 @@ def run_search(cfg: Config, query: SearchQuery, store: SeenStore) -> List[Listin
             store.record_listing(query.name, l)
         if is_new and l.is_deal:
             new_deals.append(l)
+
+    if hasattr(store, "sync_active_deals"):
+        store.sync_active_deals(query.name, portal_active_fps)
     if hasattr(store, "purge_unmatching_deals"):
         store.purge_unmatching_deals(query.name, query)
     if hasattr(store, "prune"):
