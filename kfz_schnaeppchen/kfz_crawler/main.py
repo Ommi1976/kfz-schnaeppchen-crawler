@@ -135,8 +135,8 @@ def run_search(cfg: Config, query: SearchQuery, store: SeenStore) -> List[Listin
     # Anzeige: bekannte Fahrzeuge werden bei jedem Lauf aktualisiert.
     new_deals = []
     portal_active_fps: Dict[str, Set[str]] = {}
-    for p_name, raw_list in portal_raw.items():
-        if raw_list:
+    for p_name, count in before_filter.items():
+        if count > 0:
             portal_active_fps[p_name] = set()
 
     for l in result.priced:
