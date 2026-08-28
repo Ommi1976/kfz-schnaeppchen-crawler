@@ -118,7 +118,7 @@ footer { padding: 12px 18px 24px; color: var(--muted); font-size: 12px; }
 
 /* Modal */
 .modal { position: fixed; inset: 0; background: rgba(0,0,0,.6); display: flex; align-items: flex-start; justify-content: center; padding: 30px 14px; overflow-y: auto; z-index: 50; }
-.modal.hidden { display: none; }
+.modal.hidden, .hidden { display: none !important; }
 .modal-card { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; width: 100%; max-width: 860px; box-shadow: 0 22px 70px rgba(0,0,0,.45); }
 .modal-head { display: flex; align-items: center; justify-content: space-between; padding: 14px 18px; border-bottom: 1px solid var(--line); }
 .modal-head h3 { margin: 0; font-size: 16px; }

@@ -50,6 +50,11 @@ class BrowserBlocked(RuntimeError):
     """Seite wurde trotz Browser durch Anti-Bot-Schutz geblockt."""
 
 
+PROFILE_DIR = Path("/data/firefox_profile")
+if not Path("/data").exists():
+    PROFILE_DIR = Path(__file__).parent.parent / "firefox_profile"
+
+
 def fetch_rendered(
     url: str,
     proxy: Optional[str] = None,
@@ -60,13 +65,7 @@ def fetch_rendered(
     wait_selector: Optional[str] = None,
     wait_selector_timeout_ms: int = 15000,
 ) -> str:
-    """Lädt eine URL in Playwright Firefox/Chromium und liefert das gerenderte HTML.
-
-    Ist ``wait_selector`` gesetzt, wird explizit gewartet, bis dieses Element im
-    DOM ist (statt nur eines festen ``render_delay``). Das ist auf langsamen/
-    ausgelasteten Hosts entscheidend: bei einer React-SPA wie mobile.de sind die
-    Listings sonst noch nicht gerendert, wenn der feste Delay abläuft -> 0 Treffer.
-    """
+    """Lädt eine URL in Playwright Firefox mit persistentem Profil und Cookie-Caching."""
     try:
         from playwright.sync_api import sync_playwright
     except ImportError as e:
@@ -74,46 +73,55 @@ def fetch_rendered(
 
     with _lock:
         with sync_playwright() as p:
-            engine_obj = getattr(p, engine, p.firefox)
-            browser = engine_obj.launch(headless=True)
+            PROFILE_DIR.mkdir(parents=True, exist_ok=True)
+            ctx = p.firefox.launch_persistent_context(
+                user_data_dir=str(PROFILE_DIR),
+                headless=True,
+                locale="de-DE",
+                timezone_id="Europe/Berlin",
+                viewport={"width": 1440, "height": 900},
+            )
+            page = ctx.new_page() if not ctx.pages else ctx.pages[0]
             try:
-                page = browser.new_page(
-                    locale="de-DE",
-                    timezone_id="Europe/Berlin",
-                    viewport={"width": 1440, "height": 900},
-                )
-                try:
-                    # Akamai Session Warmup auf Startseite
-                    if "mobile.de" in url:
+                # Akamai Session Warmup auf Startseite
+                if "mobile.de" in url:
+                    try:
+                        page.goto("https://www.mobile.de/", wait_until="domcontentloaded", timeout=15000)
+                        time.sleep(1.5)
                         try:
-                            page.goto("https://www.mobile.de/", wait_until="domcontentloaded", timeout=15000)
-                            time.sleep(1.5)
+                            from .cookie_storage import save_mobile_cookies
+                            cookies = ctx.cookies()
+                            if cookies:
+                                save_mobile_cookies({c["name"]: c["value"] for c in cookies})
                         except Exception:
                             pass
+                    except Exception:
+                        pass
 
-                    page.goto(url, wait_until=wait_until, timeout=timeout_ms)
+                page.goto(url, wait_until=wait_until, timeout=timeout_ms)
 
-                    # Auf die eigentlichen Inhalte warten (robust gegen langsame CPU).
-                    if wait_selector:
-                        try:
-                            page.wait_for_selector(wait_selector, timeout=wait_selector_timeout_ms)
-                        except Exception:
-                            # Selektor nicht erschienen -> trotzdem weiter, ggf. Block/leer.
-                            logger.debug("wait_selector '%s' nicht erschienen", wait_selector)
-                        # Bis die Liste vollständig nachgeladen ist (nicht nur die
-                        # erste Card) – sonst auf langsamer Box zu wenige Treffer.
-                        count = _wait_stable(page, wait_selector)
-                        logger.debug("wait_selector '%s' stabil bei %d", wait_selector, count)
+                if wait_selector:
+                    try:
+                        page.wait_for_selector(wait_selector, timeout=wait_selector_timeout_ms)
+                    except Exception:
+                        logger.debug("wait_selector '%s' nicht erschienen", wait_selector)
+                    count = _wait_stable(page, wait_selector)
+                    logger.debug("wait_selector '%s' stabil bei %d", wait_selector, count)
 
-                    if render_delay > 0:
-                        time.sleep(render_delay)
+                if render_delay > 0:
+                    time.sleep(render_delay)
 
-                    html = page.content()
-                    return html
-                finally:
-                    page.close()
+                html = page.content()
+                return html
             finally:
-                browser.close()
+                try:
+                    from .cookie_storage import save_mobile_cookies
+                    cookies = ctx.cookies()
+                    if cookies:
+                        save_mobile_cookies({c["name"]: c["value"] for c in cookies})
+                except Exception:
+                    pass
+                ctx.close()
 
 
 def fetch_rendered_batch(
