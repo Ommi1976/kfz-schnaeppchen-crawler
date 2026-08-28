@@ -48,41 +48,92 @@ _GEAR_NORM = {"manuell": "schaltgetriebe", "schaltgetriebe": "schaltgetriebe",
              "automatik": "automatik"}
 
 
+_EXPANSION_EV_MODELS = [
+    "vw id 3", "vw id 4", "vw id 5", "cupra born", "skoda enyaq",
+    "tesla model 3", "tesla model y", "hyundai ioniq 5", "hyundai ioniq 6",
+    "kia ev6", "renault megane e tech", "hyundai kona elektro", "kia niro ev",
+    "smart 1", "audi q4 e tron", "mercedes eqa", "mercedes eqb", "bmw i4", "bmw ix3"
+]
+
+
+def _clean_slug(text: str) -> str:
+    s = re.sub(r"[^\w\s-]", "", text.lower())
+    return re.sub(r"[-\s]+", "-", s).strip("-")
+
+
 class Kleinanzeigen(BasePortal):
     name = "Kleinanzeigen"
     BASE = "https://www.kleinanzeigen.de"
 
-    def _build_url(self, query: SearchQuery, page: int) -> str:
-        # Rubrik "Autos" = c216. Suchbegriff aus Marke + Modell bzw. Keywords/Kraftstoff.
-        term_parts = [p for p in (query.make, query.model) if p]
-        if not term_parts:
-            if getattr(query, "keywords", None):
+    def _build_url(self, query: SearchQuery, page: int, custom_term: Optional[str] = None) -> str:
+        # Native Kleinanzeigen Attribute im k0-Segment
+        attr_parts = ["c216"]
+        if query.year_from:
+            attr_parts.append(f"autos.ez_i:{query.year_from},")
+        if query.mileage_to:
+            attr_parts.append(f"autos.km_i:,{query.mileage_to}")
+        if query.fuel == "elektro":
+            attr_parts.append("autos.kraftstoff_s:elektro")
+        elif query.fuel == "diesel":
+            attr_parts.append("autos.kraftstoff_s:diesel")
+        elif query.fuel == "benzin":
+            attr_parts.append("autos.kraftstoff_s:benzin")
+        elif query.fuel == "hybrid":
+            attr_parts.append("autos.kraftstoff_s:hybrid")
+
+        if query.transmission == "automatik":
+            attr_parts.append("autos.getriebe_s:automatik")
+        elif query.transmission == "schaltgetriebe":
+            attr_parts.append("autos.getriebe_s:manuell")
+
+        attr_seg = "+".join(attr_parts)
+
+        # Suchbegriff
+        if custom_term:
+            term = _clean_slug(custom_term)
+        else:
+            term_parts = [p for p in (query.make, query.model) if p]
+            if not term_parts and getattr(query, "keywords", None):
                 term_parts = list(query.keywords)
-            elif query.fuel == "elektro":
-                term_parts = ["elektroauto"]
-            elif query.fuel == "hybrid":
-                term_parts = ["hybrid"]
-        term = "-".join(term_parts) if term_parts else "auto"
+            term = _clean_slug("-".join(term_parts)) if term_parts else "auto"
+
         loc_seg = f"/{query.zip_code}" if query.zip_code else ""
-        price = ""
+        price_seg = ""
         if query.price_from or query.price_to:
-            price = f"/preis:{query.price_from or ''}:{query.price_to or ''}"
+            price_seg = f"/preis:{query.price_from or ''}:{query.price_to or ''}"
         page_seg = f"/seite:{page}" if page > 1 else ""
         qs = f"?radius={query.radius_km}" if (query.zip_code and query.radius_km) else ""
-        return f"{self.BASE}/s-autos{loc_seg}{price}{page_seg}/{term}/k0c216{qs}"
+
+        return f"{self.BASE}/s-autos{loc_seg}{price_seg}{page_seg}/{term}/k0{attr_seg}{qs}"
 
     def search(self, query: SearchQuery) -> List[Listing]:
         results: List[Listing] = []
-        pages_to_fetch = max(self.max_pages, 5)
-        for page in range(1, pages_to_fetch + 1):
-            url = self._build_url(query, page)
-            resp = self._get(url)
-            if not resp or not resp.text:
-                break
-            items = self._parse(resp.text, query)
-            if not items:
-                break
-            results.extend(items)
+        seen_urls = set()
+
+        # Bestimme Suchbegriffe (entweder explizit oder via Modell-Expansion für allgemeine E-Auto-Suchen)
+        has_specific_car = bool(query.make or query.model or getattr(query, "keywords", None))
+
+        if not has_specific_car and query.fuel == "elektro" and (query.battery_from_kwh or query.ev_range_from or query.power_from):
+            terms: List[Optional[str]] = list(_EXPANSION_EV_MODELS)
+            pages_per_term = 1
+        else:
+            terms = [None]
+            pages_per_term = max(self.max_pages, 3)
+
+        for term in terms:
+            for page in range(1, pages_per_term + 1):
+                url = self._build_url(query, page, custom_term=term)
+                resp = self._get(url)
+                if not resp or not resp.text:
+                    break
+                items = self._parse(resp.text, query)
+                if not items:
+                    break
+                for it in items:
+                    if it.url not in seen_urls:
+                        seen_urls.add(it.url)
+                        results.append(it)
+
         return results
 
     def _parse(self, html: str, query: SearchQuery) -> List[Listing]:
@@ -107,6 +158,7 @@ class Kleinanzeigen(BasePortal):
                 title=(title or "Kleinanzeigen-Inserat")[:120],
                 url=url,
                 price=price,
+                fuel=query.fuel if query.fuel else None,
                 mileage=self._extract_km(listing_text),
                 year=self._extract_year(listing_text),
                 ev_range_km=extract_ev_range_km(listing_text),
@@ -115,7 +167,9 @@ class Kleinanzeigen(BasePortal):
                 image_urls=image_urls,
                 raw_id=art.get("data-adid"),
             )
-            from ..models import infer_listing_details
+            from ..models import infer_listing_battery, infer_listing_details, infer_listing_range
+            infer_listing_battery(listing, check_images=False)
+            infer_listing_range(listing)
             infer_listing_details(listing, getattr(query, "zip_code", None))
             if self._matches(listing, query):
                 listings.append(listing)
