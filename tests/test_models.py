@@ -43,6 +43,11 @@ def test_extract_battery_soh():
     assert extract_battery_soh("Restkapazität 90%") == 90.0
     assert extract_battery_soh("verbleibende Kapazität 86%") == 86.0
     assert extract_battery_soh("Batteriezertifikat: 89 %") == 89.0
+    assert extract_battery_soh("Aviloo Score: 98") == 98.0
+    assert extract_battery_soh("DEKRA Batterietest 95%") == 95.0
+    assert extract_battery_soh("Akku liegt bei 91 %") == 91.0
+    assert extract_battery_soh("19% MwSt. ausgewiesen") is None
+    assert extract_battery_soh("100% unfallfrei") is None
     assert extract_battery_soh("Batteriegesundheit 97 %") == 97.0
     assert extract_battery_soh("94,6 % (SoH)") == 94.6
     assert extract_battery_soh("SOH: 96") == 96.0  # ohne Prozentzeichen

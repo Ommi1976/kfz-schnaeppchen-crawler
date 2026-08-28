@@ -145,9 +145,7 @@ def ocr_image_bytes(image_bytes: bytes, url: str = "") -> Optional[str]:
         gray = ImageOps.autocontrast(img.convert("L"), cutoff=1)
         enhanced = ImageEnhance.Contrast(gray).enhance(1.8)
 
-        # Varianten: normal + (bei dunklem Bild) invertiert. Dunkle Diagnose-
-        # Screens haben hellen Text auf dunklem Grund – Tesseract braucht das
-        # Gegenteil, deshalb zusätzlich invertiert erkennen.
+        # Varianten: normal, invertiert + Zertifikats-Fokus-Crops (AVILOO/DEKRA)
         variants = [enhanced]
         try:
             if ImageStat.Stat(gray).mean[0] < 115:
@@ -155,10 +153,20 @@ def ocr_image_bytes(image_bytes: bytes, url: str = "") -> Optional[str]:
         except Exception:
             pass
 
+        # Zertifikats-Crops: AVILOO Score-Kreis (oben rechts / Mitte)
+        cw, ch = enhanced.size
+        try:
+            # Rechter oberer Quadrant (typisch für AVILOO Score)
+            crop_tr = enhanced.crop((int(cw * 0.45), 0, cw, int(ch * 0.55)))
+            variants.append(crop_tr)
+            # Zentrierter Kasten (typisch für DEKRA / TÜV Ergebnis)
+            crop_center = enhanced.crop((int(cw * 0.2), int(ch * 0.2), int(cw * 0.8), int(ch * 0.7)))
+            variants.append(crop_center)
+        except Exception:
+            pass
+
         lang = _resolve_ocr_lang()
         collected: List[str] = []
-        # Zwei PSM-Modi: 6 = Textblock (Tabellen/Zertifikate),
-        # 11 = verstreute Zeichen (große Gauge-/Tacho-Zahlen).
         for var in variants:
             for psm in (6, 11):
                 try:

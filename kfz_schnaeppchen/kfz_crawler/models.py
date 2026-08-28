@@ -17,27 +17,28 @@ _EV_RANGE_RE = re.compile(
     r"(\d{2,4})\s*km\D{0,24}(?<!gesamt)(?:reichweite|range)",
     re.IGNORECASE,
 )
-# Stichwörter, die eindeutig den Akku-Gesundheitszustand meinen (auch ohne %
-# verwertbar, weil sie nie eine kWh/km-Angabe bezeichnen).
-_SOH_STRONG = r"(?:soh|state\s+of\s+health|batteriegesundheit|akkugesundheit|gesundheitszustand)"
-# Alle Stichwörter inkl. der mehrdeutigen (Kapazität/Status): hier ist ein
-# nachfolgendes % nötig, damit keine kWh-Angabe fälschlich als SoH gilt.
+# Stichwörter, die eindeutig den Akku-Gesundheitszustand meinen
+_SOH_STRONG = r"(?:soh|state\s+of\s+health|health\s+state|battery\s+health|batteriegesundheit|akkugesundheit|gesundheitszustand|batteriezustand|akkuzustand|aviloo|dekra)"
+# Alle Stichwörter inkl. der mehrdeutigen (Kapazität/Status)
 _SOH_ANY = (
-    r"(?:soh|state\s+of\s+health"
-    r"|batterie(?:-?\s*(?:status|information|gesundheit|zustand|zertifikat|kapazit[aä]t))"
-    r"|akku(?:-?\s*(?:status|gesundheit|zustand|kapazit[aä]t))"
+    r"(?:soh|state\s+of\s+health|health\s+state|battery\s+health"
+    r"|batterie(?:-?\s*(?:status|information|gesundheit|zustand|zertifikat|test|kapazit[aä]t))"
+    r"|akku(?:-?\s*(?:status|gesundheit|zustand|zertifikat|test|kapazit[aä]t))"
     r"|gesundheitszustand|restkapazit[aä]t|verbleibende\s+kapazit[aä]t"
-    r"|zertifizierte\s+(?:rest)?kapazit[aä]t)"
+    r"|zertifizierte\s+(?:rest)?kapazit[aä]t"
+    r"|aviloo(?:\s*-\s*score|\s+score|\s+zertifikat|\s+test|\s+flash)?"
+    r"|dekra(?:\s+batterietest|\s+zertifikat|\s+test|\s+siegel)?)"
 )
 _BATTERY_SOH_RE = re.compile(
-    # 1) Stichwort … Zahl % (Ziffern im Zwischenraum, z. B. Datum, erlaubt)
-    _SOH_ANY + r"[\s\S]{0,40}?(\d{2,3}(?:[.,]\d+)?)\s*%"
-    # 2) Zahl % … Stichwort (umgekehrte Reihenfolge, z. B. "92,4 % (SoH)")
-    r"|(\d{2,3}(?:[.,]\d+)?)\s*%[\s\S]{0,25}?" + _SOH_ANY +
-    # 3) eindeutiges Stichwort ohne % (z. B. "SoH 92", "SoH: 96") – aber nicht,
-    #    wenn direkt eine Einheit folgt (kWh/kW/km/PS/€).
-    r"|" + _SOH_STRONG + r"\s*[:=)\]}]?\s*(\d{2,3}(?:[.,]\d+)?)(?!\s*(?:%|k?wh|kw|km|ps|€|eur))"
-    # 4) Zahl % + Qualitätswort (Fallback)
+    # 1) Stichwort … Zahl % (z.B. "Batteriezustand lt. Test vom 12.03.2024: 92 %", "SoH: 94.6 %")
+    _SOH_ANY + r"[\s\S]{0,60}?(\d{2,3}(?:[.,]\d+)?)\s*%"
+    # 2) Zahl % … Stichwort (z. B. "92,4 % (SoH)", "96% State of Health")
+    r"|(\d{2,3}(?:[.,]\d+)?)\s*%[\s\S]{0,35}?" + _SOH_ANY +
+    # 3) Eindeutiges Stichwort / Aviloo Score ohne % (z. B. "SoH 92", "Aviloo Score: 96", "Aviloo: 98/100")
+    r"|" + _SOH_STRONG + r"(?:\s*-\s*score|\s+score)?\s*[:=)\]}]?\s*(\d{2,3}(?:[.,]\d+)?)(?:\s*/\s*100)?(?!\s*(?:k?wh|kw|km|ps|€|eur))"
+    # 4) Akku bei/noch XX %
+    r"|(?:akku|batterie)\s+(?:liegt\s+)?(?:bei|mit|noch)\s+(\d{2,3}(?:[.,]\d+)?)\s*%"
+    # 5) Zahl % + Qualitätswort (mobile.de Widget Fallback)
     r"|(\d{2,3}(?:[.,]\d+)?)\s*%\s*(?:sehr\s*gut|gut|ausgezeichnet|top)\b",
     re.IGNORECASE,
 )
@@ -59,7 +60,7 @@ def extract_battery_kwh(text: str | None) -> Optional[float]:
 
 
 def extract_battery_soh(text: str | None) -> Optional[float]:
-    """Erkennt den State of Health (SoH in %) aus Texten, z. B. ``Batterie-Status 94.6%``, ``SOH 96%`` oder ``Batteriezustand 97%``."""
+    """Erkennt den State of Health (SoH in %) aus Texten, z. B. ``Batterie-Status 94.6%``, ``SOH 96%`` oder ``Aviloo 98%``."""
     if not text:
         return None
     for match in _BATTERY_SOH_RE.finditer(str(text)):
@@ -67,7 +68,7 @@ def extract_battery_soh(text: str | None) -> Optional[float]:
             if val:
                 try:
                     num = float(val.replace(",", "."))
-                    if 50.0 <= num <= 100.0:
+                    if 50.0 <= num <= 100.0 and num != 19.0:
                         return round(num, 1)
                 except ValueError:
                     continue

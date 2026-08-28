@@ -479,94 +479,10 @@ async function refresh() {
   try {
     await loadStatus();
     await loadDeals();
-    await checkCookieStatus();
   } catch (e) { console.error(e); }
 }
 function poll() {
   refresh().then(() => { if (statusCache && statusCache.running) setTimeout(poll, 2000); });
-}
-
-// ---------- Cookie Modal ----------
-const modalCookies = document.getElementById("modal-cookies");
-const btnSyncMobile = document.getElementById("btn-sync-mobile");
-const cookiesClose = document.getElementById("cookies-close");
-const cookiesCancel = document.getElementById("cookies-cancel");
-const cookiesSave = document.getElementById("cookies-save");
-const cookiesDelete = document.getElementById("cookies-delete");
-const cookiesInput = document.getElementById("cookies-input");
-const cookiesStatusText = document.getElementById("cookies-status-text");
-const cookieBookmarklet = document.getElementById("cookie-bookmarklet");
-
-async function checkCookieStatus() {
-  if (!btnSyncMobile) return;
-  try {
-    const res = await fetch(`${API}/mobile-cookies/status`);
-    const st = await res.json();
-    if (st.has_cookies) {
-      btnSyncMobile.style.borderColor = "rgba(34, 197, 94, 0.5)";
-      btnSyncMobile.style.color = "#4ade80";
-      btnSyncMobile.textContent = "🍪 mobile.de ✓";
-      if (cookiesStatusText) {
-        cookiesStatusText.innerHTML = `<span style="color: #4ade80;">✓ ${st.count} Cookies gespeichert (vor ${st.age_seconds ? Math.round(st.age_seconds / 60) : 0} Min). Akamai-Bypass aktiv.</span>`;
-      }
-    } else {
-      btnSyncMobile.style.borderColor = "";
-      btnSyncMobile.style.color = "";
-      btnSyncMobile.textContent = "🍪 mobile.de Sync";
-      if (cookiesStatusText) {
-        cookiesStatusText.innerHTML = `<span style="color: #fbbf24;">⚠ Keine Cookies gespeichert. mobile.de blockiert ggf. Anfragen.</span>`;
-      }
-    }
-  } catch (e) {
-    console.error("Cookie Status Fehler:", e);
-  }
-}
-
-function openCookieModal() {
-  modalCookies.classList.remove("hidden");
-  checkCookieStatus();
-  const endpoint = `${window.location.origin}${API}/mobile-cookies`;
-  const code = `javascript:(function(){fetch('${endpoint}',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({cookies:document.cookie})}).then(r=>r.json()).then(d=>alert('KFZ Crawler: mobile.de Cookies synchronisiert ('+d.saved_count+' Cookies)!')).catch(e=>alert('Fehler: '+e))})();`;
-  if (cookieBookmarklet) cookieBookmarklet.setAttribute("href", code);
-}
-
-function closeCookieModal() {
-  if (modalCookies) modalCookies.classList.add("hidden");
-}
-
-if (btnSyncMobile) btnSyncMobile.addEventListener("click", openCookieModal);
-if (cookiesClose) cookiesClose.addEventListener("click", closeCookieModal);
-if (cookiesCancel) cookiesCancel.addEventListener("click", closeCookieModal);
-if (modalCookies) modalCookies.addEventListener("click", (e) => { if (e.target.id === "modal-cookies") closeCookieModal(); });
-
-if (cookiesSave) {
-  cookiesSave.addEventListener("click", async () => {
-    const val = cookiesInput.value.trim();
-    if (!val) { alert("Bitte Cookies einfügen."); return; }
-    try {
-      const res = await fetch(`${API}/mobile-cookies`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ cookies: val }),
-      });
-      const d = await res.json();
-      alert(`Erfolgreich ${d.saved_count} Cookies gespeichert!`);
-      cookiesInput.value = "";
-      checkCookieStatus();
-      closeCookieModal();
-      refresh();
-    } catch (e) {
-      alert("Fehler beim Speichern: " + e);
-    }
-  });
-}
-
-if (cookiesDelete) {
-  cookiesDelete.addEventListener("click", async () => {
-    if (!confirm("Gespeicherte mobile.de Cookies wirklich löschen?")) return;
-    await fetch(`${API}/mobile-cookies`, { method: "DELETE" });
-    checkCookieStatus();
-  });
 }
 
 (async function init() {
