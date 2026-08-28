@@ -17,6 +17,31 @@ logger = logging.getLogger(__name__)
 _lock = threading.Lock()
 
 
+def _wait_stable(page, selector: str, max_wait: float = 9.0, poll: float = 0.7) -> int:
+    """Wartet, bis die Trefferzahl für ``selector`` nicht mehr wächst (SPA lädt
+    Cards nach). Wichtig auf langsamen Hosts: ein fester Delay schneidet sonst
+    unvollständig gerenderte Listen ab. Gibt die finale Anzahl zurück.
+    """
+    last = -1
+    stable = 0
+    deadline = time.time() + max_wait
+    n = 0
+    while time.time() < deadline:
+        try:
+            n = page.locator(selector).count()
+        except Exception:
+            break
+        if n > 0 and n == last:
+            stable += 1
+            if stable >= 2:  # ~2 gleiche Messungen in Folge => fertig geladen
+                break
+        else:
+            stable = 0
+            last = n
+        time.sleep(poll)
+    return n
+
+
 class BrowserUnavailable(RuntimeError):
     """Playwright/Browser ist nicht installiert."""
 
@@ -75,6 +100,10 @@ def fetch_rendered(
                         except Exception:
                             # Selektor nicht erschienen -> trotzdem weiter, ggf. Block/leer.
                             logger.debug("wait_selector '%s' nicht erschienen", wait_selector)
+                        # Bis die Liste vollständig nachgeladen ist (nicht nur die
+                        # erste Card) – sonst auf langsamer Box zu wenige Treffer.
+                        count = _wait_stable(page, wait_selector)
+                        logger.debug("wait_selector '%s' stabil bei %d", wait_selector, count)
 
                     if render_delay > 0:
                         time.sleep(render_delay)
@@ -125,6 +154,11 @@ def fetch_rendered_batch(
 
                     # 2. SRP abrufen (etabliert Akamai-Session)
                     page.goto(srp_url, wait_until="domcontentloaded", timeout=timeout_ms)
+                    try:
+                        page.wait_for_selector("article a[href*='details.html']", timeout=20000)
+                    except Exception:
+                        pass
+                    _wait_stable(page, "article a[href*='details.html']")
                     time.sleep(srp_delay)
                     srp_html = page.content()
 
@@ -133,6 +167,12 @@ def fetch_rendered_batch(
                     for url in detail_urls:
                         try:
                             page.goto(url, wait_until="domcontentloaded", timeout=timeout_ms)
+                            # Auf den Detail-Inhalt warten (Titel) statt nur fester
+                            # Delay – auf langsamer Box sonst leere Seite -> kein SoH.
+                            try:
+                                page.wait_for_selector("h1", timeout=15000)
+                            except Exception:
+                                pass
                             time.sleep(detail_delay)
                             html = page.content()
                             if "zugriff verweigert" not in html.lower()[:500]:
