@@ -72,14 +72,13 @@ class Kleinanzeigen(BasePortal):
             attr_parts.append(f"autos.ez_i:{query.year_from},")
         if query.mileage_to:
             attr_parts.append(f"autos.km_i:,{query.mileage_to}")
-        if query.fuel == "elektro":
-            attr_parts.append("autos.kraftstoff_s:elektro")
-        elif query.fuel == "diesel":
-            attr_parts.append("autos.kraftstoff_s:diesel")
-        elif query.fuel == "benzin":
-            attr_parts.append("autos.kraftstoff_s:benzin")
-        elif query.fuel == "hybrid":
-            attr_parts.append("autos.kraftstoff_s:hybrid")
+        if not custom_term and not (query.make or query.model):
+            if query.fuel == "diesel":
+                attr_parts.append("autos.kraftstoff_s:diesel")
+            elif query.fuel == "benzin":
+                attr_parts.append("autos.kraftstoff_s:benzin")
+            elif query.fuel == "hybrid":
+                attr_parts.append("autos.kraftstoff_s:hybrid")
 
         if query.transmission == "automatik":
             attr_parts.append("autos.getriebe_s:automatik")
