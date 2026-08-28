@@ -35,7 +35,7 @@ RUN apt-get update \
     && mkdir -p /opt/playwright-browsers \
     && playwright install --with-deps chromium firefox \
     && chmod -R a+rx /opt/playwright-browsers \
-    && echo -e "SocksPort 127.0.0.1:9050\nControlPort 127.0.0.1:9051\nCookieAuthentication 0\nDataDirectory /data/tor\nUser crawler" > /etc/tor/torrc \
+    && echo -e "SocksPort 127.0.0.1:9050\nControlPort 127.0.0.1:9051\nCookieAuthentication 0\nDataDirectory /data/tor" > /etc/tor/torrc \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
