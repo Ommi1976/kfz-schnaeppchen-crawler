@@ -61,37 +61,16 @@ class MobileDe(BasePortal):
             params.append(f"q={quote_plus(term)}")
         return f"{self.BASE}/fahrzeuge/search.html?{'&'.join(params)}"
 
-    # ---- Abruf (mit Cookie-Bypass oder Playwright Firefox) ----------
+    # ---- Abruf (autark via Playwright Chromium/Firefox mit Stealth) ----------
     def _fetch(self, url: str) -> str:
-        import requests
-        from ..cookie_storage import get_mobile_cookies
-
-        # 1. Schneller Abruf mit synchronisierten Akamai-Cookies (HTTP 200 in ~0.4s)
-        cookies = get_mobile_cookies()
-        if cookies:
-            try:
-                headers = {
-                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-                    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
-                    "Accept-Language": "de-DE,de;q=0.9,en-US;q=0.8,en;q=0.7",
-                    "Referer": "https://suchen.mobile.de/",
-                }
-                proxies = {"http": self.proxy, "https": self.proxy} if self.proxy else None
-                resp = requests.get(url, headers=headers, cookies=cookies, proxies=proxies, timeout=8.0)
-                if resp.status_code == 200 and len(resp.text) > 4000 and "access denied" not in resp.text.lower() and "zugriff verweigert" not in resp.text.lower():
-                    return resp.text
-            except Exception:
-                pass
-
-        # 2. Fallback: Autarker Playwright Firefox Abruf
         try:
             from ..browser import fetch_rendered
             return fetch_rendered(
-                url, proxy=self.proxy, engine="firefox",
+                url, proxy=self.proxy, engine="chromium",
                 wait_until="domcontentloaded",
                 wait_selector="article a[href*='details.html']",
                 wait_selector_timeout_ms=20000,
-                render_delay=0.8,
+                render_delay=1.0,
             )
         except Exception as e:
             raise PortalError(f"mobile.de: Abruf fehlgeschlagen – {e}")

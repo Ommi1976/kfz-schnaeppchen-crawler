@@ -56,17 +56,35 @@ if not Path("/data").exists():
     PROFILE_DIR = Path(__file__).parent.parent / "firefox_profile"
 
 
+STEALTH_JS = """
+Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+delete Object.getPrototypeOf(navigator).webdriver;
+window.chrome = { runtime: {}, loadTimes: function() {}, csi: function() {}, app: {} };
+Object.defineProperty(navigator, 'plugins', { get: () => [1, 2, 3, 4, 5] });
+Object.defineProperty(navigator, 'languages', { get: () => ['de-DE', 'de', 'en-US', 'en'] });
+"""
+
+CHROMIUM_ARGS = [
+    "--disable-blink-features=AutomationControlled",
+    "--no-sandbox",
+    "--disable-setuid-sandbox",
+    "--disable-dev-shm-usage",
+    "--disable-infobars",
+    "--window-size=1920,1080",
+]
+
+
 def fetch_rendered(
     url: str,
     proxy: Optional[str] = None,
-    engine: str = "firefox",
+    engine: str = "chromium",
     wait_until: str = "domcontentloaded",
     timeout_ms: int = 30000,
-    render_delay: float = 3.0,
+    render_delay: float = 2.0,
     wait_selector: Optional[str] = None,
     wait_selector_timeout_ms: int = 15000,
 ) -> str:
-    """Lädt eine URL in Playwright Firefox mit persistentem Profil und Cookie-Caching."""
+    """Lädt eine URL in Playwright Chromium/Firefox mit Stealth-Injektion."""
     try:
         from playwright.sync_api import sync_playwright
     except ImportError as e:
@@ -74,28 +92,33 @@ def fetch_rendered(
 
     with _lock:
         with sync_playwright() as p:
-            PROFILE_DIR.mkdir(parents=True, exist_ok=True)
-            ctx = p.firefox.launch_persistent_context(
-                user_data_dir=str(PROFILE_DIR),
-                headless=True,
+            # Wähle Engine (Chromium bevorzugt für Akamai-Stealth)
+            try:
+                engine_obj = getattr(p, engine, p.chromium)
+                args = CHROMIUM_ARGS if engine == "chromium" else []
+                browser = engine_obj.launch(headless=True, args=args)
+            except Exception:
+                # Fallback auf Firefox
+                browser = p.firefox.launch(headless=True)
+
+            ctx = browser.new_context(
                 locale="de-DE",
                 timezone_id="Europe/Berlin",
                 viewport={"width": 1440, "height": 900},
+                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
             )
-            page = ctx.new_page() if not ctx.pages else ctx.pages[0]
+            page = ctx.new_page()
+            try:
+                page.add_init_script(STEALTH_JS)
+            except Exception:
+                pass
+
             try:
                 # Akamai Session Warmup auf Startseite
                 if "mobile.de" in url:
                     try:
                         page.goto("https://www.mobile.de/", wait_until="domcontentloaded", timeout=15000)
                         time.sleep(1.5)
-                        try:
-                            from .cookie_storage import save_mobile_cookies
-                            cookies = ctx.cookies()
-                            if cookies:
-                                save_mobile_cookies({c["name"]: c["value"] for c in cookies})
-                        except Exception:
-                            pass
                     except Exception:
                         pass
 
@@ -115,14 +138,8 @@ def fetch_rendered(
                 html = page.content()
                 return html
             finally:
-                try:
-                    from .cookie_storage import save_mobile_cookies
-                    cookies = ctx.cookies()
-                    if cookies:
-                        save_mobile_cookies({c["name"]: c["value"] for c in cookies})
-                except Exception:
-                    pass
-                ctx.close()
+                page.close()
+                browser.close()
 
 
 def fetch_rendered_batch(

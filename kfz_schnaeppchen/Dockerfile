@@ -32,7 +32,7 @@ RUN apt-get update \
         ca-certificates \
     && python3 -m pip install --no-cache-dir --break-system-packages rich PySocks fastapi uvicorn curl_cffi playwright pytesseract pillow \
     && mkdir -p /opt/playwright-browsers \
-    && playwright install --with-deps firefox \
+    && playwright install --with-deps chromium firefox \
     && chmod -R a+rx /opt/playwright-browsers \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
