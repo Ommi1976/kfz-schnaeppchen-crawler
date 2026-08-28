@@ -149,6 +149,8 @@ def run_search(cfg: Config, query: SearchQuery, store: SeenStore) -> List[Listin
             store.record_listing(query.name, l)
         if is_new and l.is_deal:
             new_deals.append(l)
+    if hasattr(store, "purge_unmatching_deals"):
+        store.purge_unmatching_deals(query.name, query)
     if hasattr(store, "prune"):
         store.prune()
 

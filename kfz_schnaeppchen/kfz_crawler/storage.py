@@ -370,12 +370,47 @@ class SeenStore:
             )
             self.conn.commit()
 
-    def clear_deals(self) -> int:
+    def clear_deals(self, search_name: Optional[str] = None) -> None:
         with self._lock:
-            cur = self.conn.execute("DELETE FROM deals")
+            if search_name:
+                self.conn.execute("DELETE FROM deals WHERE search_name = ?", (search_name,))
+            else:
+                self.conn.execute("DELETE FROM deals")
             self.conn.commit()
-            return cur.rowcount
+
+    def purge_unmatching_deals(self, search_name: str, query) -> int:
+        """Entfernt Inserate aus der DB, die den aktuellen Suchkriterien nicht mehr entsprechen."""
+        from .models import Listing, matches_query
+        deals = self.list_deals(limit=1000, search_name=search_name)
+        to_delete = []
+        for d in deals:
+            l = Listing(
+                portal=d.get("portal") or "",
+                title=d.get("title") or "",
+                url=d.get("url") or "",
+                price=d.get("price"),
+                year=d.get("year"),
+                mileage=d.get("mileage"),
+                fuel=d.get("fuel"),
+                power_ps=d.get("power_ps"),
+                battery_kwh=d.get("battery_kwh"),
+                battery_soh=d.get("battery_soh"),
+                ev_range_km=d.get("ev_range_km"),
+                location=d.get("location"),
+                body=d.get("body") or "",
+            )
+            if not matches_query(l, query):
+                to_delete.append(d["fingerprint"])
+
+        if to_delete:
+            with self._lock:
+                placeholders = ",".join("?" * len(to_delete))
+                self.conn.execute(f"DELETE FROM deals WHERE fingerprint IN ({placeholders})", to_delete)
+                self.conn.commit()
+        return len(to_delete)
 
     def close(self) -> None:
-        with self._lock:
+        try:
             self.conn.close()
+        except Exception:
+            pass
