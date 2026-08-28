@@ -187,9 +187,15 @@ def test_matches_query_filtering():
     l5 = Listing(portal="AS24", title="VW Golf 7 TDI DSG Navi", url="http://x/5", price=15000, power_ps=116)
     assert matches_query(l5, q) is False
 
-    # 6. Defekt / Schaden / Motorschaden / Unfall
+    # 6. Defekt / Schaden / Motorschaden / Unfall / Beschädigtes Fahrzeug
     l6 = Listing(portal="AS24", title="VW Golf 7 TDI DSG Navi *Motorschaden*", url="http://x/6", price=8000, year=2019, mileage=85000, fuel="diesel", transmission="automatik", power_ps=150)
     assert matches_query(l6, q) is False
+
+    l6_beschaedigt = Listing(portal="KA", title="Volkswagen ID.3 Pro S", body="Volkswagen ID.3 Pro S 150 kW Beschädigtes Fahrzeug", url="http://x/6b", price=5600)
+    assert matches_query(l6_beschaedigt, q) is False
+
+    l6_glasschaden = Listing(portal="KA", title="VW ID.3 Facelift Glasschaden!!", url="http://x/6c", price=12000)
+    assert matches_query(l6_glasschaden, q) is False
 
     # 7. Nur Export / Nur Händler
     l7 = Listing(portal="AS24", title="VW Golf 7 TDI DSG Navi *Nur für Export*", url="http://x/7", price=9000, year=2019, mileage=85000, fuel="diesel", transmission="automatik", power_ps=150)

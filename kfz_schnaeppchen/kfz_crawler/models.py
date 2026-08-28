@@ -510,9 +510,12 @@ _NON_PKW_PATTERNS = [
 _DEFECT_AND_RESTRICTION_PATTERNS = [
     re.compile(p, re.IGNORECASE)
     for p in [
-        r"\bdefekt\b",
-        r"\bbesch[aä]digt\b",
+        r"\bdefekt",
+        r"\bbesch[aä]dig",
         r"\bunfall(?!frei)",
+        r"\bunfallwagen\b",
+        r"\bunfallauto\b",
+        r"\bunfallfahrzeug\b",
         r"\bmotorschad",
         r"\bgetriebeschad",
         r"\bmotor\s*defekt",
@@ -520,6 +523,12 @@ _DEFECT_AND_RESTRICTION_PATTERNS = [
         r"\bbatteriedefekt",
         r"\bbatterieschad",
         r"\bhagelschad",
+        r"\bhagelschlag",
+        r"\bglasschad",
+        r"\bblechschad",
+        r"\bwasserschad",
+        r"\bbrandschad",
+        r"\bsturmschad",
         r"\bbastler",
         r"\bteiletr[aä]ger",
         r"\bersatzteilspender",

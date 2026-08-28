@@ -78,7 +78,8 @@ class MobileDe(BasePortal):
     def search(self, query: SearchQuery) -> List[Listing]:
         results: List[Listing] = []
         seen_ids = set()
-        for page in range(1, self.max_pages + 1):
+        pages_to_fetch = max(self.max_pages, 5)
+        for page in range(1, pages_to_fetch + 1):
             html = self._fetch(self._build_url(query, page))
             cards = self._parse_cards(html)
             new = 0
