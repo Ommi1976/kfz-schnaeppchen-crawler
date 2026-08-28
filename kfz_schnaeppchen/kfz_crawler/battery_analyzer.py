@@ -244,6 +244,80 @@ def extract_soh_from_image_urls(image_urls: List[str], max_images: int = 15, tim
     return None
 
 
+def fetch_mobile_de_detail_data(raw_id: str) -> dict:
+    """Lädt die unblockierte mobile.de Detailseite und extrahiert SoH, Reichweite, Kapazität, Garantie und Bilder."""
+    if not raw_id:
+        return {}
+    out = {}
+    target_urls = [
+        f"https://suchen.mobile.de/auto-inserat/car/{raw_id}.html",
+        f"https://m.mobile.de/auto-inserat/car/{raw_id}.html",
+    ]
+    sess = requests.Session()
+    sess.headers.update({
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:128.0) Gecko/20100101 Firefox/128.0",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": "de,en-US;q=0.7,en;q=0.3",
+    })
+    html = ""
+    for url in target_urls:
+        try:
+            resp = sess.get(url, headers=sess.headers, timeout=5.0)
+            if resp.status_code == 200 and len(resp.text) > 4000:
+                html = resp.text
+                break
+        except Exception:
+            continue
+
+    if not html:
+        try:
+            from kfz_crawler.browser import fetch_rendered
+            html = fetch_rendered(target_urls[0], engine="firefox")
+        except Exception:
+            pass
+
+    if not html:
+        return {}
+
+    soup = BeautifulSoup(html, "lxml")
+    full_text = soup.get_text(" ", strip=True)
+
+    # 1. SoH
+    soh = extract_battery_soh(full_text)
+    if soh is not None:
+        out["battery_soh"] = soh
+
+    # 2. Reichweite
+    rng = extract_ev_range_km(full_text)
+    if rng is not None:
+        out["ev_range_km"] = rng
+
+    # 3. Batterie-kWh
+    kwh = extract_battery_kwh(full_text)
+    if kwh is not None:
+        out["battery_kwh"] = kwh
+
+    # 4. Garantie
+    from kfz_crawler.models import extract_warranty
+    warr = extract_warranty(full_text)
+    if warr:
+        out["warranty"] = warr
+
+    # 5. Bilder
+    imgs = [img.get("src") or img.get("data-src") for img in soup.select("img[src], img[data-src]")]
+    valid_imgs = [u for u in imgs if u and u.startswith("http") and not u.endswith(".svg")]
+    if valid_imgs:
+        out["image_urls"] = valid_imgs
+
+    # 6. Bild-OCR Fallback
+    if "battery_soh" not in out and valid_imgs:
+        img_soh = extract_soh_from_image_urls(valid_imgs, max_images=8)
+        if img_soh:
+            out["battery_soh"] = img_soh
+
+    return out
+
+
 # Bereits erfolglos geprüfte Inserate (pro Prozess), damit hoffnungslose
 # Inserate nicht bei jedem Hintergrund-Lauf erneut heruntergeladen/OCR-t werden.
 _OCR_TRIED_FP: set = set()
@@ -252,12 +326,9 @@ _BG_MAX_LISTINGS_PER_PASS = 40
 
 
 def run_background_image_enrichment(store, max_listings: int = _BG_MAX_LISTINGS_PER_PASS) -> int:
-    """Scannt im Hintergrund E-Auto-Inserate ohne SoH (CPU-schonend, gedeckelt)."""
-    if not HAS_OCR:
-        return 0
-
+    """Scannt im Hintergrund E-Auto-Inserate ohne SoH (inkl. blockfreiem mobile.de Detailabruf & Turbo-OCR)."""
     rows = store.conn.execute(
-        "SELECT fingerprint, title, image_urls FROM deals WHERE (fuel LIKE '%elektro%' OR fuel LIKE '%electric%') AND battery_soh IS NULL"
+        "SELECT fingerprint, portal, url, title, image_urls FROM deals WHERE (fuel LIKE '%elektro%' OR fuel LIKE '%electric%') AND battery_soh IS NULL"
     ).fetchall()
 
     found = 0
@@ -269,8 +340,46 @@ def run_background_image_enrichment(store, max_listings: int = _BG_MAX_LISTINGS_
         if processed >= max_listings:
             break
         title = r["title"]
+        portal = r["portal"] or ""
+        url = r["url"] or ""
         imgs_json = r["image_urls"]
-        if not imgs_json:
+
+        # 1. mobile.de: Detaildaten blockfrei im Hintergrund abrufen
+        if "mobile" in portal.lower() or "mobile.de" in url:
+            m = re.search(r"id=(\d+)", url) or re.search(r"/(\d+)\.html", url)
+            raw_id = m.group(1) if m else None
+            if raw_id:
+                try:
+                    det = fetch_mobile_de_detail_data(raw_id)
+                    if det:
+                        soh = det.get("battery_soh")
+                        rng = det.get("ev_range_km")
+                        kwh = det.get("battery_kwh")
+                        warr = det.get("warranty")
+                        new_imgs = det.get("image_urls")
+                        imgs_str = json.dumps(new_imgs, ensure_ascii=False) if new_imgs else None
+
+                        store.conn.execute(
+                            "UPDATE deals SET "
+                            "battery_soh = COALESCE(?, battery_soh), "
+                            "ev_range_km = COALESCE(?, ev_range_km), "
+                            "battery_kwh = COALESCE(?, battery_kwh), "
+                            "warranty = COALESCE(?, warranty), "
+                            "image_urls = COALESCE(?, image_urls) "
+                            "WHERE fingerprint = ?",
+                            (soh, rng, kwh, warr, imgs_str, fp)
+                        )
+                        store.conn.commit()
+                        if soh:
+                            found += 1
+                            logger.info("⚡ mobile.de Detail-Sync: SoH=%.1f%% für %s gespeichert", soh, title[:50])
+                            _OCR_TRIED_FP.add(fp)
+                            continue
+                except Exception as e:
+                    logger.debug("mobile.de Detail-Sync Fehler für %s: %s", title[:40], e)
+
+        # 2. Bild-OCR Fallback für andere Portale & Galerien
+        if not HAS_OCR or not imgs_json:
             continue
         try:
             urls = json.loads(imgs_json) if isinstance(imgs_json, str) else imgs_json
