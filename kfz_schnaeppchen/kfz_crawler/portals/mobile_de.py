@@ -65,8 +65,16 @@ class MobileDe(BasePortal):
     def _fetch(self, url: str) -> str:
         try:
             from ..browser import fetch_rendered
-            return fetch_rendered(url, proxy=self.proxy, engine="firefox",
-                                  wait_until="domcontentloaded", render_delay=1.0)
+            # Explizit warten, bis die Ergebnis-Cards im DOM sind – auf einer
+            # ausgelasteten HAOS-Box reicht ein fester Delay nicht, die SPA ist
+            # dann noch leer (0 Treffer). Danach kleiner Settle-Delay.
+            return fetch_rendered(
+                url, proxy=self.proxy, engine="firefox",
+                wait_until="domcontentloaded",
+                wait_selector="article a[href*='details.html']",
+                wait_selector_timeout_ms=20000,
+                render_delay=0.8,
+            )
         except Exception as e:
             raise PortalError(f"mobile.de: Abruf fehlgeschlagen – {e}")
 

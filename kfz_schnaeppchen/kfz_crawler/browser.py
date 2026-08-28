@@ -32,8 +32,16 @@ def fetch_rendered(
     wait_until: str = "domcontentloaded",
     timeout_ms: int = 30000,
     render_delay: float = 3.0,
+    wait_selector: Optional[str] = None,
+    wait_selector_timeout_ms: int = 15000,
 ) -> str:
-    """Lädt eine URL in Playwright Firefox/Chromium und liefert das gerenderte HTML."""
+    """Lädt eine URL in Playwright Firefox/Chromium und liefert das gerenderte HTML.
+
+    Ist ``wait_selector`` gesetzt, wird explizit gewartet, bis dieses Element im
+    DOM ist (statt nur eines festen ``render_delay``). Das ist auf langsamen/
+    ausgelasteten Hosts entscheidend: bei einer React-SPA wie mobile.de sind die
+    Listings sonst noch nicht gerendert, wenn der feste Delay abläuft -> 0 Treffer.
+    """
     try:
         from playwright.sync_api import sync_playwright
     except ImportError as e:
@@ -59,6 +67,15 @@ def fetch_rendered(
                             pass
 
                     page.goto(url, wait_until=wait_until, timeout=timeout_ms)
+
+                    # Auf die eigentlichen Inhalte warten (robust gegen langsame CPU).
+                    if wait_selector:
+                        try:
+                            page.wait_for_selector(wait_selector, timeout=wait_selector_timeout_ms)
+                        except Exception:
+                            # Selektor nicht erschienen -> trotzdem weiter, ggf. Block/leer.
+                            logger.debug("wait_selector '%s' nicht erschienen", wait_selector)
+
                     if render_delay > 0:
                         time.sleep(render_delay)
 
