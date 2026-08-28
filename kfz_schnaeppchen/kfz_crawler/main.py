@@ -16,12 +16,13 @@ from .models import (
     Listing,
     SearchQuery,
     infer_listing_battery,
+    infer_listing_details,
     infer_listing_range,
     matches_query,
 )
 from .notify import notify_all
 from .portals import REGISTRY
-from .portals.base import CookiesExpired, PortalError
+from .portals.base import PortalError
 from .storage import SeenStore
 
 console = Console()
@@ -39,10 +40,6 @@ def _search_one_portal(cfg: Config, key: str, query: SearchQuery, store=None) ->
         proxy=cfg.settings.proxy or None,
         render=cfg.settings.use_browser,
     )
-    # mobile.de: importierte Session-Cookies (Browser-Add-on) durchreichen.
-    cookies = getattr(cfg.settings, "mobile_cookies", "")
-    if cookies and hasattr(portal, "cookies"):
-        portal.cookies = cookies
     try:
         found = portal.search(query)
         # Homogenisierung: Felder, die die Trefferliste nicht liefert, per
@@ -54,28 +51,12 @@ def _search_one_portal(cfg: Config, key: str, query: SearchQuery, store=None) ->
             infer_listing_battery(listing, check_images=True)
             infer_listing_range(listing)
         console.print(f"  [dim]{portal.name}: {len(found)} Treffer[/dim]")
-        if key == "mobile_de" and store is not None:
-            _set_mobile_status(store, "ok", f"{len(found)} Treffer")
         return found
-    except CookiesExpired as e:
-        console.print(f"  [yellow]{e}[/yellow]")
-        if key == "mobile_de" and store is not None:
-            _set_mobile_status(store, "expired", str(e))
     except PortalError as e:
         console.print(f"  [yellow]{e}[/yellow]")
     except Exception as e:  # pragma: no cover - robuster Lauf trotz Portalfehler
         console.print(f"  [red]{portal.name}: Fehler – {e}[/red]")
     return []
-
-
-def _set_mobile_status(store, state: str, message: str) -> None:
-    import json as _json
-    import time as _time
-    try:
-        store.set_setting("mobile_status", _json.dumps(
-            {"state": state, "message": message, "checked_at": _time.time()}))
-    except Exception:
-        pass
 
 
 def run_search(cfg: Config, query: SearchQuery, store: SeenStore) -> List[Listing]:
@@ -95,11 +76,31 @@ def run_search(cfg: Config, query: SearchQuery, store: SeenStore) -> List[Listin
         for fut in as_completed(futures):
             all_listings.extend(fut.result())
 
+    # Entfernung zur eigenen PLZ (Home) für alle Treffer berechnen.
+    home_zip = getattr(cfg.settings, "home_zip", "") or None
+    if home_zip:
+        for l in all_listings:
+            try:
+                infer_listing_details(l, home_zip)
+            except Exception:
+                pass
+
     # Zentraler Nachfilter: erweiterte Kriterien (Getriebe, Leistung, Karosserie,
     # E-Auto-Reichweite …) portalübergreifend anwenden. Die Aufteilung wird
     # protokolliert, damit ein Portal mit Roh-Treffern nicht stillschweigend
     # aus der Anzeige verschwindet.
     before_filter = Counter(l.portal for l in all_listings)
+    # #2 Portal-Health: liefert ein aktives Portal 0 Roh-Treffer, obwohl insgesamt
+    # genug zusammenkommt, deutet das auf einen Parser-Bruch oder Block hin.
+    total_raw = sum(before_filter.values())
+    if total_raw >= cfg.settings.min_comparables:
+        for key in active:
+            pname = REGISTRY[key].name
+            if before_filter.get(pname, 0) == 0:
+                console.print(
+                    f"  [yellow]⚠ Portal-Health: {pname} lieferte 0 Treffer – "
+                    f"Parser/Block prüfen.[/yellow]"
+                )
     all_listings = [l for l in all_listings if matches_query(l, query)]
     after_filter = Counter(l.portal for l in all_listings)
     if before_filter:

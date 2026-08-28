@@ -34,7 +34,6 @@ def test_api_status(client):
     assert "version" in status
     assert "running" in status
     assert "searches" in status
-    assert "mobile" in status
 
 
 def test_api_searches_lifecycle(client):
@@ -79,28 +78,3 @@ def test_api_searches_lifecycle(client):
     # 5. Prüfen ob gelöscht
     r_up_after = client.put(f"/api/searches/{sid}", json=payload)
     assert r_up_after.status_code == 404
-
-
-def test_api_mobile_cookies_token_protection(client):
-    token = client.app.state.store.get_setting("ingest_token", "")
-    assert token != ""
-
-    # Ohne Token -> 401
-    r_no_tok = client.post("/api/mobile-cookies", json={"cookies": "foo=bar; _abck=123"})
-    assert r_no_tok.status_code == 401
-
-    # Mit falschem Token -> 401
-    r_wrong_tok = client.post(
-        "/api/mobile-cookies",
-        headers={"X-KFZ-Token": "wrong"},
-        json={"cookies": "foo=bar; _abck=123"},
-    )
-    assert r_wrong_tok.status_code == 401
-
-    # Mit ungültigen Cookies (ohne _abck) -> 400
-    r_bad_cookie = client.post(
-        "/api/mobile-cookies",
-        headers={"X-KFZ-Token": token},
-        json={"cookies": "session=123"},
-    )
-    assert r_bad_cookie.status_code == 400

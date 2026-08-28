@@ -135,7 +135,6 @@ async function loadStatus() {
   sel.value = cur;
 
   renderSearches(s.searches || []);
-  renderMobileBanner(s.mobile);
   document.getElementById("run").disabled = running;
 }
 
@@ -279,9 +278,9 @@ async function loadDeals() {
         ? `<div class="battery-cell">${battInfo}${sohBadge}${rangeInfo}</div>`
         : `<span class="muted">–</span>`;
 
-      const locText = d.location_city || d.location || "";
-      const locBadge = locText
-        ? `<span class="badge-loc" title="${escapeHtml(d.location || '')}">📍 ${escapeHtml(locText)}${d.distance_km ? ` · ${d.distance_km} km` : ''}</span>`
+      // Nur die Entfernung (Luftlinie) zur eigenen PLZ anzeigen – nicht den Ort.
+      const locBadge = (d.distance_km != null)
+        ? `<span class="badge-loc" title="${escapeHtml(d.location || '')}">📍 ${d.distance_km} km</span>`
         : "";
       const warrantyBadge = d.warranty
         ? `<span class="badge-warranty" title="${escapeHtml(d.warranty)}">🛡️ ${escapeHtml(d.warranty)}</span>`
@@ -430,65 +429,6 @@ async function submitForm(ev) {
 }
 
 // ---------- Events ----------
-function renderMobileBanner(m) {
-  const banner = document.getElementById("mobile-banner");
-  if (!m || !m.active) { banner.classList.add("hidden"); return; }
-  banner.classList.remove("hidden");
-  const txt = document.getElementById("mobile-banner-text");
-  banner.classList.remove("ok", "warn");
-  if (m.state === "ok") {
-    banner.classList.add("ok");
-    txt.innerHTML = "✓ <b>mobile.de</b> autark aktiv (Playwright Firefox Headless – kein PC-Browser nötig).";
-  } else if (m.state === "expired") {
-    banner.classList.add("warn");
-    txt.innerHTML = "⚠ <b>mobile.de</b>: Modus wird automatisch synchronisiert.";
-  } else {
-    banner.classList.add("ok");
-    txt.innerHTML = "✓ <b>mobile.de</b> aktiv.";
-  }
-}
-
-document.getElementById("mobile-open").addEventListener("click", () => {
-  document.getElementById("mobile-result").textContent = "";
-  document.getElementById("mobile-cookies").value = "";
-  const tok = statusCache && statusCache.mobile && statusCache.mobile.ingest_token;
-  const box = document.getElementById("mobile-token-box");
-  if (tok) {
-    document.getElementById("mobile-token").textContent = tok;
-    box.style.display = "";
-  } else {
-    box.style.display = "none";
-  }
-  document.getElementById("mobile-modal").classList.remove("hidden");
-});
-document.getElementById("mobile-close").addEventListener("click", () =>
-  document.getElementById("mobile-modal").classList.add("hidden"));
-document.getElementById("mobile-modal").addEventListener("click", (e) => {
-  if (e.target.id === "mobile-modal") e.currentTarget.classList.add("hidden");
-});
-document.getElementById("mobile-test").addEventListener("click", async () => {
-  const btn = document.getElementById("mobile-test");
-  const res = document.getElementById("mobile-result");
-  const cookies = document.getElementById("mobile-cookies").value.trim();
-  btn.disabled = true; res.textContent = "teste…"; res.className = "form-error";
-  try {
-    const tok = (statusCache && statusCache.mobile && statusCache.mobile.ingest_token) || "";
-    const r = await fetch(`${API}/mobile-cookies`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "X-KFZ-Token": tok },
-      body: JSON.stringify({ cookies }),
-    });
-    const d = await r.json();
-    if (r.ok && d.ok) {
-      res.textContent = "✓ " + d.message; res.style.color = "#86efac";
-      setTimeout(() => { document.getElementById("mobile-modal").classList.add("hidden"); refresh(); }, 1200);
-    } else {
-      res.style.color = ""; res.textContent = d.message || d.detail || "Fehler";
-    }
-  } catch (e) { res.textContent = String(e); }
-  btn.disabled = false;
-});
-
 document.getElementById("new-search").addEventListener("click", () => openForm(null));
 document.getElementById("modal-close").addEventListener("click", closeForm);
 document.getElementById("modal-cancel").addEventListener("click", closeForm);

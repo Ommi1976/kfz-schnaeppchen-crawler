@@ -22,7 +22,7 @@ class Settings:
     use_browser: bool = False        # #1: Playwright-Backend für geblockte Portale
     verify_details: bool = False     # #4: Kleinanzeigen-Detailseiten anreichern
     suspicious_discount: float = 0.6  # #5: ab diesem Rabatt gilt ein Inserat als verdächtig
-    mobile_cookies: str = ""         # mobile.de Session-Cookies (Browser-Add-on); leer = aus
+    home_zip: str = "68766"          # eigene PLZ – Basis für die Entfernungsanzeige
 
 
 @dataclass
@@ -74,6 +74,7 @@ class Config:
             use_browser=bool(s.get("use_browser", False)),
             verify_details=bool(s.get("verify_details", False)),
             suspicious_discount=float(s.get("suspicious_discount", 0.6)),
+            home_zip=str(s.get("home_zip", "68766") or "68766").strip(),
         )
 
         portals = data.get("portals", {}) or {}

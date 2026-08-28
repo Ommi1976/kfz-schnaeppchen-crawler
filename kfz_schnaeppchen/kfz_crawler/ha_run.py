@@ -59,6 +59,7 @@ def build_config(opts: dict) -> Config:
         verify_details=bool(opts.get("verify_details", False)),
         # Prozentwert aus der UI (z. B. 60) -> Anteil.
         suspicious_discount=float(opts.get("suspicious_discount", 60)) / 100.0,
+        home_zip=str(opts.get("home_zip", "68766") or "68766").strip(),
     )
 
     # Portale: Liste aktiver Portal-Keys -> dict {key: bool}

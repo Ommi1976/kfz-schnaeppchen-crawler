@@ -1,11 +1,9 @@
-"""mobile.de-Scraper (browserlos via curl_cffi + importierte Session-Cookies).
+"""mobile.de-Scraper (Playwright/Firefox-Rendering).
 
-mobile.de ist durch Akamai Bot Manager geschützt. Weder reine requests noch
-ein (auch headless) Browser kommen an echte Daten – Akamai weist automatisierte
-Browser ab. Funktionierender Weg OHNE Browser im Crawler: die Session-Cookies
-aus einem echten, eingeloggten Browser importieren und mit curl_cffi (imitiert
-den Chrome-TLS-Fingerprint) wiederverwenden. Laufen die Cookies ab, meldet der
-Scraper CookiesExpired und die Oberfläche fordert zum Aktualisieren auf.
+mobile.de ist durch Akamai Bot Manager geschützt. Reine requests werden
+abgewiesen. Funktionierender Weg im Add-on: die Seite headless mit
+Playwright/Firefox (Gecko-Engine) rendern – dieser Fingerprint kommt an die
+server-gerenderten Ergebnis-Cards (data-testid) heran, ganz ohne Session-Cookies.
 """
 
 from __future__ import annotations
@@ -17,7 +15,7 @@ from urllib.parse import quote_plus
 from bs4 import BeautifulSoup
 
 from ..models import Listing, SearchQuery
-from .base import BasePortal, CookiesExpired, PortalError
+from .base import BasePortal, PortalError
 
 FUEL_MAP = {"benzin": "PETROL", "diesel": "DIESEL", "elektro": "ELECTRICITY", "hybrid": "HYBRID"}
 GEAR_MAP = {"schaltgetriebe": "MANUAL_GEAR", "automatik": "AUTOMATIC_GEAR"}
@@ -29,10 +27,6 @@ class MobileDe(BasePortal):
     name = "mobile.de"
     BASE = "https://suchen.mobile.de"
     PREFERS_BROWSER = True  # Autarker Playwright Firefox Abruf
-
-    def __init__(self, *args, cookies: str = "", **kwargs):
-        super().__init__(*args, **kwargs)
-        self.cookies = (cookies or "").strip()
 
     # ---- URL ----------------------------------------------------------
     def _build_url(self, query: SearchQuery, page: int) -> str:
@@ -67,31 +61,13 @@ class MobileDe(BasePortal):
             params.append(f"q={quote_plus(term)}")
         return f"{self.BASE}/fahrzeuge/search.html?{'&'.join(params)}"
 
-    # ---- Abruf (primär autark via Playwright Firefox, Fallback auf curl_cffi) ---
+    # ---- Abruf (autark via Playwright Firefox auf dem Server) ----------
     def _fetch(self, url: str) -> str:
-        # 1. Primärer Weg: Autarker Playwright Firefox Abruf auf dem Server
         try:
             from ..browser import fetch_rendered
-            return fetch_rendered(url, proxy=self.proxy, engine="firefox", wait_until="domcontentloaded", render_delay=1.0)
+            return fetch_rendered(url, proxy=self.proxy, engine="firefox",
+                                  wait_until="domcontentloaded", render_delay=1.0)
         except Exception as e:
-            # 2. Sekundärer Weg: curl_cffi mit hinterlegten Session-Cookies (falls vorhanden)
-            if self.cookies:
-                try:
-                    from curl_cffi import requests as creq
-                    headers = {
-                        "User-Agent": ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-                                       "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"),
-                        "Accept-Language": "de-DE,de;q=0.9,en;q=0.7",
-                        "Cookie": self.cookies,
-                        "Referer": "https://www.mobile.de/",
-                    }
-                    r = creq.get(url, headers=headers, impersonate="chrome124", timeout=25)
-                    html = r.text or ""
-                    low = html.lower()
-                    if not ("behavioral-content" in low or "sec-if-cpt" in low or r.status_code in (403, 429)):
-                        return html
-                except Exception:
-                    pass
             raise PortalError(f"mobile.de: Abruf fehlgeschlagen – {e}")
 
     def search(self, query: SearchQuery) -> List[Listing]:

@@ -14,7 +14,7 @@ from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 
-from fastapi import Body, FastAPI, HTTPException, Request
+from fastapi import Body, FastAPI, HTTPException
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -63,8 +63,6 @@ def _run_all(app: FastAPI, only_id: str | None = None) -> dict:
     """Führt die (aktiven) Suchen aus der DB aus (blockierend -> via to_thread)."""
     cfg = _load_cfg()  # globale Einstellungen/Portale/Benachrichtigung
     store: SeenStore = app.state.store
-    # mobile.de-Cookies aus dem Store (Browser-Add-on-Import) übernehmen.
-    cfg.settings.mobile_cookies = store.get_setting("mobile_cookies", "")
     app.state.cfg = cfg
     summary = {}
     total = 0
@@ -144,10 +142,6 @@ async def lifespan(app: FastAPI):
     app.state.last_finished_at = None
     app.state.next_run_at = None
     app.state.last_report = {}
-    # Token für den direkten LAN-Zugriff (Browser-Extension). Einmalig erzeugen.
-    if not app.state.store.get_setting("ingest_token", ""):
-        import secrets
-        app.state.store.set_setting("ingest_token", secrets.token_hex(16))
     app.state.scheduler = asyncio.create_task(_scheduler(app))
     try:
         yield
@@ -215,69 +209,7 @@ async def status():
         "portal_counts": app.state.store.count_deals_by_portal(),
         "searches": searches,
         "last_report": app.state.last_report,
-        "mobile": _mobile_status(app),
     }
-
-
-def _mobile_status(app: FastAPI) -> dict:
-    """Status der mobile.de-Anbindung (autark via Firefox Playwright)."""
-    cfg: Config = app.state.cfg
-    active = bool(cfg.portals.get("mobile_de"))
-    return {
-        "active": active,
-        "has_cookies": True,
-        "state": "ok" if active else "none",
-        "message": "Autarker Firefox-Headless-Betrieb aktiv",
-        "checked_at": time.time(),
-        "ingest_token": app.state.store.get_setting("ingest_token", ""),
-    }
-
-
-@app.get("/api/mobile-status")
-async def mobile_status():
-    return _mobile_status(app)
-
-
-def _test_mobile_cookies(cookies: str) -> dict:
-    """Cookies sofort gegen mobile.de testen (kleiner Suchlauf)."""
-    from .models import SearchQuery as _SQ
-    from .portals.mobile_de import MobileDe
-    from .portals.base import CookiesExpired, PortalError
-    portal = MobileDe(request_delay=0.5, max_pages=1, cookies=cookies)
-    try:
-        found = portal.search(_SQ(name="test", make="volkswagen", model="golf"))
-        return {"ok": True, "count": len(found),
-                "message": f"{len(found)} Treffer – Cookies gültig."}
-    except CookiesExpired as e:
-        return {"ok": False, "message": str(e)}
-    except PortalError as e:
-        return {"ok": False, "message": str(e)}
-    except Exception as e:
-        return {"ok": False, "message": f"Fehler: {e}"}
-
-
-@app.post("/api/mobile-cookies")
-async def save_mobile_cookies(request: Request, payload: dict = Body(...)):
-    import json as _json
-    import time as _time
-    store = app.state.store
-    # Token-Schutz: sowohl die (Ingress-)Oberfläche als auch die Browser-Extension
-    # senden den X-KFZ-Token mit. So ist der Endpunkt auch bei freigegebenem
-    # LAN-Port abgesichert, ohne die übrige Oberfläche zu beeinträchtigen.
-    token = store.get_setting("ingest_token", "")
-    if not token or request.headers.get("X-KFZ-Token") != token:
-        raise HTTPException(status_code=401, detail="Ungültiger oder fehlender Token.")
-    cookies = str(payload.get("cookies", "") or "").strip()
-    if not cookies or "_abck" not in cookies:
-        raise HTTPException(status_code=400,
-                            detail="Ungültig: erwarte den mobile.de-Cookie-String (mit _abck).")
-    result = await asyncio.to_thread(_test_mobile_cookies, cookies)
-    if result["ok"]:
-        store.set_setting("mobile_cookies", cookies)
-    store.set_setting("mobile_status", _json.dumps({
-        "state": "ok" if result["ok"] else "expired",
-        "message": result["message"], "checked_at": _time.time()}))
-    return result
 
 
 # ---- Suchen verwalten -------------------------------------------------

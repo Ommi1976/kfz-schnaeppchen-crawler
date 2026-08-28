@@ -21,7 +21,14 @@ logger = logging.getLogger(__name__)
 try:
     from PIL import Image, ImageEnhance, ImageFilter, ImageOps, ImageStat
     import pytesseract
-    HAS_OCR = True
+    # Auch das Tesseract-Binary prüfen: pytesseract allein reicht nicht, das
+    # ausführbare tesseract muss vorhanden sein. Fehlt es, OCR komplett aus
+    # (keine vergeblichen Bild-Downloads/OCR-Versuche pro Inserat).
+    try:
+        pytesseract.get_tesseract_version()
+        HAS_OCR = True
+    except Exception:
+        HAS_OCR = False
 except ImportError:
     HAS_OCR = False
 
