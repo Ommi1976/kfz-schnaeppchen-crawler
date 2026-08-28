@@ -9,13 +9,11 @@ export PLAYWRIGHT_BROWSERS_PATH=/opt/playwright-browsers
 # Home Assistant mountet /data als root:root. Einmal beim Start korrigieren,
 # danach läuft die App ohne Root-Rechte.
 if [ "$(id -u)" = "0" ]; then
-    mkdir -p /data /var/lib/tor /var/log/tor
-    chown -R debian-tor:debian-tor /var/lib/tor /var/log/tor 2>/dev/null || true
-    chmod 700 /var/lib/tor 2>/dev/null || true
-    echo "[KFZ Schnäppchen] Starte integrierten Tor-Dienst..."
-    tor --RunAsDaemon 1 || true
-    mkdir -p /data
+    mkdir -p /data/tor /data/firefox_profile
     chown -R crawler:crawler /data
+    chmod 700 /data/tor
+    echo "[KFZ Schnäppchen] Starte integrierten Tor-Dienst..."
+    gosu crawler tor --RunAsDaemon 1 || true
     exec gosu crawler /run.sh
 fi
 
