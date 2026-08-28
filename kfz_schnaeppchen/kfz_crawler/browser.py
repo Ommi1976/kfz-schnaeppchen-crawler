@@ -83,63 +83,86 @@ def fetch_rendered(
     render_delay: float = 2.0,
     wait_selector: Optional[str] = None,
     wait_selector_timeout_ms: int = 15000,
+    max_retries: int = 2,
 ) -> str:
-    """Lädt eine URL in Playwright Chromium/Firefox mit Stealth-Injektion."""
+    """Lädt eine URL in Playwright Chromium/Firefox mit Stealth-Injektion und dynamischer Tor-Rotation."""
     try:
         from playwright.sync_api import sync_playwright
     except ImportError as e:
         raise BrowserUnavailable("Playwright nicht installiert.") from e
 
+    from .tor_service import is_tor_available, renew_tor_identity
+
+    # Falls kein Proxy explizit angegeben ist, nutze lokalen Tor-Dienst für mobile.de
+    effective_proxy = proxy
+    if not effective_proxy and "mobile.de" in url and is_tor_available():
+        effective_proxy = "socks5://127.0.0.1:9050"
+
     with _lock:
-        with sync_playwright() as p:
-            # Wähle Engine (Chromium bevorzugt für Akamai-Stealth)
-            try:
+        for attempt in range(max_retries + 1):
+            with sync_playwright() as p:
                 engine_obj = getattr(p, engine, p.chromium)
-                args = CHROMIUM_ARGS if engine == "chromium" else []
-                browser = engine_obj.launch(headless=True, args=args)
-            except Exception:
-                # Fallback auf Firefox
-                browser = p.firefox.launch(headless=True)
+                launch_kwargs: dict = {"headless": True}
+                if engine == "chromium":
+                    launch_kwargs["args"] = CHROMIUM_ARGS
+                if effective_proxy:
+                    launch_kwargs["proxy"] = {"server": effective_proxy}
 
-            ctx = browser.new_context(
-                locale="de-DE",
-                timezone_id="Europe/Berlin",
-                viewport={"width": 1440, "height": 900},
-                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-            )
-            page = ctx.new_page()
-            try:
-                page.add_init_script(STEALTH_JS)
-            except Exception:
-                pass
+                try:
+                    browser = engine_obj.launch(**launch_kwargs)
+                except Exception:
+                    # Fallback auf Firefox
+                    browser = p.firefox.launch(headless=True, proxy={"server": effective_proxy} if effective_proxy else None)
 
-            try:
-                # Akamai Session Warmup auf Startseite
-                if "mobile.de" in url:
-                    try:
-                        page.goto("https://www.mobile.de/", wait_until="domcontentloaded", timeout=15000)
-                        time.sleep(1.5)
-                    except Exception:
-                        pass
+                ctx = browser.new_context(
+                    locale="de-DE",
+                    timezone_id="Europe/Berlin",
+                    viewport={"width": 1440, "height": 900},
+                    user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+                )
+                page = ctx.new_page()
+                try:
+                    page.add_init_script(STEALTH_JS)
+                except Exception:
+                    pass
 
-                page.goto(url, wait_until=wait_until, timeout=timeout_ms)
+                try:
+                    # Akamai Session Warmup auf Startseite
+                    if "mobile.de" in url:
+                        try:
+                            page.goto("https://www.mobile.de/", wait_until="domcontentloaded", timeout=15000)
+                            time.sleep(1.5)
+                        except Exception:
+                            pass
 
-                if wait_selector:
-                    try:
-                        page.wait_for_selector(wait_selector, timeout=wait_selector_timeout_ms)
-                    except Exception:
-                        logger.debug("wait_selector '%s' nicht erschienen", wait_selector)
-                    count = _wait_stable(page, wait_selector)
-                    logger.debug("wait_selector '%s' stabil bei %d", wait_selector, count)
+                    page.goto(url, wait_until=wait_until, timeout=timeout_ms)
 
-                if render_delay > 0:
-                    time.sleep(render_delay)
+                    if wait_selector:
+                        try:
+                            page.wait_for_selector(wait_selector, timeout=wait_selector_timeout_ms)
+                        except Exception:
+                            logger.debug("wait_selector '%s' nicht erschienen", wait_selector)
+                        count = _wait_stable(page, wait_selector)
+                        logger.debug("wait_selector '%s' stabil bei %d", wait_selector, count)
 
-                html = page.content()
-                return html
-            finally:
-                page.close()
-                browser.close()
+                    if render_delay > 0:
+                        time.sleep(render_delay)
+
+                    html = page.content()
+
+                    # Prüfe auf Blockseite
+                    if "zugriff verweigert" in html.lower()[:1000] or "access denied" in html.lower()[:1000]:
+                        if attempt < max_retries and effective_proxy and "9050" in effective_proxy:
+                            logger.info("mobile.de blockiert Tor-Node. Fordere neue Tor-Identität (Circuit) an (Versuch %d/%d)...", attempt + 1, max_retries)
+                            renew_tor_identity()
+                            continue
+
+                    return html
+                finally:
+                    page.close()
+                    browser.close()
+
+        return html
 
 
 def fetch_rendered_batch(

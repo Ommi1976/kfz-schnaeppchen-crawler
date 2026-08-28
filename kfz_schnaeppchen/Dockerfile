@@ -26,6 +26,7 @@ RUN apt-get update \
         tesseract-ocr-deu \
         tesseract-ocr-eng \
         libtesseract-dev \
+        tor \
         curl \
         gosu \
         netbase \
@@ -34,6 +35,7 @@ RUN apt-get update \
     && mkdir -p /opt/playwright-browsers \
     && playwright install --with-deps chromium firefox \
     && chmod -R a+rx /opt/playwright-browsers \
+    && echo -e "SocksPort 0.0.0.0:9050\nControlPort 0.0.0.0:9051\nCookieAuthentication 0\nDataDirectory /var/lib/tor" > /etc/tor/torrc \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
