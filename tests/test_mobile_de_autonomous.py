@@ -33,5 +33,17 @@ def test_mobile_de_autonomous_search():
         assert l.mileage == 54000
         assert l.fuel == "diesel"
         assert l.power_ps == 150
-        assert l.location == "Autohaus Müller, 66111 Saarbrücken"
+        # Standort wird auf 'PLZ Stadt' normalisiert, damit die Entfernung
+        # berechnet werden kann (Händlername wird entfernt).
+        assert l.location == "66111 Saarbrücken"
         assert l.raw_id == "11223344"
+
+
+def test_mobile_de_location_extraction():
+    """PLZ hinter langem Händlernamen darf nicht abgeschnitten werden."""
+    E = MobileDe._extract_location
+    assert E("Sehr langer Autohaus-Name GmbH & Co. KG Vertragshändler DE-68766 Hockenheim") == "68766 Hockenheim"
+    # Kilometer-Falle: 5-stellige km-Zahl darf NICHT als PLZ gelten.
+    assert E("Golf · 12.345 km · 90 kW · Privat 70173 Stuttgart") == "70173 Stuttgart"
+    # Ohne PLZ: Fallback auf Stadttext (keine Distanz, aber Anzeige bleibt).
+    assert E("Nur Berlin ohne PLZ") == "Nur Berlin ohne PLZ"

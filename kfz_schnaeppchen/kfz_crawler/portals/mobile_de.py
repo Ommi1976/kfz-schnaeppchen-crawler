@@ -171,6 +171,13 @@ class MobileDe(BasePortal):
                     existing.append(img_url)
             listing.image_urls = existing
 
+            # Standort: hat die Karte keine PLZ geliefert, aus der Detailseite
+            # (volle Adresse) nachziehen, damit die Entfernung berechnet werden kann.
+            if not (listing.location and re.search(r"\b\d{5}\b", listing.location)):
+                loc2 = self._extract_location(full_text)
+                if loc2 and re.search(r"\b\d{5}\b", loc2):
+                    listing.location = loc2
+
             # Garantie & Standort anreichern
             from ..models import infer_listing_details
             infer_listing_details(listing, getattr(query, "zip_code", None))
@@ -185,6 +192,29 @@ class MobileDe(BasePortal):
                         logger.info("SoH=%.1f%% per Bild-OCR (AVILOO/DEKRA): %s", ocr_soh, listing.title[:60])
                 except Exception as e:
                     logger.debug("OCR-Fallback fehlgeschlagen für %s: %s", listing.title[:40], e)
+
+    # PLZ (optional "DE-") + Stadt (beginnt mit Großbuchstabe, keine Einheit wie km).
+    _LOC_RE = re.compile(
+        r"(?:DE-)?\b(\d{5})\s+([A-ZÄÖÜ][A-Za-zÄÖÜäöüß.\-/ ]{2,38})"
+    )
+
+    @classmethod
+    def _extract_location(cls, *texts: str) -> Optional[str]:
+        """Sucht 'PLZ Stadt' in den gegebenen Texten (untrunkiert!) und liefert
+        z. B. '68766 Hockenheim'. Fällt sonst auf den ersten Text (nur Stadt)
+        zurück – so bleibt zumindest eine Ortsanzeige erhalten.
+        """
+        for t in texts:
+            if not t:
+                continue
+            m = cls._LOC_RE.search(t)
+            if m:
+                city = m.group(2).strip().rstrip(",;·|").strip()
+                return f"{m.group(1)} {city}"[:60]
+        for t in texts:
+            if t:
+                return t[:60]
+        return None
 
     # ---- HTML-Karten-Parsing (server-gerendert, mit gültigen Cookies) --
     def _parse_cards(self, html: str) -> List[Listing]:
@@ -212,7 +242,10 @@ class MobileDe(BasePortal):
             full_card_text = art.get_text(" ", strip=True)
             imgs = [img.get("src") or img.get("data-src") for img in art.select("img[src], img[data-src]")]
             image_urls = [u for u in imgs if u and u.startswith("http") and not u.endswith(".svg")]
-            loc = snode.get_text(" ", strip=True)[:60] if snode else None
+            seller_txt = snode.get_text(" ", strip=True) if snode else ""
+            # PLZ steht bei mobile.de oft HINTER dem langen Händlernamen – daher
+            # untrunkiert aus seller-info und der ganzen Karte suchen.
+            loc = self._extract_location(seller_txt, full_card_text)
             l = Listing(
                 portal=self.name,
                 title=title[:120],
