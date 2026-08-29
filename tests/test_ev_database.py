@@ -1,4 +1,4 @@
-﻿from kfz_crawler.models import Listing, infer_listing_battery, infer_listing_range
+from kfz_crawler.models import Listing, infer_listing_battery, infer_listing_range
 from kfz_crawler.ev_database import lookup_ev_spec
 
 def test_ev_database_lookup():
@@ -38,3 +38,18 @@ def test_fallback_database_when_no_text_kwh():
     infer_listing_range(l)
     assert l.battery_kwh == 82.0
     assert l.ev_range_km == 522
+
+
+def test_byd_dolphin_surf_wltp_plausibility():
+    # Händler schreibt 460 km Reichweite (City/Marketing), echter WLTP Kombiniert ist 310 km (44.9/43.2 kWh)
+    l = Listing(
+        portal="AutoScout24",
+        title="BYD Dolphin Surf Comfort Alu LED Link NAV NBA PDC RFK SHA Shz",
+        body="28 km Automatik 01/2026 Elektro 115 kW (156 PS) 460 km Reichweite",
+        url="http://as24/byd",
+    )
+    infer_listing_battery(l)
+    infer_listing_range(l)
+    # Muss durch Referenzdatenbank auf echten Akkuwert und echten WLTP-Kombiniert-Wert korrigiert werden
+    assert l.battery_kwh == 44.9
+    assert l.ev_range_km == 310

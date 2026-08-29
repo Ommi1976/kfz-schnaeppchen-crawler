@@ -1,4 +1,4 @@
-﻿"""Interne Referenzdatenbank für Elektrofahrzeuge (Akkukapazität Brutto/Netto & WLTP-Reichweite)."""
+"""Interne Referenzdatenbank für Elektrofahrzeuge (Akkukapazität Brutto/Netto & WLTP-Reichweite)."""
 
 from __future__ import annotations
 
@@ -224,6 +224,48 @@ _EV_DATABASE: List[EVSpec] = [
     ]),
     EVSpec("Ora", "03 / Funky Cat", "48 / 63 kWh", 48.0, 45.4, 310, 126, 171, [
         re.compile(r"\bora\s*(?:03|funky\s*cat)\b", re.I),
+    ]),
+
+    # --- BYD ---
+    EVSpec("BYD", "Dolphin", "Surf / Active / Boost (43.2 / 44.9 kWh)", 44.9, 43.2, 310, 115, 156, [
+        re.compile(r"\b(?:byd\b.*?\bdolphin\b.*?\b(?:surf|active|boost)\b|dolphin\s*surf\b|\bsurf\s*comfort\b)", re.I),
+    ]),
+    EVSpec("BYD", "Dolphin", "Comfort / Design (60.4 kWh)", 60.4, 60.4, 427, 150, 204, [
+        re.compile(r"\b(?:byd\b.*?\bdolphin\b|\bdolphin\b)", re.I),
+    ]),
+    EVSpec("BYD", "Atto 3", "60.5 kWh", 60.5, 60.5, 420, 150, 204, [
+        re.compile(r"\b(?:byd\b.*?\batto\s*3\b|\batto\s*3\b)", re.I),
+    ]),
+    EVSpec("BYD", "Seal", "Design / Excellence", 82.5, 82.5, 570, 230, 313, [
+        re.compile(r"\b(?:byd\b.*?\bseal\b|\bseal\s+rwd|\bseal\s+awd)\b", re.I),
+    ]),
+    EVSpec("BYD", "Seal U", "71.8 / 87 kWh", 87.0, 87.0, 500, 160, 218, [
+        re.compile(r"\bseal\s*u\b", re.I),
+    ]),
+
+    # --- VOLVO & POLESTAR ---
+    EVSpec("Volvo", "EX30", "Single Motor (51 kWh)", 51.0, 49.0, 344, 200, 272, [
+        re.compile(r"\bex30\b.*?\b(?:single\s+motor\b(?!.*?extended)|core\b(?!.*?extended)|51\s*kwh)\b", re.I),
+    ]),
+    EVSpec("Volvo", "EX30", "Single Motor Extended Range / Twin (69 kWh)", 69.0, 64.0, 476, 200, 272, [
+        re.compile(r"\bex30\b", re.I),
+    ]),
+    EVSpec("Polestar", "2", "Standard Range (69 kWh)", 69.0, 67.0, 478, 170, 231, [
+        re.compile(r"\bpolestar\s*2\b.*?\b(?:standard\s*range|69\s*kwh)\b", re.I),
+    ]),
+    EVSpec("Polestar", "2", "Long Range (78 / 82 kWh)", 82.0, 79.0, 551, 220, 299, [
+        re.compile(r"\bpolestar\s*2\b", re.I),
+    ]),
+
+    # --- KIA & HYUNDAI NEU ---
+    EVSpec("Kia", "EV3", "Standard (58.3 kWh)", 58.3, 58.3, 436, 150, 204, [
+        re.compile(r"\bev3\b.*?\b(?:standard|58\s*kwh)\b", re.I),
+    ]),
+    EVSpec("Kia", "EV3", "Long Range (81.4 kWh)", 81.4, 81.4, 605, 150, 204, [
+        re.compile(r"\bev3\b", re.I),
+    ]),
+    EVSpec("Dacia", "Spring", "26.8 kWh", 26.8, 25.0, 230, 33, 45, [
+        re.compile(r"\bspring\b|\bdacia\s+spring\b", re.I),
     ]),
 ]
 

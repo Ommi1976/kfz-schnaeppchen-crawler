@@ -165,6 +165,15 @@ _KNOWN_EV_CATALOG = [
     (re.compile(r"\bnissan\s*leaf\b", re.I), 40.0, 270),
     (re.compile(r"\bpeugeot\s*e-?208\b|\bopel\s*corsa-?e\b", re.I), 50.0, 360),
     (re.compile(r"\bpeugeot\s*e-?2008\b|\bopel\s*mokka-?e\b", re.I), 50.0, 340),
+    (re.compile(r"\b(?:byd\b.*?\bdolphin\b.*?\b(?:surf|active|boost)\b|dolphin\s*surf\b|\bsurf\s*comfort\b)", re.I), 44.9, 310),
+    (re.compile(r"\b(?:byd\b.*?\bdolphin\b|\bdolphin\b)", re.I), 60.4, 427),
+    (re.compile(r"\b(?:byd\b.*?\batto\s*3\b|\batto\s*3\b)", re.I), 60.5, 420),
+    (re.compile(r"\b(?:byd\b.*?\bseal\b|\bseal\b)", re.I), 82.5, 570),
+    (re.compile(r"\bex30\b.*?\b(?:single\s+motor\b(?!.*?extended)|core\b(?!.*?extended)|51\s*kwh)\b", re.I), 51.0, 344),
+    (re.compile(r"\bex30\b", re.I), 69.0, 476),
+    (re.compile(r"\bev3\b.*?\b(?:standard|58\s*kwh)\b", re.I), 58.3, 436),
+    (re.compile(r"\bev3\b", re.I), 81.4, 605),
+    (re.compile(r"\bspring\b|\bdacia\s+spring\b", re.I), 26.8, 230),
 ]
 
 
@@ -180,20 +189,33 @@ def infer_ev_specs_from_model(text: str | None) -> tuple[Optional[float], Option
 
 def infer_listing_battery(listing: "Listing", check_images: bool = False) -> None:
     """Füllt den Akkuwert und SoH nach:
-    1. Priorität (im Zweifel): Expliziter Wert aus dem Inseratstext/Titel.
-    2. Priorität: Interne Referenzdatenbank (ev_database).
+    1. Priorität: Interne Referenzdatenbank (ev_database) für verifizierte Brutto-/Nettowerte.
+    2. Plausibilisierung: Explizite Händlerwerte werden mit der Referenzdatenbank abgeglichen.
     """
     text = f"{listing.title or ''} {getattr(listing, 'body', '') or ''}"
     explicit_kwh = extract_battery_kwh(text)
-    if explicit_kwh is not None:
-        listing.battery_kwh = explicit_kwh
-    elif listing.battery_kwh is None:
-        try:
-            from kfz_crawler.ev_database import lookup_ev_spec
-            spec = lookup_ev_spec(listing.title, getattr(listing, "body", ""))
-            if spec:
+    
+    spec = None
+    try:
+        from kfz_crawler.ev_database import lookup_ev_spec
+        spec = lookup_ev_spec(listing.title, getattr(listing, "body", ""))
+    except Exception:
+        pass
+
+    if spec:
+        # Wenn Modell in EV-Datenbank erkannt wurde:
+        # Falls Händlerwert unplausibel abweicht (> 10 % über Brutto oder < 15 % unter Netto), Referenzwert nutzen
+        if explicit_kwh is not None:
+            if explicit_kwh > spec.battery_gross_kwh * 1.1 or explicit_kwh < spec.battery_net_kwh * 0.85:
                 listing.battery_kwh = spec.battery_gross_kwh
-        except Exception:
+            else:
+                listing.battery_kwh = explicit_kwh
+        else:
+            listing.battery_kwh = spec.battery_gross_kwh
+    else:
+        if explicit_kwh is not None:
+            listing.battery_kwh = explicit_kwh
+        elif listing.battery_kwh is None:
             kwh, _ = infer_ev_specs_from_model(text)
             if kwh is not None:
                 listing.battery_kwh = kwh
@@ -210,20 +232,33 @@ def infer_listing_battery(listing: "Listing", check_images: bool = False) -> Non
 
 def infer_listing_range(listing: "Listing") -> None:
     """Füllt die elektrische Reichweite nach:
-    1. Priorität (im Zweifel): Expliziter Wert aus dem Inseratstext/Titel.
-    2. Priorität: Interne Referenzdatenbank (ev_database).
+    1. Priorität: Interne Referenzdatenbank (ev_database) mit offiziellem WLTP-Kombiniert-Wert.
+    2. Plausibilisierung: Händler-Übertreibungen (z. B. City-WLTP) werden durch echten WLTP Kombiniert korrigiert.
     """
     text = f"{listing.title or ''} {getattr(listing, 'body', '') or ''}"
     explicit_rng = extract_ev_range_km(text)
-    if explicit_rng is not None:
-        listing.ev_range_km = explicit_rng
-    elif listing.ev_range_km is None:
-        try:
-            from kfz_crawler.ev_database import lookup_ev_spec
-            spec = lookup_ev_spec(listing.title, getattr(listing, "body", ""))
-            if spec:
+
+    spec = None
+    try:
+        from kfz_crawler.ev_database import lookup_ev_spec
+        spec = lookup_ev_spec(listing.title, getattr(listing, "body", ""))
+    except Exception:
+        pass
+
+    if spec:
+        # Wenn der Händlerwert deutlich über dem echten WLTP-Kombiniert-Wert liegt (z. B. 460 km vs. 310 km),
+        # wird der offizielle WLTP-Kombiniert-Wert aus der Datenbank verwendet.
+        if explicit_rng is not None:
+            if explicit_rng > spec.wltp_range_km * 1.05:
                 listing.ev_range_km = spec.wltp_range_km
-        except Exception:
+            else:
+                listing.ev_range_km = explicit_rng
+        else:
+            listing.ev_range_km = spec.wltp_range_km
+    else:
+        if explicit_rng is not None:
+            listing.ev_range_km = explicit_rng
+        elif listing.ev_range_km is None:
             _, rng = infer_ev_specs_from_model(text)
             if rng is not None:
                 listing.ev_range_km = rng
