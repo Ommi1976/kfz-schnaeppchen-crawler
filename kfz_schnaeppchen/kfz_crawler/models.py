@@ -698,15 +698,15 @@ def matches_query(l: Listing, q: SearchQuery) -> bool:
         if l.country.upper() != q.country.upper():
             return False
 
-    # Ausstattungsfilter-Nachprüfung (insb. für Kleinanzeigen ohne native URL-Filter):
-    if getattr(q, "equipment", None):
-        from .portals.as24_taxonomy import EQUIPMENT_SYNONYMS
-        hay = f"{l.title or ''} {l.body or ''}".lower()
-        if l.portal.lower() in ("kleinanzeigen", "ebay_kleinanzeigen"):
-            for eq_id in q.equipment:
-                synonyms = EQUIPMENT_SYNONYMS.get(eq_id)
-                if synonyms and not any(syn in hay for syn in synonyms):
-                    return False
+    # Ausstattungsfilter-Nachprüfung:
+    # Kleinanzeigen stellt weder einen strukturierten Ausstattungsfilter noch
+    # verlässliche Ausstattungsdaten bereit. Eine fehlende Erwähnung im kurzen
+    # Anzeigentext bedeutet deshalb nicht, dass die Ausstattung fehlt. Solche
+    # Inserate bleiben bewusst erhalten; wer dort zwingende Begriffe verlangt,
+    # kann sie über "Stichwörter enthalten" als expliziten Textfilter setzen.
+    # AutoScout24 und mobile.de wenden ihre Ausstattungsfilter bereits
+    # serverseitig an. Weitere Quellen dürfen bei unbekannten Angaben ebenfalls
+    # nicht aufgrund fehlender Textfragmente ausgeschlossen werden.
 
     # Ausstattung / Freitext: Stichwörter müssen ALLE vorkommen, Ausschluss keiner.
     hay = f"{l.title or ''} {l.body or ''}".lower()

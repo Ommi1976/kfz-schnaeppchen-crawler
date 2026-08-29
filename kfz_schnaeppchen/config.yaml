@@ -1,5 +1,5 @@
 ﻿name: KFZ Schnäppchen Crawler
-version: "1.0.40"
+version: "1.0.51"
 slug: kfz_schnaeppchen
 description: Findet Auto-Schnäppchen über deutsche Fahrzeugportale und meldet Treffer an Home Assistant.
 url: https://github.com/Ommi1976/kfz-schnaeppchen-crawler

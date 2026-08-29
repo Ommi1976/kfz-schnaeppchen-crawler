@@ -236,10 +236,12 @@ def test_matches_query_filtering():
     l_id3_small = Listing(portal="AS24", title="VW ID.3", url="http://x/id3", fuel="elektro", ev_range_km=420, battery_kwh=58.0)
     assert matches_query(l_id3_small, q_ev) is False
 
-    # 11. Ausstattungsfilter auf Kleinanzeigen (Text-Nachprüfung)
+    # 11. Kleinanzeigen kennt keine verlässlichen strukturierten
+    # Ausstattungsdaten. Fehlende Begriffe sind daher "unbekannt", nicht
+    # "fehlt"; das Inserat bleibt in der Ergebnisliste.
     q_eq = SearchQuery(name="Mit Ausstattung", equipment=[34, 133])  # 34: Sitzheizung, 133: Abstandstempomat (ACC)
     l_ka_match = Listing(portal="Kleinanzeigen", title="VW Golf 8 mit SHZ und ACC Abstandstempomat", body="Top Zustand", url="http://ka/1")
     assert matches_query(l_ka_match, q_eq) is True
 
     l_ka_missing = Listing(portal="Kleinanzeigen", title="VW Golf 8 Basis", body="Nur Radio und Klima", url="http://ka/2")
-    assert matches_query(l_ka_missing, q_eq) is False
+    assert matches_query(l_ka_missing, q_eq) is True

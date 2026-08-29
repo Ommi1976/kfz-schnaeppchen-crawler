@@ -39,6 +39,30 @@ def test_mobile_de_autonomous_search():
         assert l.raw_id == "11223344"
 
 
+def test_mobile_de_crawls_past_configured_page_sample():
+    """Fünf konfigurierte Seiten dürfen keine Treffer ab Seite sechs verlieren."""
+    def fetch_page(url):
+        page = int(url.split("pageNumber=")[1].split("&", 1)[0])
+        if page > 8:
+            return "<html><body></body></html>"
+        return f"""
+        <html><body><article data-testid="result-listing">
+            <a href="/fahrzeuge/details.html?id={page}">
+                <h2 data-testid="listing-title-card-view">Elektroauto {page}</h2>
+            </a>
+            <span data-testid="price-label">20.000 €</span>
+            <div data-testid="listing-details">EZ 01/2023 • 10.000 km • 150 kW (204 PS) • Elektro</div>
+        </article></body></html>
+        """
+
+    with patch("kfz_crawler.portals.mobile_de.MobileDe._fetch", side_effect=fetch_page):
+        portal = MobileDe(max_pages=5)
+        listings = portal.search(SearchQuery(name="E-Autos", fuel="elektro"))
+
+    assert len(listings) == 8
+    assert listings[-1].raw_id == "8"
+
+
 def test_mobile_de_location_extraction():
     """PLZ hinter langem Händlernamen darf nicht abgeschnitten werden."""
     E = MobileDe._extract_location

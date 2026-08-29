@@ -100,6 +100,7 @@ def test_kleinanzeigen_parse_detail():
     assert l.transmission == "automatik"
     assert l.fuel == "diesel"
     assert "Beschädigtes Fahrzeug" in (l.body or "")
+    assert "Batteriekapazität ca 58 kWh" in (l.body or "")
     assert l.battery_kwh == 58.0
 
 

@@ -211,6 +211,12 @@ class Kleinanzeigen(BasePortal):
     def _parse_detail(self, html: str, l: Listing) -> None:
         soup = BeautifulSoup(html, "lxml")
         full_text = soup.get_text(" ", strip=True)
+        # Die Trefferkarte enthält nur wenige Textzeilen. Die Detailseite ist
+        # die beste verfügbare Quelle für Akku, Reichweite, Zustand und freie
+        # Ausstattungsangaben. Sie wird deshalb am Inserat erhalten, statt die
+        # Informationen nach dem Extrahieren wieder zu verwerfen.
+        if full_text:
+            l.body = " ".join(part for part in (l.body, full_text) if part)
         for li in soup.select("li.addetailslist--detail"):
             valel = li.select_one(".addetailslist--detail--value")
             if not valel:

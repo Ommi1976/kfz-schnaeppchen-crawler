@@ -30,6 +30,7 @@ class MobileDe(BasePortal):
     name = "mobile.de"
     BASE = "https://suchen.mobile.de"
     PREFERS_BROWSER = True  # Autarker Playwright Firefox Abruf
+    FULL_CRAWL_MAX_PAGES = 100  # harter Schutz, beendet regulär vorher bei leerer Seite
 
     # ---- URL ----------------------------------------------------------
     def _build_url(self, query: SearchQuery, page: int) -> str:
@@ -95,7 +96,11 @@ class MobileDe(BasePortal):
     def search(self, query: SearchQuery) -> List[Listing]:
         results: List[Listing] = []
         seen_ids = set()
-        max_limit = self.max_pages if (self.max_pages and self.max_pages > 0) else 100
+        # Die Einstellung max_pages war ursprünglich eine Stichprobengröße.
+        # Für mobile.de muss aber bis zur ersten leeren Seite gelesen werden,
+        # sonst fehlen bei mehr als fünf Seiten (z. B. 159 statt 104 Treffer)
+        # reguläre Inserate. FULL_CRAWL_MAX_PAGES ist nur eine Schutzgrenze.
+        max_limit = max(self.max_pages or 0, self.FULL_CRAWL_MAX_PAGES)
         for page in range(1, max_limit + 1):
             try:
                 html = self._fetch(self._build_url(query, page))
