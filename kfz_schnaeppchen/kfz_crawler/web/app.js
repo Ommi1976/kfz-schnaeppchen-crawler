@@ -627,60 +627,10 @@ document.getElementById("clear").addEventListener("click", async () => {
   refresh();
 });
 
-async function loadDiscoveredEV() {
-  try {
-    const data = await getJSON(`${API}/discovered-ev?status=discovered`);
-    const sec = document.getElementById("discovered-ev-section");
-    const badge = document.getElementById("discovered-badge");
-    const list = document.getElementById("discovered-list");
-    if (!sec || !list) return;
-
-    if (!data.models || !data.models.length) {
-      sec.classList.add("hidden");
-      return;
-    }
-    sec.classList.remove("hidden");
-    if (badge) badge.textContent = data.models.length;
-
-    list.innerHTML = data.models.map((m) => `
-      <div class="discovered-card" data-key="${escapeHtml(m.model_key)}">
-        <div class="discovered-card-head">
-          <div class="discovered-card-title">${escapeHtml(m.sample_title || m.model_key)}</div>
-          <div class="discovered-hits">📌 ${m.count} ${m.count === 1 ? 'Fund' : 'Funde'}</div>
-        </div>
-        <div class="discovered-stats">
-          <div>Akku: <span>${m.avg_battery_kwh ? m.avg_battery_kwh + ' kWh' : '–'}</span></div>
-          <div>Reichweite: <span>${m.avg_range_km ? '~' + m.avg_range_km + ' km' : '–'}</span></div>
-        </div>
-        <div class="discovered-actions">
-          <button class="btn-approve" onclick="handleDiscoveredEV('${escapeHtml(m.model_key)}', 'approved')">✓ In Filter übernehmen</button>
-          <button class="btn-dismiss" onclick="handleDiscoveredEV('${escapeHtml(m.model_key)}', 'rejected')">✕ Ausblenden</button>
-        </div>
-      </div>
-    `).join("");
-  } catch (e) {
-    console.error("Fehler beim Laden entdeckter E-Modelle:", e);
-  }
-}
-
-window.handleDiscoveredEV = async function(key, status) {
-  try {
-    await fetch(`${API}/discovered-ev/${encodeURIComponent(key)}/status`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ status }),
-    });
-    await loadDiscoveredEV();
-  } catch (e) {
-    console.error(e);
-  }
-};
-
 async function refresh() {
   try {
     await loadStatus();
     await loadDeals();
-    await loadDiscoveredEV();
   } catch (e) { console.error(e); }
 }
 function poll() {

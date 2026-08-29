@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import sqlite3
 import threading
 import time
@@ -11,6 +12,8 @@ from pathlib import Path
 from typing import List, Optional
 
 from .models import Listing
+
+logger = logging.getLogger(__name__)
 
 
 class SeenStore:
@@ -519,6 +522,12 @@ class SeenStore:
             key_words = words[:3]
         model_key = " ".join(key_words)
         
+        # Plausibilitätsfilter für sichere Qualifizierung
+        if battery_kwh is not None and (battery_kwh < 15.0 or battery_kwh > 200.0):
+            battery_kwh = None
+        if ev_range_km is not None and (ev_range_km < 100 or ev_range_km > 1200):
+            ev_range_km = None
+
         now = time.time()
         with self._lock:
             cur = self.conn.execute(
@@ -540,14 +549,20 @@ class SeenStore:
                 new_rng = old_rng
                 if ev_range_km is not None:
                     new_rng = round(((old_rng or ev_range_km) * old_count + ev_range_km) / new_count)
+                
+                status = row["status"]
+                # Sichere Qualifikation: Ab 2 unabhängigen Funden mit plausiblen Werten automatisch aktiv
+                if status == "discovered" and new_count >= 2 and (new_kwh is not None and new_kwh >= 20.0):
+                    status = "approved"
+                    logger.info("🤖 E-Modell sicher qualifiziert & freigeschaltet: %s (~%.1f kWh, ~%d km)", model_key, new_kwh or 0, new_rng or 0)
                     
                 self.conn.execute(
                     """
                     UPDATE discovered_ev_models
-                    SET count = ?, avg_battery_kwh = ?, avg_range_km = ?, last_seen = ?
+                    SET count = ?, avg_battery_kwh = ?, avg_range_km = ?, status = ?, last_seen = ?
                     WHERE model_key = ?
                     """,
-                    (new_count, new_kwh, new_rng, now, model_key)
+                    (new_count, new_kwh, new_rng, status, now, model_key)
                 )
                 self.conn.commit()
                 return False, {
@@ -556,7 +571,7 @@ class SeenStore:
                     "count": new_count,
                     "avg_battery_kwh": new_kwh,
                     "avg_range_km": new_rng,
-                    "status": row["status"],
+                    "status": status,
                 }
             else:
                 self.conn.execute(
@@ -587,6 +602,13 @@ class SeenStore:
                     "avg_range_km": ev_range_km,
                     "status": "discovered",
                 }
+
+    def get_approved_ev_models(self) -> List[dict]:
+        with self._lock:
+            cur = self.conn.execute(
+                "SELECT * FROM discovered_ev_models WHERE status = 'approved' ORDER BY count DESC"
+            )
+            return [dict(r) for r in cur.fetchall()]
 
     def list_discovered_ev_models(self, status: Optional[str] = None) -> List[dict]:
         with self._lock:

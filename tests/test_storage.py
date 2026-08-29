@@ -118,11 +118,12 @@ def test_discovered_ev_models(store):
 
     discovered = store.list_discovered_ev_models()
     assert len(discovered) == 1
-    assert discovered[0]["status"] == "discovered"
+    assert discovered[0]["status"] == "approved"  # Automatisch qualifiziert ab 2 Funden
+    assert len(store.get_approved_ev_models()) == 1
 
-    # Status ändern
-    ok = store.set_discovered_ev_status(rec["model_key"], "approved")
+    # Status manuell ändern (z. B. auf rejected)
+    ok = store.set_discovered_ev_status(rec["model_key"], "rejected")
     assert ok is True
-    assert len(store.list_discovered_ev_models(status="approved")) == 1
-    assert len(store.list_discovered_ev_models(status="discovered")) == 0
+    assert len(store.list_discovered_ev_models(status="rejected")) == 1
+    assert len(store.list_discovered_ev_models(status="approved")) == 0
 
