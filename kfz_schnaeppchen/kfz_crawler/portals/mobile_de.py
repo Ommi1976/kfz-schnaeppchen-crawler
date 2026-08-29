@@ -47,6 +47,9 @@ class MobileDe(BasePortal):
         pw_from = round(query.power_from / PS_TO_KW) if query.power_from else None
         pw_to = round(query.power_to / PS_TO_KW) if query.power_to else None
         span("pw", pw_from, pw_to)
+        # Batteriekapazität (bat=<min>:)
+        bat_from = int(query.battery_from_kwh) if getattr(query, "battery_from_kwh", None) else None
+        span("bat", bat_from, None)
         if not query.include_damaged:
             params.append("dam=0")
         if query.fuel and query.fuel in FUEL_MAP:
