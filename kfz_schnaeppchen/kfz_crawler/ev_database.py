@@ -152,6 +152,21 @@ _EV_DATABASE: List[EVSpec] = [
         re.compile(r"\bix1\b", re.I),
     ]),
 
+    # --- MINI ---
+    EVSpec("MINI", "Cooper SE", "3-Türer (32.6 kWh)", 32.6, 28.9, 233, 135, 184, [
+        re.compile(r"\bmini\b.*?\b(?:cooper\s*se|cooper-se)\b", re.I),
+        re.compile(r"\bcooper\s*se\b", re.I),
+    ]),
+    EVSpec("MINI", "Cooper E", "40.7 kWh (J01)", 40.7, 36.6, 305, 135, 184, [
+        re.compile(r"\bmini\b.*?\bcooper\s*e\b", re.I),
+    ]),
+    EVSpec("MINI", "Countryman SE", "ALL4 (66.5 kWh)", 66.5, 64.7, 433, 230, 313, [
+        re.compile(r"\bcountryman\s*(?:se|all4)\b", re.I),
+    ]),
+    EVSpec("MINI", "Countryman E", "66.5 kWh", 66.5, 64.7, 462, 150, 204, [
+        re.compile(r"\bcountryman\s*e\b", re.I),
+    ]),
+
     # --- AUDI ---
     EVSpec("Audi", "Q4 e-tron", "35", 55.0, 52.0, 341, 125, 170, [
         re.compile(r"\bq4\b.*?\b(?:35)\b", re.I),

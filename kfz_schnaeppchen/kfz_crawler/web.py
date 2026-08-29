@@ -317,28 +317,36 @@ async def deals(search: str | None = None, limit: int = 400, deals_only: bool = 
         limit=min(limit, 2000), search_name=search, deals_only=deals_only, portal=portal
     )
     specs = {s["name"]: SearchQuery.from_dict(s) for s in app.state.store.list_searches()}
+    active_search_names = set(specs.keys())
     filtered = []
     for row in rows:
-        query = specs.get(row.get("search_name"))
-        if query:
-            l = Listing(
-                portal=row.get("portal") or "",
-                title=row.get("title") or "",
-                url=row.get("url") or "",
-                price=row.get("price"),
-                year=row.get("year"),
-                mileage=row.get("mileage"),
-                fuel=row.get("fuel"),
-                power_ps=row.get("power_ps"),
-                battery_kwh=row.get("battery_kwh"),
-                battery_soh=row.get("battery_soh"),
-                ev_range_km=row.get("ev_range_km"),
-                location=row.get("location"),
-                body=row.get("body") or "",
-                country=row.get("country"),
-            )
-            if not matches_query(l, query):
+        s_name = row.get("search_name")
+        query = specs.get(s_name)
+        if not query:
+            # Falls kein spezifischer Suchname passt, erste aktive Suche als Referenz prüfen oder verwerfen
+            if len(specs) == 1:
+                query = next(iter(specs.values()))
+            else:
                 continue
+
+        l = Listing(
+            portal=row.get("portal") or "",
+            title=row.get("title") or "",
+            url=row.get("url") or "",
+            price=row.get("price"),
+            year=row.get("year"),
+            mileage=row.get("mileage"),
+            fuel=row.get("fuel"),
+            power_ps=row.get("power_ps"),
+            battery_kwh=row.get("battery_kwh"),
+            battery_soh=row.get("battery_soh"),
+            ev_range_km=row.get("ev_range_km"),
+            location=row.get("location"),
+            body=row.get("body") or "",
+            country=row.get("country"),
+        )
+        if not matches_query(l, query):
+            continue
         filtered.append(row)
     rows = filtered
 

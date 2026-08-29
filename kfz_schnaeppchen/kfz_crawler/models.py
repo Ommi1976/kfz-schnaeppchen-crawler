@@ -173,6 +173,10 @@ _KNOWN_EV_CATALOG = [
     (re.compile(r"\bex30\b", re.I), 69.0, 476),
     (re.compile(r"\bev3\b.*?\b(?:standard|58\s*kwh)\b", re.I), 58.3, 436),
     (re.compile(r"\bev3\b", re.I), 81.4, 605),
+    (re.compile(r"\bmini\b.*?\b(?:cooper\s*se|cooper-se)\b|\bcooper\s*se\b", re.I), 32.6, 233),
+    (re.compile(r"\bmini\b.*?\bcooper\s*e\b", re.I), 40.7, 305),
+    (re.compile(r"\bcountryman\s*(?:se|all4)\b", re.I), 66.5, 433),
+    (re.compile(r"\bcountryman\s*e\b", re.I), 66.5, 462),
     (re.compile(r"\bspring\b|\bdacia\s+spring\b", re.I), 26.8, 230),
 ]
 

@@ -387,8 +387,8 @@ class SeenStore:
 
     def purge_unmatching_deals(self, search_name: str, query) -> int:
         """Entfernt Inserate aus der DB, die den aktuellen Suchkriterien nicht mehr entsprechen."""
-        from .models import Listing, matches_query
-        deals = self.list_deals(limit=1000, search_name=search_name)
+        from .models import Listing, matches_query, infer_listing_details
+        deals = self.list_deals(limit=2000, search_name=search_name)
         to_delete = []
         for d in deals:
             l = Listing(
@@ -405,9 +405,17 @@ class SeenStore:
                 ev_range_km=d.get("ev_range_km"),
                 location=d.get("location"),
                 body=d.get("body") or "",
+                country=d.get("country"),
             )
+            infer_listing_details(l)
             if not matches_query(l, query):
                 to_delete.append(d["fingerprint"])
+            else:
+                # Aktualisierte Werte sichern
+                self.conn.execute(
+                    "UPDATE deals SET battery_kwh = ?, ev_range_km = ? WHERE fingerprint = ?",
+                    (l.battery_kwh, l.ev_range_km, d["fingerprint"])
+                )
 
         if to_delete:
             with self._lock:
