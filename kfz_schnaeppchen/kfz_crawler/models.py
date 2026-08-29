@@ -107,10 +107,11 @@ _KNOWN_EV_CATALOG = [
     (re.compile(r"\bid\.?[45]\b.*?\b(?:pro\s*s|pro-s)\b", re.I), 82.0, 530),
     (re.compile(r"\bid\.?[45]\b.*?\b(?:pro\s+performance|pro|gtx|1st)\b", re.I), 82.0, 520),
     (re.compile(r"\bid\.?[45]\b", re.I), 77.0, 500),
-    # Cupra Born
-    (re.compile(r"\bborn\b.*?\b(?:77|82|e-boost)\b", re.I), 82.0, 548),
-    (re.compile(r"\bborn\b.*?\b(?:170\s*kw|231\s*ps)\b", re.I), 82.0, 548),
-    (re.compile(r"\bborn\b", re.I), 77.0, 548),
+    # Cupra Born: 170 kW / e-Boost ist bei mehreren Akkuvarianten möglich;
+    # nur eine explizite Kapazität ist für eine automatische Zuordnung sicher.
+    (re.compile(r"\bborn\b.*?\b(?:45|55)\s*kwh\b", re.I), 55.0, 340),
+    (re.compile(r"\bborn\b.*?\b(?:58|60|62|63)\s*kwh\b", re.I), 62.0, 425),
+    (re.compile(r"\bborn\b.*?\b(?:77|79|82|84)\s*kwh\b", re.I), 82.0, 548),
     # Skoda Enyaq
     (re.compile(r"\benyaq\b.*?\b(?:80|80x|85|rs|82)\b", re.I), 82.0, 535),
     (re.compile(r"\benyaq\b.*?\b(?:60)\b", re.I), 62.0, 400),
@@ -224,15 +225,10 @@ def infer_listing_battery(listing: "Listing", check_images: bool = False) -> Non
         pass
 
     if spec:
-        # Wenn Modell in EV-Datenbank erkannt wurde:
-        # Falls Händlerwert unplausibel abweicht (> 10 % über Brutto oder < 15 % unter Netto), Referenzwert nutzen
-        if explicit_kwh is not None:
-            if explicit_kwh > spec.battery_gross_kwh * 1.1 or explicit_kwh < spec.battery_net_kwh * 0.85:
-                listing.battery_kwh = spec.battery_gross_kwh
-            else:
-                listing.battery_kwh = explicit_kwh
-        else:
-            listing.battery_kwh = spec.battery_gross_kwh
+        # Eine explizite kWh-Angabe im Inserat ist präziser als ein
+        # Modell-Fallback. Insbesondere Hersteller geben je nach Quelle die
+        # Netto- oder Bruttokapazität an (z. B. Cupra Born 58/62 kWh).
+        listing.battery_kwh = explicit_kwh if explicit_kwh is not None else spec.battery_gross_kwh
     else:
         if explicit_kwh is not None:
             listing.battery_kwh = explicit_kwh

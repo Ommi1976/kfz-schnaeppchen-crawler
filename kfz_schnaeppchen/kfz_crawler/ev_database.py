@@ -88,10 +88,17 @@ _EV_DATABASE: List[EVSpec] = [
         re.compile(r"\bmodel\s*y\b.*?\b(?:standard|rwd|hinterradantrieb)\b", re.I),
     ]),
 
-    EVSpec("Cupra", "Born", "77 / 82 kWh (548 km)", 82.0, 77.0, 548, 170, 231, [
-        re.compile(r"\bborn\b.*?\b(?:77|82|e-boost)\b", re.I),
-        re.compile(r"\bborn\b.*?\b(?:170\s*kw|231\s*ps)\b", re.I),
-        re.compile(r"\bborn\b", re.I),
+    # Cupra Born: Leistung und "e-Boost" reichen nicht zur Bestimmung der
+    # Batterie, da sowohl die 58- als auch die 77-kWh-Variante mit 170 kW
+    # angeboten wurde. Deshalb nur eindeutige Kapazitätsangaben zuordnen.
+    EVSpec("Cupra", "Born", "45 kWh netto / 55 kWh brutto", 55.0, 45.0, 340, 110, 150, [
+        re.compile(r"\bborn\b.*?\b(?:45|55)\s*kwh\b", re.I),
+    ]),
+    EVSpec("Cupra", "Born", "58 kWh netto / 62 kWh brutto", 62.0, 58.0, 425, 150, 204, [
+        re.compile(r"\bborn\b.*?\b(?:58|60|62|63)\s*kwh\b", re.I),
+    ]),
+    EVSpec("Cupra", "Born", "77 kWh netto / 82 kWh brutto", 82.0, 77.0, 548, 170, 231, [
+        re.compile(r"\bborn\b.*?\b(?:77|79|82|84)\s*kwh\b", re.I),
     ]),
     EVSpec("Skoda", "Enyaq iV", "50", 55.0, 52.0, 350, 109, 148, [
         re.compile(r"\benyaq\b.*?\b(?:50)\b", re.I),
