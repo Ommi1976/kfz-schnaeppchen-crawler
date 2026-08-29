@@ -286,6 +286,7 @@ class Listing:
     mileage: Optional[int] = None        # in km
     fuel: Optional[str] = None
     location: Optional[str] = None
+    country: Optional[str] = None        # DE, AT, CH, FR, etc.
     raw_id: Optional[str] = None         # portal-eigene ID, wenn vorhanden
 
     # Erweiterte Attribute (wo das Portal sie liefert; sonst None):
@@ -361,6 +362,7 @@ class SearchQuery:
     seller: str = ""                     # haendler | privat
     doors: str = ""                      # "" | "2/3" | "4/5"
     # Standort & Umkreis:
+    country: str = "DE"                  # DE | AT | CH | FR | NL | BE | IT | ES | PL | LU | ALL
     zip_code: str = ""                   # 5-stellige PLZ (z. B. "66111")
     radius_km: Optional[int] = None      # Umkreis in km (z. B. 50, 100, 200)
     # Zustand & Umwelt (Phase 2, server-seitig bei AutoScout24):
@@ -439,6 +441,7 @@ class SearchQuery:
             power_to=i("power_to"),
             seller=s("seller"),
             doors=s("doors"),
+            country=s("country").upper() if s("country") else "DE",
             zip_code=raw_s("zip_code"),
             radius_km=i("radius_km"),
             emission_class=s("emission_class"),
@@ -466,7 +469,7 @@ class SearchQuery:
             "fuel": self.fuel, "transmission": self.transmission,
             "body_type": self.body_type, "power_from": self.power_from,
             "power_to": self.power_to, "seller": self.seller, "doors": self.doors,
-            "zip_code": self.zip_code, "radius_km": self.radius_km,
+            "country": self.country, "zip_code": self.zip_code, "radius_km": self.radius_km,
             "emission_class": self.emission_class, "drivetrain": self.drivetrain,
             "include_damaged": self.include_damaged,
             "ev_range_from": self.ev_range_from, "battery_from_kwh": self.battery_from_kwh,
@@ -643,6 +646,11 @@ def matches_query(l: Listing, q: SearchQuery) -> bool:
         return False
     elif q.battery_from_kwh and l.battery_kwh is not None and l.battery_kwh < q.battery_from_kwh:
         return False
+
+    # Länderfilter: Wenn spezifisches Land gewählt und Inseratsland bekannt ist
+    if q.country and q.country.upper() != "ALL" and l.country:
+        if l.country.upper() != q.country.upper():
+            return False
 
     # Ausstattung / Freitext: Stichwörter müssen ALLE vorkommen, Ausschluss keiner.
     hay = f"{l.title or ''} {l.body or ''}".lower()

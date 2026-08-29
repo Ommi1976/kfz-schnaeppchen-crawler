@@ -59,6 +59,12 @@ class MobileDe(BasePortal):
             params.append(f"ambc={quote_plus(query.zip_code)}")
             if query.radius_km:
                 params.append(f"rad={query.radius_km}")
+        # Land / Region (cn)
+        country = (query.country or "DE").strip().upper()
+        if country == "ALL":
+            pass  # Europaweit / alle Länder
+        else:
+            params.append(f"cn={country}")
         term = " ".join(p for p in (query.make, query.model) if p)
         if term:
             params.append(f"q={quote_plus(term)}")

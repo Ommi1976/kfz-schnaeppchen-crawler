@@ -1,10 +1,10 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="de">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>KFZ Schnäppchen Crawler</title>
-  <link rel="stylesheet" href="static/style.css?v=1.0.24">
+  <link rel="stylesheet" href="static/style.css?v=1.0.25">
 </head>
 <body>
   <header>
@@ -45,15 +45,53 @@
         <button id="clear" class="btn danger small">Liste leeren</button>
       </div>
     </div>
+    
+    <!-- Interaktive Schnellsuche & Spaltenfilter -->
+    <div class="quick-toolbar">
+      <div class="search-box">
+        <span class="search-icon">🔍</span>
+        <input id="quickSearch" type="text" placeholder="Echtzeit-Schnellsuche (Modell, Titel, Ort, Händler, Text...)" autocomplete="off">
+        <button id="quickSearchClear" class="clear-search-btn" title="Suche löschen">✕</button>
+      </div>
+      <div class="quick-filters">
+        <div class="qf-item">
+          <label>Max. Preis:</label>
+          <input id="qf-price-max" type="number" placeholder="z. B. 25000" step="500">
+        </div>
+        <div class="qf-item">
+          <label>Max. km:</label>
+          <input id="qf-km-max" type="number" placeholder="z. B. 60000" step="5000">
+        </div>
+        <div class="qf-item">
+          <label>Min. Reichweite:</label>
+          <input id="qf-range-min" type="number" placeholder="z. B. 450" step="10">
+        </div>
+        <div class="qf-item">
+          <label>Min. SoH (%):</label>
+          <input id="qf-soh-min" type="number" placeholder="z. B. 90" min="50" max="100">
+        </div>
+        <div class="qf-item counter-item">
+          <span id="quickFilterCount" class="qf-badge">Zeige alle Treffer</span>
+        </div>
+      </div>
+    </div>
+
     <div id="portal-filters" class="portal-filters"></div>
     <div class="tablewrap">
       <table id="deals">
         <thead>
           <tr>
-            <th></th><th>Portal</th><th>Fahrzeug</th><th>Akku / SoH</th><th class="num">Preis</th>
-            <th class="num">Marktpreis</th><th class="num">Rabatt</th>
-            <th class="num">Baujahr</th><th class="num">km</th>
-            <th>Gefunden</th><th></th>
+            <th></th>
+            <th class="sortable" data-sort="portal">Portal <span class="sort-icon">⇅</span></th>
+            <th class="sortable" data-sort="title">Fahrzeug <span class="sort-icon">⇅</span></th>
+            <th class="sortable" data-sort="battery_kwh">Akku / SoH <span class="sort-icon">⇅</span></th>
+            <th class="num sortable" data-sort="price">Preis <span class="sort-icon">⇅</span></th>
+            <th class="num sortable" data-sort="market_price">Marktpreis <span class="sort-icon">⇅</span></th>
+            <th class="num sortable" data-sort="discount">Rabatt <span class="sort-icon">⇅</span></th>
+            <th class="num sortable" data-sort="year">Baujahr <span class="sort-icon">⇅</span></th>
+            <th class="num sortable" data-sort="mileage">km <span class="sort-icon">⇅</span></th>
+            <th class="sortable" data-sort="first_seen">Gefunden <span class="sort-icon">⇅</span></th>
+            <th></th>
           </tr>
         </thead>
         <tbody id="deals-body">
@@ -102,6 +140,7 @@
             <label>Preis bis (€) <input id="f-price_to" type="number" min="0" placeholder="27.500"></label>
             <label>km von <input id="f-mileage_from" type="number" min="0" placeholder="0"></label>
             <label>km bis <input id="f-mileage_to" type="number" min="0" placeholder="90.000"></label>
+            <label>Land / Region <select id="f-country"></select></label>
             <label>PLZ <input id="f-zip_code" placeholder="z. B. 66111" maxlength="5"></label>
             <label>Umkreis (km) <input id="f-radius_km" type="number" min="0" step="10" placeholder="z. B. 50"></label>
             <label>Anbieter <select id="f-seller"></select></label>
@@ -157,6 +196,6 @@
     </div>
   </div>
 
-  <script src="static/app.js?v=1.0.24"></script>
+  <script src="static/app.js?v=1.0.25"></script>
 </body>
 </html>

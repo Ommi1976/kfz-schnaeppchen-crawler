@@ -76,6 +76,7 @@ class SeenStore:
             "ALTER TABLE deals ADD COLUMN location_zip TEXT",
             "ALTER TABLE deals ADD COLUMN location_city TEXT",
             "ALTER TABLE deals ADD COLUMN distance_km INTEGER",
+            "ALTER TABLE deals ADD COLUMN country TEXT",
             "ALTER TABLE deals ADD COLUMN last_seen REAL",
         ]:
             try:
@@ -240,8 +241,8 @@ class SeenStore:
                 "INSERT INTO deals "
                 "(fingerprint, search_name, portal, title, url, price, market_price, "
                 " discount, year, mileage, fuel, battery_kwh, battery_soh, ev_range_km, is_deal, is_suspicious, "
-                " reasons, body, image_urls, warranty, location, location_zip, location_city, distance_km, first_seen, last_seen) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+                " reasons, body, image_urls, warranty, location, location_zip, location_city, distance_km, country, first_seen, last_seen) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
                 " ON CONFLICT(fingerprint) DO UPDATE SET "
                 "search_name=excluded.search_name, portal=excluded.portal, title=excluded.title, "
                 "url=excluded.url, price=excluded.price, market_price=excluded.market_price, "
@@ -255,6 +256,7 @@ class SeenStore:
                 "location_zip=COALESCE(excluded.location_zip, deals.location_zip), "
                 "location_city=COALESCE(excluded.location_city, deals.location_city), "
                 "distance_km=COALESCE(excluded.distance_km, deals.distance_km), "
+                "country=COALESCE(excluded.country, deals.country), "
                 "last_seen=excluded.last_seen",
                 (
                     listing.fingerprint,
@@ -281,6 +283,7 @@ class SeenStore:
                     listing.location_zip,
                     listing.location_city,
                     listing.distance_km,
+                    listing.country,
                     now,
                     now,
                 ),

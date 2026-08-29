@@ -98,6 +98,32 @@ class AutoScout24(BasePortal):
             params.append(f"zip={query.zip_code}")
             if query.radius_km:
                 params.append(f"zipradius={query.radius_km}")
+        # Land / Region (cy)
+        country = (query.country or "DE").strip().upper()
+        if country == "ALL":
+            pass  # Europaweit / alle Länder
+        elif country in ("DE", "D"):
+            params.append("cy=D")
+        elif country in ("AT", "A"):
+            params.append("cy=A")
+        elif country in ("CH"):
+            params.append("cy=CH")
+        elif country in ("FR", "F"):
+            params.append("cy=F")
+        elif country in ("IT", "I"):
+            params.append("cy=I")
+        elif country in ("NL"):
+            params.append("cy=NL")
+        elif country in ("BE", "B"):
+            params.append("cy=B")
+        elif country in ("ES", "E"):
+            params.append("cy=E")
+        elif country in ("PL"):
+            params.append("cy=PL")
+        elif country in ("LU", "L"):
+            params.append("cy=L")
+        else:
+            params.append(f"cy={country}")
         # Ausstattung (eq=<id>,<id>,…)
         eq = [str(i) for i in (query.equipment or []) if i in VALID_EQUIPMENT_IDS]
         if eq:

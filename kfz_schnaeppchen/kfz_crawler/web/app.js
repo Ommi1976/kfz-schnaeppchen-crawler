@@ -46,12 +46,30 @@ function discountClass(d) {
   return "d-lo";
 }
 
+const COUNTRY_LABELS = {
+  DE: "Deutschland (DE)",
+  AT: "Österreich (AT)",
+  CH: "Schweiz (CH)",
+  FR: "Frankreich (FR)",
+  NL: "Niederlande (NL)",
+  BE: "Belgien (BE)",
+  IT: "Italien (IT)",
+  ES: "Spanien (ES)",
+  PL: "Polen (PL)",
+  LU: "Luxemburg (LU)",
+  ALL: "Alle Länder (Europa)",
+};
+
 // ---------- Meta / Selects ----------
 async function loadMeta() {
   META = await getJSON(`${API}/meta`);
   for (const key of ["fuel", "transmission", "body_type", "seller", "doors", "emission_class", "drivetrain"]) {
     const el = document.getElementById("f-" + key);
-    el.innerHTML = META[key].map((v) => `<option value="${v}">${label(v)}</option>`).join("");
+    if (el) el.innerHTML = META[key].map((v) => `<option value="${v}">${label(v)}</option>`).join("");
+  }
+  const cEl = document.getElementById("f-country");
+  if (cEl && META.country) {
+    cEl.innerHTML = META.country.map((c) => `<option value="${c}">${COUNTRY_LABELS[c] || c}</option>`).join("");
   }
   renderEquipment(META.equipment_groups || []);
 }
@@ -135,12 +153,10 @@ async function loadStatus() {
   sel.value = cur;
 
   renderSearches(s.searches || []);
-  document.getElementById("run").disabled = running;
-}
-
-// ---------- Suchen ----------
+  document.getElementB// ---------- Suchen ----------
 function chips(spec) {
   const c = [];
+  if (spec.country && spec.country !== "ALL") c.push(`🏳️ ${spec.country}`);
   if (spec.make) c.push(spec.make);
   if (spec.model) c.push(spec.model);
   if ((spec.exclude_makes || []).length) c.push(`− Hersteller: ${spec.exclude_makes.join(", ")}`);
@@ -193,7 +209,7 @@ function renderSearches(searches) {
   }).join("");
 }
 function chipsCount(s) {
-  return ["make","model","fuel","transmission","body_type","seller","doors","zip_code","radius_km","year_from","year_to",
+  return ["country","make","model","fuel","transmission","body_type","seller","doors","zip_code","radius_km","year_from","year_to",
     "price_from","price_to","mileage_from","mileage_to","power_from","power_to","ev_range_from","battery_from_kwh"]
     .filter((k) => s[k]).length + (s.exclude_makes||[]).length + (s.exclude_models||[]).length
     + (s.keywords||[]).length + (s.exclude_terms||[]).length + (s.equipment||[]).length;
@@ -207,6 +223,7 @@ function mobileSearchUrl(s) {
   span("p", s.price_from, s.price_to);
   span("fr", s.year_from, s.year_to);
   span("ml", s.mileage_from, s.mileage_to);
+  if (s.country && s.country !== "ALL") params.set("cn", s.country);
   if (s.zip_code) params.set("ambc", s.zip_code);
   if (s.radius_km) params.set("rad", String(s.radius_km));
   if (s.ev_range_from) params.set("re", String(Math.max(50, Math.floor(Number(s.ev_range_from) / 100) * 100)));
@@ -222,8 +239,154 @@ function sohClass(soh) {
   return "soh-low";
 }
 
-// ---------- Deals ----------
+// ---------- Deals & Schnellsuche ----------
 let currentPortalFilter = "";
+let allLoadedDeals = [];
+let sortState = { col: "discount", dir: "desc" };
+
+function getCellValue(deal, col) {
+  if (col === "price") return deal.price ?? 99999999;
+  if (col === "market_price") return deal.market_price ?? 0;
+  if (col === "discount") {
+    if (deal.is_deal) return 1000 + (deal.discount ?? 0);
+    return deal.discount ?? -999;
+  }
+  if (col === "year") return deal.year ?? 0;
+  if (col === "mileage") return deal.mileage ?? 99999999;
+  if (col === "battery_kwh") return deal.battery_kwh ?? deal.ev_range_km ?? 0;
+  if (col === "first_seen") return deal.first_seen ?? 0;
+  if (col === "portal") return (deal.portal || "").toLowerCase();
+  if (col === "title") return (deal.title || "").toLowerCase();
+  return 0;
+}
+
+function sortDealsList(list) {
+  const { col, dir } = sortState;
+  const mul = dir === "asc" ? 1 : -1;
+  return [...list].sort((a, b) => {
+    const va = getCellValue(a, col);
+    const vb = getCellValue(b, col);
+    if (typeof va === "string") return va.localeCompare(vb) * mul;
+    return (va - vb) * mul;
+  });
+}
+
+function updateSortHeaders() {
+  document.querySelectorAll("th.sortable").forEach((th) => {
+    const col = th.dataset.sort;
+    const icon = th.querySelector(".sort-icon");
+    if (!icon) return;
+    if (col === sortState.col) {
+      th.classList.add("active-sort");
+      icon.textContent = sortState.dir === "asc" ? "▲" : "▼";
+    } else {
+      th.classList.remove("active-sort");
+      icon.textContent = "⇅";
+    }
+  });
+}
+
+function renderDealsRows(deals) {
+  const body = document.getElementById("deals-body");
+  if (!deals.length) {
+    body.innerHTML = `<tr><td colspan="11" class="empty">Keine Inserate entsprechen den aktuellen Filterkriterien.</td></tr>`;
+    return;
+  }
+  body.innerHTML = deals.map((d) => {
+    const discPct = d.discount == null ? null : Math.abs(Math.round(d.discount * 100));
+    const discText = d.discount == null ? "" : `${d.discount < 0 ? "+" : "-"}${discPct} %`;
+    let mark = "", rowcls = "", discBadge = "";
+
+    if (d.is_deal) {
+      mark = `<span class="mark deal" title="Schnäppchen (≥ 15 % unter Markt)">★</span>`;
+      rowcls = "row-deal";
+      discBadge = `<span class="deal-badge" title="Schnäppchen: ${discPct} % unter Marktwert!">🔥 -${discPct} %</span>`;
+    } else if (d.is_suspicious) {
+      mark = `<span class="mark susp" title="${escapeHtml(d.reasons || "verdächtig")}">⚠</span>`;
+      rowcls = "row-susp";
+      discBadge = `<span class="disc-normal ${discountClass(d.discount)}">${discText}</span>`;
+    } else {
+      discBadge = `<span class="disc-normal ${discountClass(d.discount)}">${discText}</span>`;
+    }
+
+    const pcls = "portal-" + (d.portal || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+    const sohBadge = d.battery_soh != null 
+      ? `<span class="soh-badge ${sohClass(d.battery_soh)}" title="Batteriezustand (State of Health)">🔋 ${d.battery_soh} % SoH</span>`
+      : "";
+    const battInfo = d.battery_kwh != null
+      ? `<span class="batt-badge" title="Akku-Kapazität">⚡ ${d.battery_kwh} kWh</span>`
+      : "";
+    const rangeInfo = d.ev_range_km != null
+      ? `<span class="range-badge" title="Reichweite">🌐 ~${d.ev_range_km} km</span>`
+      : "";
+    const batteryCell = (battInfo || sohBadge || rangeInfo)
+      ? `<div class="battery-cell">${battInfo}${sohBadge}${rangeInfo}</div>`
+      : `<span class="muted">–</span>`;
+
+    const locBadge = (d.distance_km != null)
+      ? `<span class="badge-loc" title="${escapeHtml(d.location || '')}">📍 ${d.distance_km} km</span>`
+      : "";
+    const warrantyBadge = d.warranty
+      ? `<span class="badge-warranty" title="${escapeHtml(d.warranty)}">🛡️ ${escapeHtml(d.warranty)}</span>`
+      : "";
+    const subInfo = (locBadge || warrantyBadge)
+      ? `<div class="sub-info">${locBadge}${warrantyBadge}</div>`
+      : "";
+
+    return `<tr class="${rowcls}">
+      <td class="markcell">${mark}</td>
+      <td><span class="portal-badge ${pcls}">${escapeHtml(d.portal || "")}</span></td>
+      <td class="title">
+        <div class="t-main">${escapeHtml(d.title || "")}</div>
+        ${subInfo}
+        ${d.is_suspicious ? `<div class="reason">${escapeHtml(d.reasons || "")}</div>` : ""}
+      </td>
+      <td class="battery-col">${batteryCell}</td>
+      <td class="num font-bold">${euro(d.price)}</td>
+      <td class="num muted">${euro(d.market_price)}</td>
+      <td class="num discount-cell">${discBadge}</td>
+      <td class="num">${d.year || "–"}</td>
+      <td class="num">${km(d.mileage)}</td>
+      <td>${timeAgo(d.first_seen)}</td>
+      <td><a class="link" href="${d.url}" target="_blank" rel="noopener">öffnen ↗</a></td>
+    </tr>`;
+  }).join("");
+}
+
+function applyQuickFilters() {
+  const qText = (document.getElementById("quickSearch")?.value || "").trim().toLowerCase();
+  const maxPrice = Number(document.getElementById("qf-price-max")?.value) || null;
+  const maxKm = Number(document.getElementById("qf-km-max")?.value) || null;
+  const minRange = Number(document.getElementById("qf-range-min")?.value) || null;
+  const minSoh = Number(document.getElementById("qf-soh-min")?.value) || null;
+
+  const filtered = allLoadedDeals.filter((d) => {
+    if (qText) {
+      const hay = `${d.title || ""} ${d.portal || ""} ${d.body || ""} ${d.location || ""} ${d.location_city || ""} ${d.warranty || ""} ${d.reasons || ""}`.toLowerCase();
+      if (!hay.includes(qText)) return false;
+    }
+    if (maxPrice != null && d.price != null && d.price > maxPrice) return false;
+    if (maxKm != null && d.mileage != null && d.mileage > maxKm) return false;
+    if (minRange != null && (d.ev_range_km == null || d.ev_range_km < minRange)) return false;
+    if (minSoh != null && (d.battery_soh == null || d.battery_soh < minSoh)) return false;
+    return true;
+  });
+
+  const sorted = sortDealsList(filtered);
+  renderDealsRows(sorted);
+  updateSortHeaders();
+
+  const badge = document.getElementById("quickFilterCount");
+  if (badge) {
+    if (filtered.length === allLoadedDeals.length) {
+      badge.textContent = `Zeige alle ${allLoadedDeals.length} Treffer`;
+      badge.classList.remove("filtered");
+    } else {
+      badge.textContent = `${filtered.length} von ${allLoadedDeals.length} Treffern`;
+      badge.classList.add("filtered");
+    }
+  }
+}
 
 async function loadDeals() {
   const sel = document.getElementById("searchFilter");
@@ -234,7 +397,8 @@ async function loadDeals() {
   if (currentPortalFilter) params.push(`portal=${encodeURIComponent(currentPortalFilter)}`);
   const data = await getJSON(`${API}/deals${params.length ? "?" + params.join("&") : ""}`);
   
-  const apiDealCount = data.total_deals ?? data.deals.filter(x => x.is_deal).length;
+  allLoadedDeals = data.deals || [];
+  const apiDealCount = data.total_deals ?? allLoadedDeals.filter(x => x.is_deal).length;
   renderPortalFilters(data.portal_counts || {}, apiDealCount);
 
   // Kachel synchron halten
@@ -243,73 +407,10 @@ async function loadDeals() {
   const cAllV = document.querySelector("#card-all .v");
   if (cAllV) cAllV.textContent = data.count;
 
-  const body = document.getElementById("deals-body");
-  if (!data.deals.length) {
-    body.innerHTML = `<tr><td colspan="11" class="empty">Noch keine Treffer. Lege eine Suche an und klick „Suchen".</td></tr>`;
-  } else {
-    body.innerHTML = data.deals.map((d) => {
-      const discPct = d.discount == null ? null : Math.abs(Math.round(d.discount * 100));
-      const discText = d.discount == null ? "" : `${d.discount < 0 ? "+" : "-"}${discPct} %`;
-      let mark = "", rowcls = "", discBadge = "";
+  applyQuickFilters();
 
-      if (d.is_deal) {
-        mark = `<span class="mark deal" title="Schnäppchen (≥ 15 % unter Markt)">★</span>`;
-        rowcls = "row-deal";
-        discBadge = `<span class="deal-badge" title="Schnäppchen: ${discPct} % unter Marktwert!">🔥 -${discPct} %</span>`;
-      } else if (d.is_suspicious) {
-        mark = `<span class="mark susp" title="${escapeHtml(d.reasons || "verdächtig")}">⚠</span>`;
-        rowcls = "row-susp";
-        discBadge = `<span class="disc-normal ${discountClass(d.discount)}">${discText}</span>`;
-      } else {
-        discBadge = `<span class="disc-normal ${discountClass(d.discount)}">${discText}</span>`;
-      }
-
-      const pcls = "portal-" + (d.portal || "").toLowerCase().replace(/[^a-z0-9]/g, "");
-      const sohBadge = d.battery_soh != null 
-        ? `<span class="soh-badge ${sohClass(d.battery_soh)}" title="Batteriezustand (State of Health)">🔋 ${d.battery_soh} % SoH</span>`
-        : "";
-      const battInfo = d.battery_kwh != null
-        ? `<span class="batt-badge" title="Akku-Kapazität">⚡ ${d.battery_kwh} kWh</span>`
-        : "";
-      const rangeInfo = d.ev_range_km != null
-        ? `<span class="range-badge" title="Reichweite">🌐 ~${d.ev_range_km} km</span>`
-        : "";
-      const batteryCell = (battInfo || sohBadge || rangeInfo)
-        ? `<div class="battery-cell">${battInfo}${sohBadge}${rangeInfo}</div>`
-        : `<span class="muted">–</span>`;
-
-      // Nur die Entfernung (Luftlinie) zur eigenen PLZ anzeigen – nicht den Ort.
-      const locBadge = (d.distance_km != null)
-        ? `<span class="badge-loc" title="${escapeHtml(d.location || '')}">📍 ${d.distance_km} km</span>`
-        : "";
-      const warrantyBadge = d.warranty
-        ? `<span class="badge-warranty" title="${escapeHtml(d.warranty)}">🛡️ ${escapeHtml(d.warranty)}</span>`
-        : "";
-      const subInfo = (locBadge || warrantyBadge)
-        ? `<div class="sub-info">${locBadge}${warrantyBadge}</div>`
-        : "";
-
-      return `<tr class="${rowcls}">
-        <td class="markcell">${mark}</td>
-        <td><span class="portal-badge ${pcls}">${escapeHtml(d.portal || "")}</span></td>
-        <td class="title">
-          <div class="t-main">${escapeHtml(d.title || "")}</div>
-          ${subInfo}
-          ${d.is_suspicious ? `<div class="reason">${escapeHtml(d.reasons || "")}</div>` : ""}
-        </td>
-        <td class="battery-col">${batteryCell}</td>
-        <td class="num font-bold">${euro(d.price)}</td>
-        <td class="num muted">${euro(d.market_price)}</td>
-        <td class="num discount-cell">${discBadge}</td>
-        <td class="num">${d.year || "–"}</td>
-        <td class="num">${km(d.mileage)}</td>
-        <td>${timeAgo(d.first_seen)}</td>
-        <td><a class="link" href="${d.url}" target="_blank" rel="noopener">öffnen ↗</a></td>
-      </tr>`;
-    }).join("");
-  }
   document.getElementById("footer-info").textContent =
-    `${data.count} Treffer angezeigt${dealsOnly ? " (nur Schnäppchen)" : ""}${currentPortalFilter ? ` · Filter: ${currentPortalFilter}` : ""} · Auto-Aktualisierung alle 20 s`;
+    `${data.count} Treffer im Speicher${dealsOnly ? " (nur Schnäppchen)" : ""}${currentPortalFilter ? ` · Filter: ${currentPortalFilter}` : ""} · Auto-Aktualisierung alle 20 s`;
 }
 
 function renderPortalFilters(counts, dealCount) {
@@ -361,7 +462,7 @@ function renderPortalFilters(counts, dealCount) {
 
 // ---------- Formular ----------
 const NUMS = ["year_from","year_to","price_from","price_to","mileage_from","mileage_to","radius_km","power_from","power_to","ev_range_from","battery_from_kwh"];
-const SELS = ["make","model","fuel","transmission","body_type","seller","doors","emission_class","drivetrain"];
+const SELS = ["make","model","country","fuel","transmission","body_type","seller","doors","emission_class","drivetrain"];
 
 function openForm(spec) {
   document.getElementById("form-error").textContent = "";
@@ -371,8 +472,15 @@ function openForm(spec) {
   document.getElementById("f-active").checked = spec ? !!spec.active : true;
   document.getElementById("f-include_damaged").checked = spec ? !!spec.include_damaged : false;
   document.getElementById("f-zip_code").value = (spec && spec.zip_code) || "";
-  SELS.forEach((k) => { document.getElementById("f-" + k).value = (spec && spec[k]) || ""; });
-  NUMS.forEach((k) => { document.getElementById("f-" + k).value = (spec && spec[k] != null) ? spec[k] : ""; });
+  document.getElementById("f-country").value = (spec && spec.country) || "DE";
+  SELS.forEach((k) => { 
+    const el = document.getElementById("f-" + k);
+    if (el) el.value = (spec && spec[k]) || (k === "country" ? "DE" : ""); 
+  });
+  NUMS.forEach((k) => { 
+    const el = document.getElementById("f-" + k);
+    if (el) el.value = (spec && spec[k] != null) ? spec[k] : ""; 
+  });
   ["exclude_makes", "exclude_models"].forEach((k) => {
     document.getElementById("f-" + k).value = spec && spec[k] ? spec[k].join(", ") : "";
   });
@@ -386,7 +494,7 @@ function openForm(spec) {
 function closeForm() { document.getElementById("modal").classList.add("hidden"); }
 
 function collectForm() {
-  const val = (id) => document.getElementById(id).value.trim();
+  const val = (id) => (document.getElementById(id)?.value || "").trim();
   const num = (id) => { const v = val(id); return v === "" ? null : Number(v); };
   const spec = {
     id: val("f-id"),
@@ -394,6 +502,7 @@ function collectForm() {
     active: document.getElementById("f-active").checked,
     make: val("f-make"), model: val("f-model"),
     exclude_makes: val("f-exclude_makes"), exclude_models: val("f-exclude_models"),
+    country: val("f-country") || "DE",
     fuel: val("f-fuel"), transmission: val("f-transmission"),
     body_type: val("f-body_type"), seller: val("f-seller"), doors: val("f-doors"),
     zip_code: val("f-zip_code"),
@@ -435,6 +544,31 @@ document.getElementById("modal-cancel").addEventListener("click", closeForm);
 document.getElementById("search-form").addEventListener("submit", submitForm);
 document.getElementById("equip-search").addEventListener("input", (e) => filterEquip(e.target.value));
 document.getElementById("modal").addEventListener("click", (e) => { if (e.target.id === "modal") closeForm(); });
+
+// Schnellsuche & Live-Filter Events
+document.getElementById("quickSearch").addEventListener("input", applyQuickFilters);
+document.getElementById("quickSearchClear").addEventListener("click", () => {
+  document.getElementById("quickSearch").value = "";
+  applyQuickFilters();
+});
+["qf-price-max", "qf-km-max", "qf-range-min", "qf-soh-min"].forEach((id) => {
+  const el = document.getElementById(id);
+  if (el) el.addEventListener("input", applyQuickFilters);
+});
+
+// Sortier-Header Klicks
+document.querySelectorAll("th.sortable").forEach((th) => {
+  th.addEventListener("click", () => {
+    const col = th.dataset.sort;
+    if (sortState.col === col) {
+      sortState.dir = sortState.dir === "asc" ? "desc" : "asc";
+    } else {
+      sortState.col = col;
+      sortState.dir = (col === "price" || col === "mileage") ? "asc" : "desc";
+    }
+    applyQuickFilters();
+  });
+});
 
 document.getElementById("search-list").addEventListener("click", async (e) => {
   const t = e.target;
