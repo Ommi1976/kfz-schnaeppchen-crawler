@@ -102,3 +102,27 @@ def test_sync_active_deals(store):
     assert "Car 1" in remaining_titles
     assert "Car 3" in remaining_titles
     assert "Car 2" not in remaining_titles
+
+
+def test_discovered_ev_models(store):
+    is_new, rec = store.record_discovered_ev_model("Lucid Air Pure 88 kWh", battery_kwh=88.0, ev_range_km=650)
+    assert is_new is True
+    assert rec["count"] == 1
+    assert rec["avg_battery_kwh"] == 88.0
+
+    # Zweiter Fund desselben Modells mit leichten Abweichungen
+    is_new2, rec2 = store.record_discovered_ev_model("Lucid Air Pure 88 kWh AWD", battery_kwh=90.0, ev_range_km=670)
+    assert is_new2 is False
+    assert rec2["count"] == 2
+    assert rec2["avg_battery_kwh"] == 89.0  # Durchschnitt (88 + 90) / 2
+
+    discovered = store.list_discovered_ev_models()
+    assert len(discovered) == 1
+    assert discovered[0]["status"] == "discovered"
+
+    # Status ändern
+    ok = store.set_discovered_ev_status(rec["model_key"], "approved")
+    assert ok is True
+    assert len(store.list_discovered_ev_models(status="approved")) == 1
+    assert len(store.list_discovered_ev_models(status="discovered")) == 0
+

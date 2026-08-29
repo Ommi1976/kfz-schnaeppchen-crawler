@@ -60,6 +60,23 @@ def _search_one_portal(cfg: Config, key: str, query: SearchQuery, store=None) ->
                     infer_listing_details(listing, home_zip)
                 except Exception:
                     pass
+            if listing.fuel == "elektro" or listing.battery_kwh is not None:
+                try:
+                    from .ev_database import lookup_ev_spec
+                    spec = lookup_ev_spec(listing.title, getattr(listing, "body", ""), power_ps=listing.power_ps)
+                    if not spec and (listing.battery_kwh or listing.ev_range_km):
+                        if store and hasattr(store, "record_discovered_ev_model"):
+                            is_new, rec = store.record_discovered_ev_model(
+                                listing.title,
+                                battery_kwh=listing.battery_kwh,
+                                ev_range_km=listing.ev_range_km,
+                                power_ps=listing.power_ps,
+                            )
+                            if is_new:
+                                logger.info("💡 Neues E-Modell entdeckt: %s (~%.1f kWh, ~%d km)", listing.title, listing.battery_kwh or 0, listing.ev_range_km or 0)
+                except Exception:
+                    pass
+
             if matches_query(listing, query):
                 matching.append(listing)
                 if store and hasattr(store, "record_listing"):

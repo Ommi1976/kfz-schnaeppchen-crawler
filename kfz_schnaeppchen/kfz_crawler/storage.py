@@ -111,6 +111,25 @@ class SeenStore:
             )
             """
         )
+        # Selbstlernender EV-Modellspeicher (automatisch entdeckte neue E-Autos).
+        self.conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS discovered_ev_models (
+                model_key       TEXT PRIMARY KEY,
+                make            TEXT,
+                model           TEXT,
+                sample_title    TEXT,
+                count           INTEGER DEFAULT 1,
+                avg_battery_kwh REAL,
+                avg_range_km    INTEGER,
+                power_kw        INTEGER,
+                power_ps        INTEGER,
+                status          TEXT DEFAULT 'discovered',
+                first_seen      REAL,
+                last_seen       REAL
+            )
+            """
+        )
         # Allgemeiner Key-Value-Speicher (z. B. mobile.de-Cookies + Status).
         self.conn.execute(
             "CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT)"
@@ -470,6 +489,126 @@ class SeenStore:
             if deleted_count > 0:
                 self.conn.commit()
         return deleted_count
+
+    # ---- Selbstlernender EV-Modellspeicher ----------------------------
+    def record_discovered_ev_model(
+        self,
+        title: str,
+        battery_kwh: Optional[float] = None,
+        ev_range_km: Optional[int] = None,
+        power_kw: Optional[int] = None,
+        power_ps: Optional[int] = None,
+    ) -> tuple[bool, Optional[dict]]:
+        """Registriert oder aktualisiert ein unbekanntes E-Auto-Modell.
+        
+        Gibt (is_new, record) zurück.
+        """
+        import re
+        if not title:
+            return False, None
+            
+        # Bereinige Titel für einen robusten Key (z. B. 'volkswagen id.3', 'mg mg4 luxury')
+        clean = re.sub(r"[^\w\s]", " ", title.lower())
+        words = clean.split()
+        if not words:
+            return False, None
+            
+        # Schlüssel aus den ersten 3-4 signifikanten Wörtern bilden
+        key_words = [w for w in words if len(w) > 1 and not w.isdigit()][:4]
+        if not key_words:
+            key_words = words[:3]
+        model_key = " ".join(key_words)
+        
+        now = time.time()
+        with self._lock:
+            cur = self.conn.execute(
+                "SELECT * FROM discovered_ev_models WHERE model_key = ?",
+                (model_key,)
+            )
+            row = cur.fetchone()
+            if row:
+                old_count = row["count"]
+                new_count = old_count + 1
+                
+                # Inkrementelle Durchschnittsberechnung
+                old_kwh = row["avg_battery_kwh"]
+                new_kwh = old_kwh
+                if battery_kwh is not None:
+                    new_kwh = round(((old_kwh or battery_kwh) * old_count + battery_kwh) / new_count, 1)
+                    
+                old_rng = row["avg_range_km"]
+                new_rng = old_rng
+                if ev_range_km is not None:
+                    new_rng = round(((old_rng or ev_range_km) * old_count + ev_range_km) / new_count)
+                    
+                self.conn.execute(
+                    """
+                    UPDATE discovered_ev_models
+                    SET count = ?, avg_battery_kwh = ?, avg_range_km = ?, last_seen = ?
+                    WHERE model_key = ?
+                    """,
+                    (new_count, new_kwh, new_rng, now, model_key)
+                )
+                self.conn.commit()
+                return False, {
+                    "model_key": model_key,
+                    "title": title,
+                    "count": new_count,
+                    "avg_battery_kwh": new_kwh,
+                    "avg_range_km": new_rng,
+                    "status": row["status"],
+                }
+            else:
+                self.conn.execute(
+                    """
+                    INSERT INTO discovered_ev_models
+                    (model_key, make, model, sample_title, count, avg_battery_kwh, avg_range_km, power_kw, power_ps, status, first_seen, last_seen)
+                    VALUES (?, ?, ?, ?, 1, ?, ?, ?, ?, 'discovered', ?, ?)
+                    """,
+                    (
+                        model_key,
+                        words[0].capitalize() if words else "",
+                        " ".join(words[1:3]) if len(words) > 1 else "",
+                        title[:100],
+                        battery_kwh,
+                        ev_range_km,
+                        power_kw,
+                        power_ps,
+                        now,
+                        now,
+                    )
+                )
+                self.conn.commit()
+                return True, {
+                    "model_key": model_key,
+                    "title": title,
+                    "count": 1,
+                    "avg_battery_kwh": battery_kwh,
+                    "avg_range_km": ev_range_km,
+                    "status": "discovered",
+                }
+
+    def list_discovered_ev_models(self, status: Optional[str] = None) -> List[dict]:
+        with self._lock:
+            if status:
+                cur = self.conn.execute(
+                    "SELECT * FROM discovered_ev_models WHERE status = ? ORDER BY count DESC, last_seen DESC",
+                    (status,)
+                )
+            else:
+                cur = self.conn.execute(
+                    "SELECT * FROM discovered_ev_models ORDER BY count DESC, last_seen DESC"
+                )
+            return [dict(r) for r in cur.fetchall()]
+
+    def set_discovered_ev_status(self, model_key: str, status: str) -> bool:
+        with self._lock:
+            cur = self.conn.execute(
+                "UPDATE discovered_ev_models SET status = ? WHERE model_key = ?",
+                (status, model_key)
+            )
+            self.conn.commit()
+            return cur.rowcount > 0
 
     def close(self) -> None:
         try:

@@ -395,6 +395,22 @@ async def save_mobile_cookies_endpoint(payload: dict = Body(...)):
     return {"status": "ok", "saved_count": len(saved)}
 
 
+@app.get("/api/discovered-ev")
+async def get_discovered_ev(status: str | None = None):
+    models = app.state.store.list_discovered_ev_models(status=status)
+    return {"count": len(models), "models": models}
+
+
+@app.post("/api/discovered-ev/{model_key:path}/status")
+async def update_discovered_ev_status(model_key: str, payload: dict = Body(...)):
+    new_status = payload.get("status")
+    if new_status not in ("discovered", "approved", "rejected"):
+        raise HTTPException(status_code=400, detail="Ungültiger Status")
+    ok = app.state.store.set_discovered_ev_status(model_key, new_status)
+    return {"success": ok, "model_key": model_key, "status": new_status}
+
+
+
 @app.delete("/api/mobile-cookies")
 async def delete_mobile_cookies():
     from .cookie_storage import COOKIE_FILE

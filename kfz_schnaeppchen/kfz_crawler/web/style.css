@@ -319,10 +319,99 @@ th.sortable .sort-icon {
   opacity: .5;
   margin-left: 3px;
 }
-th.sortable.active-sort {
-  color: var(--accent2);
-}
 th.sortable.active-sort .sort-icon {
   opacity: 1;
   font-weight: bold;
+}
+
+/* Selbstlernender Modell-Speicher */
+.badge-count {
+  display: inline-block;
+  background: var(--accent2);
+  color: #0d131f;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 1px 7px;
+  border-radius: 999px;
+  margin-left: 6px;
+  vertical-align: middle;
+}
+.discovered-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 12px;
+  margin-top: 12px;
+}
+.discovered-card {
+  background: var(--panel2);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  transition: transform .15s ease, border-color .15s ease;
+}
+.discovered-card:hover {
+  border-color: rgba(34, 211, 238, 0.4);
+}
+.discovered-card-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 8px;
+}
+.discovered-card-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+}
+.discovered-hits {
+  font-size: 11px;
+  color: var(--accent2);
+  background: rgba(34, 211, 238, 0.1);
+  padding: 2px 6px;
+  border-radius: 4px;
+  white-space: nowrap;
+}
+.discovered-stats {
+  display: flex;
+  gap: 12px;
+  font-size: 12px;
+  color: var(--muted);
+}
+.discovered-stats span {
+  font-weight: 600;
+  color: var(--text);
+}
+.discovered-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 4px;
+}
+.btn-approve {
+  background: rgba(34, 197, 94, 0.15);
+  border: 1px solid rgba(34, 197, 94, 0.4);
+  color: #4ade80;
+  font-size: 11px;
+  padding: 4px 10px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-weight: 600;
+}
+.btn-approve:hover {
+  background: rgba(34, 197, 94, 0.3);
+}
+.btn-dismiss {
+  background: transparent;
+  border: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 11px;
+  padding: 4px 8px;
+  border-radius: 4px;
+  cursor: pointer;
+}
+.btn-dismiss:hover {
+  color: var(--danger);
+  border-color: var(--danger);
 }
