@@ -153,7 +153,10 @@ async function loadStatus() {
   sel.value = cur;
 
   renderSearches(s.searches || []);
-  document.getElementB// ---------- Suchen ----------
+  document.getElementById("run").disabled = running;
+}
+
+// ---------- Suchen ----------
 function chips(spec) {
   const c = [];
   if (spec.country && spec.country !== "ALL") c.push(`🏳️ ${spec.country}`);
