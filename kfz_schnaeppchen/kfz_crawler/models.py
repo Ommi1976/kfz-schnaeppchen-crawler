@@ -108,9 +108,9 @@ _KNOWN_EV_CATALOG = [
     (re.compile(r"\bid\.?[45]\b.*?\b(?:pro\s+performance|pro|gtx|1st)\b", re.I), 82.0, 520),
     (re.compile(r"\bid\.?[45]\b", re.I), 77.0, 500),
     # Cupra Born
-    (re.compile(r"\bborn\b.*?\b(?:77|82|e-boost\s*(?:77|82))\b", re.I), 82.0, 548),
-    (re.compile(r"\bborn\b.*?\b(?:58|62|150\s*kw)\b", re.I), 58.0, 424),
-    (re.compile(r"\bborn\b", re.I), 58.0, 424),
+    (re.compile(r"\bborn\b.*?\b(?:77|82|e-boost)\b", re.I), 82.0, 548),
+    (re.compile(r"\bborn\b.*?\b(?:170\s*kw|231\s*ps)\b", re.I), 82.0, 548),
+    (re.compile(r"\bborn\b", re.I), 77.0, 548),
     # Skoda Enyaq
     (re.compile(r"\benyaq\b.*?\b(?:80|80x|85|rs|82)\b", re.I), 82.0, 535),
     (re.compile(r"\benyaq\b.*?\b(?:60)\b", re.I), 62.0, 400),

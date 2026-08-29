@@ -88,12 +88,9 @@ _EV_DATABASE: List[EVSpec] = [
         re.compile(r"\bmodel\s*y\b.*?\b(?:standard|rwd|hinterradantrieb)\b", re.I),
     ]),
 
-    EVSpec("Cupra", "Born", "77 / 82 kWh (e-Boost)", 82.0, 77.0, 548, 170, 231, [
-        re.compile(r"\bborn\b.*?\b(?:77|82|e-boost\s*(?:77|82))\b", re.I),
-        re.compile(r"\bborn\b.*?\b(?:170\s*kw|231\s*ps)\b(?!.*?(?:58|62)\s*kwh)", re.I),
-    ]),
-    EVSpec("Cupra", "Born", "58 / 62 kWh", 62.0, 58.0, 424, 150, 204, [
-        re.compile(r"\bborn\b.*?\b(?:58|62|150\s*kw|204\s*ps)\b", re.I),
+    EVSpec("Cupra", "Born", "77 / 82 kWh (548 km)", 82.0, 77.0, 548, 170, 231, [
+        re.compile(r"\bborn\b.*?\b(?:77|82|e-boost)\b", re.I),
+        re.compile(r"\bborn\b.*?\b(?:170\s*kw|231\s*ps)\b", re.I),
         re.compile(r"\bborn\b", re.I),
     ]),
     EVSpec("Skoda", "Enyaq iV", "50", 55.0, 52.0, 350, 109, 148, [
