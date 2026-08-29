@@ -1,12 +1,12 @@
-requests>=2.31
-beautifulsoup4>=4.12
-lxml>=5.0
-PyYAML>=6.0
-rich>=13.7
-PySocks>=1.7          # optionaler SOCKS-Proxy-Support (z. B. Tor)
-fastapi>=0.110        # Ingress-Weboberfläche
-uvicorn>=0.27         # ASGI-Server für die Weboberfläche
-curl_cffi>=0.7        # HTTP-Client (Chrome-TLS)
-playwright>=1.43      # mobile.de autarker Firefox Headless Scraper
-pytesseract>=0.3.10   # OCR für Batterie-Zertifikate (SoH); optional, graceful
-Pillow>=10.0          # Bildverarbeitung für die OCR-Pipeline
+requests==2.34.2
+beautifulsoup4==4.15.0
+lxml==6.1.1
+PyYAML==6.0.3
+rich==15.0.0
+PySocks==1.7.1
+fastapi==0.139.2
+uvicorn==0.51.0
+curl_cffi==0.16.2
+playwright==1.62.0
+pytesseract==0.3.13
+Pillow==12.2.0

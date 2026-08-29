@@ -8,6 +8,7 @@ konfigurierten Intervall aus. Wird per uvicorn auf 0.0.0.0:8099 gestartet und
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -40,6 +41,7 @@ META = {
     "country": ["DE", "AT", "CH", "FR", "NL", "BE", "IT", "ES", "PL", "LU", "ALL"],
     "emission_class": ["", "euro4", "euro5", "euro6", "euro6d", "euro6e"],
     "drivetrain": ["", "allrad", "front", "heck"],
+    "unknown_policy": ["tolerant", "strict"],
     "equipment_groups": [
         {"group": name, "items": [{"id": i, "label": EQUIPMENT[i]} for i in ids]}
         for name, ids in EQUIPMENT_GROUPS
@@ -143,7 +145,11 @@ async def _do_run(app: FastAPI, only_id: str | None = None) -> None:
             # Asynchrone Hintergrund-Bildanalyse für SoH anstoßen (blockiert die UI/Suche nicht)
             try:
                 from kfz_crawler.battery_analyzer import run_background_image_enrichment
-                asyncio.create_task(asyncio.to_thread(run_background_image_enrichment, app.state.store))
+                task = getattr(app.state, "enrichment_task", None)
+                if task is None or task.done():
+                    app.state.enrichment_task = asyncio.create_task(
+                        asyncio.to_thread(run_background_image_enrichment, app.state.store)
+                    )
             except Exception:
                 pass
         finally:
@@ -184,6 +190,7 @@ async def lifespan(app: FastAPI):
     # sofort „nächster Lauf" anzeigt und nicht erst nach dem ersten Durchlauf.
     _schedule_next(app)
     app.state.last_report = {}
+    app.state.enrichment_task = None
     app.state.scheduler = asyncio.create_task(_scheduler(app))
     try:
         yield
@@ -249,6 +256,7 @@ async def status():
         "total_deals": app.state.store.deal_count(deals_only=True),
         "total_listings": app.state.store.total_count(),
         "portal_counts": app.state.store.count_deals_by_portal(),
+        "portal_health": app.state.store.list_portal_health(),
         "searches": searches,
         "last_report": app.state.last_report,
     }
@@ -339,23 +347,32 @@ async def deals(search: str | None = None, limit: int = 400, deals_only: bool = 
             fuel=row.get("fuel"),
             power_ps=row.get("power_ps"),
             battery_kwh=row.get("battery_kwh"),
+            battery_net_kwh=row.get("battery_net_kwh"),
+            battery_gross_kwh=row.get("battery_gross_kwh"),
             battery_soh=row.get("battery_soh"),
             ev_range_km=row.get("ev_range_km"),
             location=row.get("location"),
             body=row.get("body") or "",
             country=row.get("country"),
+            is_stale=bool(row.get("is_stale")),
         )
         if not matches_query(l, query):
             continue
+        for json_field, target, fallback in (
+            ("evidence_json", "field_evidence", {}),
+            ("unknown_fields", "unknown_fields_list", []),
+        ):
+            try:
+                raw_json = row.get(json_field) or ("{}" if isinstance(fallback, dict) else "[]")
+                row[target] = json.loads(raw_json)
+            except (TypeError, ValueError):
+                row[target] = fallback
         filtered.append(row)
     rows = filtered
 
     # Portal-Aufteilung für die aktuelle Suche & Deals-Filterung berechnen
     portal_counts = {}
-    all_filtered_rows = app.state.store.list_deals(
-        limit=min(limit, 2000), search_name=search, deals_only=deals_only
-    )
-    for r in all_filtered_rows:
+    for r in rows:
         p = r.get("portal") or "Unbekannt"
         portal_counts[p] = portal_counts.get(p, 0) + 1
 
@@ -364,6 +381,8 @@ async def deals(search: str | None = None, limit: int = 400, deals_only: bool = 
         "deals": rows,
         "portal_counts": portal_counts,
         "total_deals": sum(1 for r in rows if r.get("is_deal")),
+        "stale_count": sum(1 for r in rows if r.get("is_stale")),
+        "portal_health": app.state.store.list_portal_health(search),
     }
 
 
@@ -404,7 +423,7 @@ async def get_discovered_ev(status: str | None = None):
 @app.post("/api/discovered-ev/{model_key:path}/status")
 async def update_discovered_ev_status(model_key: str, payload: dict = Body(...)):
     new_status = payload.get("status")
-    if new_status not in ("discovered", "approved", "rejected"):
+    if new_status not in ("discovered", "review", "conflict", "approved", "rejected"):
         raise HTTPException(status_code=400, detail="Ungültiger Status")
     ok = app.state.store.set_discovered_ev_status(model_key, new_status)
     return {"success": ok, "model_key": model_key, "status": new_status}

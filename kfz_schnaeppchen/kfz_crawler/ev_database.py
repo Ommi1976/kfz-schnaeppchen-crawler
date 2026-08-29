@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from typing import List, Optional, Tuple
+from typing import List, Optional
 
 
 @dataclass
@@ -18,6 +18,19 @@ class EVSpec:
     power_kw: Optional[int] = None
     power_ps: Optional[int] = None
     patterns: List[re.Pattern] = None
+    source_name: str = "Hersteller-/WLTP-Referenzdaten"
+    source_url: str = ""
+    verified: bool = True
+
+
+@dataclass(frozen=True)
+class EVMatch:
+    """Nachvollziehbares Ergebnis einer Varianten-Zuordnung."""
+
+    spec: EVSpec
+    confidence: float
+    matched_pattern: str
+    evidence: str
 
 
 # Umfassender Katalog aller gängigen E-Autos im deutschen Markt (Spezifische Trims VOR Fallbacks)
@@ -472,13 +485,37 @@ _EV_DATABASE: List[EVSpec] = [
 ]
 
 
-def lookup_ev_spec(
+_CAPACITY_RE = re.compile(
+    r"(?<![\w.,])(\d{1,3}(?:[.,]\d{1,2})?)\s*k\s*wh\b",
+    re.IGNORECASE,
+)
+
+
+def _capacity_values(text: str) -> list[float]:
+    values: list[float] = []
+    for match in _CAPACITY_RE.finditer(text):
+        try:
+            value = float(match.group(1).replace(",", "."))
+        except ValueError:
+            continue
+        if 15.0 <= value <= 130.0:
+            values.append(value)
+    return values
+
+
+def lookup_ev_spec_match(
     title: str | None,
     body: str | None = None,
     power_ps: int | None = None,
     power_kw: int | None = None,
-) -> Optional[EVSpec]:
-    """Sucht in der internen EV-Referenzdatenbank nach dem passenden Modell."""
+) -> Optional[EVMatch]:
+    """Ordnet ein EV einer Variante zu und verwirft mehrdeutige Treffer.
+
+    Explizite Kapazitäten und Leistung haben Vorrang vor generischen
+    Modell-Fallbacks. Nahezu gleich bewertete, widersprüchliche Varianten werden
+    bewusst als unbekannt behandelt, statt einen präzise wirkenden Fantasiewert
+    zu liefern.
+    """
     parts = [str(title or ""), str(body or "")]
     if power_ps:
         parts.append(f"{power_ps} ps {power_ps}ps")
@@ -494,9 +531,99 @@ def lookup_ev_spec(
     text = " ".join(parts).strip()
     if not text:
         return None
+    title_text = str(title or "")
+    capacities = _capacity_values(text)
+    ranked: list[tuple[float, EVSpec, re.Pattern, list[str]]] = []
     for spec in _EV_DATABASE:
-        if spec.patterns:
-            for pat in spec.patterns:
-                if pat.search(text):
-                    return spec
+        for pat in spec.patterns or []:
+            match = pat.search(text)
+            if not match:
+                continue
+            reasons: list[str] = []
+            score = min(24.0, len(pat.pattern) / 5.0)
+            if pat.search(title_text):
+                score += 25.0
+                reasons.append("Modellmuster im Titel")
+            else:
+                reasons.append("Modellmuster im Beschreibungstext")
+
+            if capacities:
+                delta = min(
+                    abs(value - capacity)
+                    for value in capacities
+                    for capacity in (spec.battery_gross_kwh, spec.battery_net_kwh)
+                )
+                if delta <= 1.5:
+                    score += 80.0
+                    reasons.append(f"Kapazität passend ({capacities[0]:g} kWh)")
+                elif delta <= 4.0:
+                    score += 25.0
+                    reasons.append("Kapazität ungefähr passend")
+                else:
+                    score -= 45.0
+                    reasons.append("Kapazität widersprüchlich")
+
+            effective_ps = power_ps or (round(power_kw * 1.35962) if power_kw else None)
+            if effective_ps and spec.power_ps:
+                delta_ps = abs(effective_ps - spec.power_ps)
+                if delta_ps <= 3:
+                    score += 28.0
+                    reasons.append("Leistung passend")
+                elif delta_ps <= 15:
+                    score += 8.0
+                elif delta_ps >= 35:
+                    score -= 15.0
+            ranked.append((score, spec, pat, reasons))
+
+    if not ranked:
+        return None
+    ranked.sort(key=lambda item: item[0], reverse=True)
+    best_score, best_spec, best_pattern, best_reasons = ranked[0]
+    sibling_capacities = {
+        spec.battery_gross_kwh
+        for spec in _EV_DATABASE
+        if spec.make == best_spec.make and spec.model == best_spec.model
+    }
+    if (
+        not capacities
+        and not power_ps
+        and not power_kw
+        and len(sibling_capacities) > 1
+        and len(best_pattern.pattern) < 30
+    ):
+        return None
+    for next_score, next_spec, _, _ in ranked[1:]:
+        if best_score - next_score > 6.0:
+            break
+        if (
+            best_spec.model == next_spec.model
+            and abs(best_spec.battery_gross_kwh - next_spec.battery_gross_kwh) > 2.0
+        ):
+            return None
+
+    confidence = 0.78
+    if capacities and any("Kapazität passend" in reason for reason in best_reasons):
+        confidence = 0.97
+    elif any("Leistung passend" in reason for reason in best_reasons):
+        confidence = 0.91
+    elif best_pattern.search(title_text):
+        confidence = 0.86
+    return EVMatch(
+        spec=best_spec,
+        confidence=confidence,
+        matched_pattern=best_pattern.pattern,
+        evidence="; ".join(best_reasons),
+    )
+
+
+def lookup_ev_spec(
+    title: str | None,
+    body: str | None = None,
+    power_ps: int | None = None,
+    power_kw: int | None = None,
+) -> Optional[EVSpec]:
+    """Rückwärtskompatible Kurzform der Varianten-Zuordnung."""
+    match = lookup_ev_spec_match(title, body, power_ps=power_ps, power_kw=power_kw)
+    if match:
+        return match.spec
     return None

@@ -5,7 +5,10 @@ from __future__ import annotations
 import hashlib
 import re
 from dataclasses import dataclass, field
-from typing import Optional
+from typing import Any, Optional
+
+
+DETECTOR_VERSION = "1.1.0"
 
 
 _BATTERY_KWH_RE = re.compile(
@@ -45,7 +48,8 @@ _BATTERY_SOH_RE = re.compile(
     r"|" + _SOH_STRONG + r"(?:\s*-\s*score|\s+score)?\s*[:=)\]}]?\s*(\d{2,3}(?:[.,]\d+)?)(?:\s*/\s*100)?(?!\s*(?:k?wh|kw|km|ps|€|eur))"
     # 4) Akku bei/noch XX %
     r"|(?:akku|batterie|hv\s*-\s*batterie)\s+(?:liegt\s+)?(?:bei|mit|noch)\s+(\d{2,3}(?:[.,]\d+)?)\s*%"
-    # 5) Zahl % + Qualitätswort (mobile.de Widget Fallback)
+    # 5) Bewertungswidget: Prozentwert unmittelbar mit Qualitätsurteil. Das ist
+    # ein etablierter SoH-Hinweis, während nackte Prozentwerte ausgeschlossen sind.
     r"|(\d{2,3}(?:[.,]\d+)?)\s*%\s*(?:sehr\s*gut|gut|ausgezeichnet|top)\b",
     re.IGNORECASE,
 )
@@ -63,7 +67,10 @@ def extract_battery_kwh(text: str | None) -> Optional[float]:
             continue
         if 15.0 <= value <= 130.0:
             values.append(value)
-    return max(values) if values else None
+    # Nicht den größten Wert nehmen: Vollseiten enthalten oft Vergleichsangebote
+    # mit anderen Akkugrößen. Die Reihenfolge des eng begrenzten Textausschnitts
+    # ist zuverlässiger als ein Maximalwert.
+    return values[0] if values else None
 
 
 def extract_battery_soh(text: str | None) -> Optional[float]:
@@ -200,13 +207,42 @@ _KNOWN_EV_CATALOG = [
 
 
 def infer_ev_specs_from_model(text: str | None) -> tuple[Optional[float], Optional[int]]:
-    """Gibt (akku_kwh, reichweite_km) anhand bekannter E-Auto-Modellmuster zurück."""
+    """Gibt EV-Daten ausschließlich aus der zentralen Referenzdatenbank zurück."""
     if not text:
         return None, None
-    for pattern, kwh, rng in _KNOWN_EV_CATALOG:
-        if pattern.search(text):
-            return kwh, rng
+    try:
+        from kfz_crawler.ev_database import lookup_ev_spec
+        spec = lookup_ev_spec(text)
+        if spec:
+            return spec.battery_gross_kwh, spec.wltp_range_km
+    except Exception:
+        pass
     return None, None
+
+
+def _record_evidence(
+    listing: "Listing",
+    field_name: str,
+    source: str,
+    confidence: float,
+    evidence: str = "",
+) -> None:
+    listing.field_evidence[field_name] = {
+        "source": source,
+        "confidence": round(max(0.0, min(1.0, confidence)), 2),
+        "evidence": evidence[:240],
+        "detector_version": DETECTOR_VERSION,
+    }
+
+
+def ensure_portal_evidence(listing: "Listing") -> None:
+    """Dokumentiert strukturierte Portalwerte, bevor Ableitungen hinzukommen."""
+    for field_name in (
+        "price", "year", "mileage", "fuel", "power_ps", "transmission",
+        "location", "body_type",
+    ):
+        if getattr(listing, field_name, None) is not None and field_name not in listing.field_evidence:
+            _record_evidence(listing, field_name, "portal_structured", 0.96, "Strukturiertes Trefferfeld")
 
 
 def infer_listing_battery(listing: "Listing", check_images: bool = False) -> None:
@@ -214,35 +250,63 @@ def infer_listing_battery(listing: "Listing", check_images: bool = False) -> Non
     1. Priorität: Interne Referenzdatenbank (ev_database) für verifizierte Brutto-/Nettowerte.
     2. Plausibilisierung: Explizite Händlerwerte werden mit der Referenzdatenbank abgeglichen.
     """
-    text = f"{listing.title or ''} {getattr(listing, 'body', '') or ''}"
-    explicit_kwh = extract_battery_kwh(text)
-    
-    spec = None
+    title = listing.title or ""
+    detail_text = getattr(listing, "body", "") or ""
+    title_kwh = extract_battery_kwh(title)
+    detail_kwh = extract_battery_kwh(detail_text)
+
+    match = None
     try:
-        from kfz_crawler.ev_database import lookup_ev_spec
-        spec = lookup_ev_spec(listing.title, getattr(listing, "body", ""), power_ps=listing.power_ps)
+        from kfz_crawler.ev_database import lookup_ev_spec_match
+        match = lookup_ev_spec_match(title, detail_text, power_ps=listing.power_ps)
     except Exception:
         pass
 
-    if spec:
-        # Eine explizite kWh-Angabe im Inserat ist präziser als ein
-        # Modell-Fallback. Insbesondere Hersteller geben je nach Quelle die
-        # Netto- oder Bruttokapazität an (z. B. Cupra Born 58/62 kWh).
-        listing.battery_kwh = explicit_kwh if explicit_kwh is not None else spec.battery_gross_kwh
-    else:
-        if explicit_kwh is not None:
-            listing.battery_kwh = explicit_kwh
-        elif listing.battery_kwh is None:
-            kwh, _ = infer_ev_specs_from_model(text)
-            if kwh is not None:
-                listing.battery_kwh = kwh
+    if match:
+        spec = match.spec
+        listing.battery_gross_kwh = spec.battery_gross_kwh
+        listing.battery_net_kwh = spec.battery_net_kwh
+        _record_evidence(
+            listing,
+            "battery_reference",
+            "ev_database",
+            match.confidence,
+            f"{spec.make} {spec.model} {spec.variant}; {match.evidence}",
+        )
+
+    explicit_kwh = title_kwh if title_kwh is not None else detail_kwh
+    if match and match.confidence >= 0.90:
+        # Der bisherige Einzelwert bleibt die tatsächlich gelesene Angabe. Für
+        # Filter steht zusätzlich die eindeutige Bruttokapazität bereit.
+        listing.battery_kwh = explicit_kwh if explicit_kwh is not None else match.spec.battery_gross_kwh
+        source = "title" if title_kwh is not None else "detail_text" if detail_kwh is not None else "ev_database"
+        confidence = 0.98 if explicit_kwh is not None else match.confidence
+        _record_evidence(listing, "battery_kwh", source, confidence, match.evidence)
+    elif title_kwh is not None:
+        listing.battery_kwh = title_kwh
+        _record_evidence(listing, "battery_kwh", "title", 0.99, f"{title_kwh:g} kWh")
+    elif detail_kwh is not None:
+        listing.battery_kwh = detail_kwh
+        _record_evidence(listing, "battery_kwh", "detail_text", 0.88, f"{detail_kwh:g} kWh")
+    elif match:
+        listing.battery_kwh = match.spec.battery_gross_kwh
+        _record_evidence(listing, "battery_kwh", "ev_database", match.confidence, match.evidence)
+    elif listing.battery_kwh is not None:
+        _record_evidence(listing, "battery_kwh", "portal_structured", 0.82, "Portalwert")
 
     if listing.battery_soh is None:
-        listing.battery_soh = extract_battery_soh(text)
+        title_soh = extract_battery_soh(title)
+        detail_soh = extract_battery_soh(detail_text)
+        listing.battery_soh = title_soh if title_soh is not None else detail_soh
+        if listing.battery_soh is not None:
+            source = "title" if title_soh is not None else "detail_text"
+            _record_evidence(listing, "battery_soh", source, 0.98 if title_soh is not None else 0.93, f"SoH {listing.battery_soh:g} %")
         if listing.battery_soh is None and check_images and getattr(listing, "image_urls", None):
             try:
                 from kfz_crawler.battery_analyzer import extract_soh_from_image_urls
                 listing.battery_soh = extract_soh_from_image_urls(listing.image_urls)
+                if listing.battery_soh is not None:
+                    _record_evidence(listing, "battery_soh", "ocr_consensus", 0.86, "Bild-/Dokumentanalyse")
             except Exception:
                 pass
 
@@ -252,33 +316,39 @@ def infer_listing_range(listing: "Listing") -> None:
     1. Priorität: Interne Referenzdatenbank (ev_database) mit offiziellem WLTP-Kombiniert-Wert.
     2. Plausibilisierung: Händler-Übertreibungen (z. B. City-WLTP) werden durch echten WLTP Kombiniert korrigiert.
     """
-    text = f"{listing.title or ''} {getattr(listing, 'body', '') or ''}"
-    explicit_rng = extract_ev_range_km(text)
+    title = listing.title or ""
+    detail_text = getattr(listing, "body", "") or ""
+    title_rng = extract_ev_range_km(title)
+    detail_rng = extract_ev_range_km(detail_text)
+    explicit_rng = title_rng if title_rng is not None else detail_rng
 
-    spec = None
+    match = None
     try:
-        from kfz_crawler.ev_database import lookup_ev_spec
-        spec = lookup_ev_spec(listing.title, getattr(listing, "body", ""), power_ps=listing.power_ps)
+        from kfz_crawler.ev_database import lookup_ev_spec_match
+        match = lookup_ev_spec_match(title, detail_text, power_ps=listing.power_ps)
     except Exception:
         pass
 
-    if spec:
+    if match:
+        spec = match.spec
         # Wenn der Händlerwert deutlich über dem echten WLTP-Kombiniert-Wert liegt (z. B. 460 km vs. 310 km),
         # wird der offizielle WLTP-Kombiniert-Wert aus der Datenbank verwendet.
         if explicit_rng is not None:
             if explicit_rng > spec.wltp_range_km * 1.05:
                 listing.ev_range_km = spec.wltp_range_km
+                _record_evidence(listing, "ev_range_km", "ev_database", match.confidence, "Inseratswert deutlich über WLTP")
             else:
                 listing.ev_range_km = explicit_rng
+                _record_evidence(listing, "ev_range_km", "title" if title_rng is not None else "detail_text", 0.93, "Reichweitenangabe im Inserat")
         else:
             listing.ev_range_km = spec.wltp_range_km
+            _record_evidence(listing, "ev_range_km", "ev_database", match.confidence, f"WLTP {spec.variant}")
     else:
         if explicit_rng is not None:
             listing.ev_range_km = explicit_rng
-        elif listing.ev_range_km is None:
-            _, rng = infer_ev_specs_from_model(text)
-            if rng is not None:
-                listing.ev_range_km = rng
+            _record_evidence(listing, "ev_range_km", "title" if title_rng is not None else "detail_text", 0.91, "Reichweitenangabe im Inserat")
+        elif listing.ev_range_km is not None:
+            _record_evidence(listing, "ev_range_km", "portal_structured", 0.82, "Portalwert")
 
 
 _WARRANTY_PATTERNS = [
@@ -347,15 +417,24 @@ class Listing:
     # Erweiterte Attribute (wo das Portal sie liefert; sonst None):
     transmission: Optional[str] = None   # "schaltgetriebe" | "automatik"
     power_ps: Optional[int] = None       # Leistung in PS
-    body: Optional[str] = None           # Karosserieform (Freitext/normalisiert)
+    body: Optional[str] = None           # Beschreibungstext des Inserats
+    body_type: Optional[str] = None      # Karosserieform (normalisiert)
     ev_range_km: Optional[int] = None     # elektrische Reichweite (km)
-    battery_kwh: Optional[float] = None   # Batteriekapazität (kWh)
+    battery_kwh: Optional[float] = None   # Legacy/Filterwert: Bruttokapazität (kWh)
+    battery_net_kwh: Optional[float] = None
+    battery_gross_kwh: Optional[float] = None
     battery_soh: Optional[float] = None   # Batteriezustand / State of Health (%)
     warranty: Optional[str] = None       # Garantie (z. B. "8 Jahre / 160.000 km", "12 Monate")
     location_zip: Optional[str] = None   # Postleitzahl des Standorts
     location_city: Optional[str] = None  # Stadt des Standorts
     distance_km: Optional[int] = None    # Entfernung in km zum Suchstandort
     image_urls: list[str] = field(default_factory=list, compare=False)
+    field_evidence: dict[str, dict[str, Any]] = field(default_factory=dict, compare=False)
+    quality_score: Optional[float] = field(default=None, compare=False)
+    unknown_fields: list[str] = field(default_factory=list, compare=False)
+    is_stale: bool = field(default=False, compare=False)
+    stale_since: Optional[float] = field(default=None, compare=False)
+    detector_version: str = field(default=DETECTOR_VERSION, compare=False)
 
     # Wird vom DealFinder gefüllt:
     market_price: Optional[int] = field(default=None, compare=False)
@@ -428,6 +507,7 @@ class SearchQuery:
     # E-Auto-spezifisch:
     ev_range_from: Optional[int] = None       # Mindest-Reichweite (km)
     battery_from_kwh: Optional[float] = None  # Mindest-Batteriekapazität (kWh)
+    unknown_policy: str = "tolerant"          # tolerant | strict
 
     # Ausstattung: AutoScout24-IDs (server-seitig via eq=)
     equipment: list = field(default_factory=list)
@@ -505,6 +585,7 @@ class SearchQuery:
             ev_range_from=i("ev_range_from"),
             battery_from_kwh=(float(d["battery_from_kwh"])
                               if d.get("battery_from_kwh") not in (None, "", "null") else None),
+            unknown_policy=s("unknown_policy") if s("unknown_policy") in ("tolerant", "strict") else "tolerant",
             equipment=cls._intlist(d.get("equipment")),
             keywords=cls._termlist(d.get("keywords")),
             exclude_terms=cls._termlist(d.get("exclude_terms")),
@@ -528,6 +609,7 @@ class SearchQuery:
             "emission_class": self.emission_class, "drivetrain": self.drivetrain,
             "include_damaged": self.include_damaged,
             "ev_range_from": self.ev_range_from, "battery_from_kwh": self.battery_from_kwh,
+            "unknown_policy": self.unknown_policy,
             "equipment": self.equipment,
             "keywords": self.keywords, "exclude_terms": self.exclude_terms,
         }
@@ -621,7 +703,7 @@ def is_non_pkw(listing: "Listing") -> bool:
     return any(p.search(hay) for p in _NON_PKW_PATTERNS)
 
 
-def matches_query(l: Listing, q: SearchQuery) -> bool:
+def _matches_query_legacy(l: Listing, q: SearchQuery) -> bool:
     """Clientseitiger Nachfilter.
 
     Grundsatz: Ein Kriterium schließt ein Inserat nur aus, wenn der Wert
@@ -713,3 +795,93 @@ def matches_query(l: Listing, q: SearchQuery) -> bool:
         if term.lower() in hay:
             return False
     return True
+
+
+@dataclass(frozen=True)
+class FilterDecision:
+    passed: bool
+    reasons: tuple[str, ...] = ()
+    unknown_fields: tuple[str, ...] = ()
+
+
+def evaluate_query(l: Listing, q: SearchQuery) -> FilterDecision:
+    """Bewertet einen Treffer inklusive nachvollziehbarer Ausschlussgründe.
+
+    Im Standardmodus bleiben unbekannte Werte erhalten. Der strikte Modus kann
+    für Nutzer aktiviert werden, die nur vollständig belegte Datensätze sehen
+    möchten.
+    """
+    reasons: list[str] = []
+    unknown: list[str] = []
+    title = (l.title or "").lower()
+    hay = f"{l.title or ''} {l.body or ''}".lower()
+
+    if is_non_pkw(l):
+        reasons.append("kein PKW")
+    if not q.include_damaged and is_defective_or_restricted(l):
+        reasons.append("defekt, beschädigt oder Verkaufsbeschränkung")
+    if q.make and title and not any(tok in title for tok in _make_tokens(q.make)):
+        reasons.append("Hersteller passt nicht")
+    if q.model and title and q.model not in title:
+        reasons.append("Modell passt nicht")
+    if q.exclude_makes and title and any(
+        token in title for make in q.exclude_makes for token in _make_tokens(make.lower())
+    ):
+        reasons.append("Hersteller ausgeschlossen")
+    if q.exclude_models and title and any(model.lower() in title for model in q.exclude_models):
+        reasons.append("Modell ausgeschlossen")
+
+    numeric_checks = (
+        ("price", l.price, q.price_from, q.price_to, "Preis"),
+        ("year", l.year, q.year_from, q.year_to, "Baujahr"),
+        ("mileage", l.mileage, q.mileage_from, q.mileage_to, "Kilometerstand"),
+        ("power_ps", l.power_ps, q.power_from, q.power_to, "Leistung"),
+        ("ev_range_km", l.ev_range_km, q.ev_range_from, None, "Reichweite"),
+        ("battery_kwh", l.battery_gross_kwh or l.battery_kwh, q.battery_from_kwh, None, "Akkukapazität"),
+    )
+    for field_name, value, minimum, maximum, label in numeric_checks:
+        if minimum is None and maximum is None:
+            continue
+        if value is None:
+            unknown.append(field_name)
+            continue
+        if minimum is not None and value < minimum:
+            reasons.append(f"{label} unter Mindestwert")
+        if maximum is not None and value > maximum:
+            reasons.append(f"{label} über Höchstwert")
+
+    if q.fuel:
+        if l.fuel:
+            if q.fuel not in l.fuel.strip().lower():
+                reasons.append("Kraftstoffart passt nicht")
+        else:
+            unknown.append("fuel")
+    if q.transmission:
+        if l.transmission:
+            if q.transmission not in l.transmission.strip().lower():
+                reasons.append("Getriebe passt nicht")
+        else:
+            unknown.append("transmission")
+    if q.country and q.country.upper() != "ALL":
+        if l.country:
+            if l.country.upper() != q.country.upper():
+                reasons.append("Land passt nicht")
+        else:
+            unknown.append("country")
+    for term in q.keywords or []:
+        if term.lower() not in hay:
+            reasons.append(f"Stichwort fehlt: {term}")
+    for term in q.exclude_terms or []:
+        if term.lower() in hay:
+            reasons.append(f"Ausschlusswort gefunden: {term}")
+
+    unknown = list(dict.fromkeys(unknown))
+    if q.unknown_policy == "strict" and unknown:
+        reasons.extend(f"{field_name} unbekannt" for field_name in unknown)
+    l.unknown_fields = unknown
+    return FilterDecision(not reasons, tuple(reasons), tuple(unknown))
+
+
+def matches_query(l: Listing, q: SearchQuery) -> bool:
+    """Rückwärtskompatibler boolescher Nachfilter."""
+    return evaluate_query(l, q).passed

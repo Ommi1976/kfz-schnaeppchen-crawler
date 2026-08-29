@@ -13,6 +13,7 @@ const LABELS = {
   haendler: "Händler", privat: "Privat", "2/3": "2/3 Türen", "4/5": "4/5 Türen",
   euro4: "Euro 4", euro5: "Euro 5", euro6: "Euro 6", euro6d: "Euro 6d", euro6e: "Euro 6e",
   allrad: "Allrad", front: "Front", heck: "Heck",
+  tolerant: "Unbekannte Werte zulassen", strict: "Nur vollständig belegte Treffer",
 };
 const label = (v) => LABELS[v] ?? v;
 
@@ -63,7 +64,7 @@ const COUNTRY_LABELS = {
 // ---------- Meta / Selects ----------
 async function loadMeta() {
   META = await getJSON(`${API}/meta`);
-  for (const key of ["fuel", "transmission", "body_type", "seller", "doors", "emission_class", "drivetrain"]) {
+  for (const key of ["fuel", "transmission", "body_type", "seller", "doors", "emission_class", "drivetrain", "unknown_policy"]) {
     const el = document.getElementById("f-" + key);
     if (el) el.innerHTML = META[key].map((v) => `<option value="${v}">${label(v)}</option>`).join("");
   }
@@ -175,6 +176,7 @@ function chips(spec) {
   if (spec.zip_code) c.push(`📍 ${spec.zip_code}${spec.radius_km ? ` (+${spec.radius_km} km)` : ""}`);
   if (spec.ev_range_from) c.push(`≥${spec.ev_range_from} km Reichw.`);
   if (spec.battery_from_kwh) c.push(`Akku ≥${spec.battery_from_kwh} kWh`);
+  if (spec.unknown_policy === "strict") c.push("nur belegte Werte");
   if ((spec.equipment || []).length) c.push(`🔧 ${spec.equipment.length} Ausstattung`);
   (spec.keywords || []).forEach((k) => c.push("＋" + k));
   (spec.exclude_terms || []).forEach((k) => c.push("－" + k));
@@ -328,11 +330,21 @@ function renderDealsRows(deals) {
     }
 
     const pcls = "portal-" + (d.portal || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+    const evidence = d.field_evidence || {};
+    const sourceTitle = (field, fallback) => {
+      const item = evidence[field];
+      if (!item) return fallback;
+      const confidence = item.confidence != null ? ` · ${Math.round(item.confidence * 100)} % sicher` : "";
+      return `${fallback} · Quelle: ${item.source || "unbekannt"}${confidence}${item.evidence ? ` · ${item.evidence}` : ""}`;
+    };
     const sohBadge = d.battery_soh != null 
-      ? `<span class="soh-badge ${sohClass(d.battery_soh)}" title="Batteriezustand (State of Health)">🔋 ${d.battery_soh} % SoH</span>`
+      ? `<span class="soh-badge ${sohClass(d.battery_soh)}" title="${escapeHtml(sourceTitle("battery_soh", "Batteriezustand (State of Health)"))}">🔋 ${d.battery_soh} % SoH</span>`
       : "";
-    const battInfo = d.battery_kwh != null
-      ? `<span class="batt-badge" title="Akku-Kapazität">⚡ ${d.battery_kwh} kWh</span>`
+    const batteryText = d.battery_net_kwh != null && d.battery_gross_kwh != null && d.battery_net_kwh !== d.battery_gross_kwh
+      ? `${d.battery_net_kwh} netto / ${d.battery_gross_kwh} brutto`
+      : (d.battery_gross_kwh ?? d.battery_kwh);
+    const battInfo = batteryText != null
+      ? `<span class="batt-badge" title="${escapeHtml(sourceTitle("battery_kwh", "Akku-Kapazität"))}">⚡ ${batteryText} kWh</span>`
       : "";
     const rangeInfo = d.ev_range_km != null
       ? `<span class="range-badge" title="Reichweite">🌐 ~${d.ev_range_km} km</span>`
@@ -351,12 +363,20 @@ function renderDealsRows(deals) {
       ? `<div class="sub-info">${locBadge}${warrantyBadge}</div>`
       : "";
 
-    return `<tr class="${rowcls}">
+    const unknown = d.unknown_fields_list || [];
+    const unknownBadge = unknown.length
+      ? `<span class="data-badge unknown" title="Nicht im Inserat vorhanden: ${escapeHtml(unknown.join(", "))}">? ${unknown.length} unbekannt</span>`
+      : "";
+    const staleBadge = d.is_stale
+      ? `<span class="data-badge stale" title="Das Portal konnte diesen Treffer im letzten Lauf nicht bestätigen">veraltet</span>`
+      : "";
+
+    return `<tr class="${rowcls}${d.is_stale ? " row-stale" : ""}">
       <td class="markcell">${mark}</td>
       <td><span class="portal-badge ${pcls}">${escapeHtml(d.portal || "")}</span></td>
       <td class="title">
         <div class="t-main">${escapeHtml(d.title || "")}</div>
-        ${subInfo}
+        ${subInfo}<div class="data-quality">${staleBadge}${unknownBadge}</div>
         ${d.is_suspicious ? `<div class="reason">${escapeHtml(d.reasons || "")}</div>` : ""}
       </td>
       <td class="battery-col">${batteryCell}</td>
@@ -428,7 +448,7 @@ async function loadDeals() {
   applyQuickFilters();
 
   document.getElementById("footer-info").textContent =
-    `${data.count} Treffer im Speicher${dealsOnly ? " (nur Schnäppchen)" : ""}${currentPortalFilter ? ` · Filter: ${currentPortalFilter}` : ""} · Auto-Aktualisierung alle 20 s`;
+    `${data.count} Treffer im Speicher${data.stale_count ? ` · ${data.stale_count} veraltet` : ""}${dealsOnly ? " (nur Schnäppchen)" : ""}${currentPortalFilter ? ` · Filter: ${currentPortalFilter}` : ""} · Auto-Aktualisierung alle 20 s`;
 }
 
 function renderPortalFilters(counts, dealCount) {
@@ -446,7 +466,12 @@ function renderPortalFilters(counts, dealCount) {
     { id: "", label: "Alle Portale", count: totalAll }
   ];
   for (const p of portals) {
-    items.push({ id: p, label: p, count: counts[p] || 0 });
+    const healthRows = (statusCache?.portal_health || []).filter((h) => h.portal === p);
+    const unhealthy = healthRows.some((h) => h.status && h.status !== "ok");
+    const healthTitle = unhealthy
+      ? healthRows.filter((h) => h.status !== "ok").map((h) => `${h.search_name}: ${h.status}${h.error ? ` – ${h.error}` : ""}`).join(" | ")
+      : "Letzter Abruf erfolgreich";
+    items.push({ id: p, label: p, count: counts[p] || 0, unhealthy, healthTitle });
   }
 
   box.innerHTML = items.map((it) => {
@@ -457,7 +482,7 @@ function renderPortalFilters(counts, dealCount) {
       active = (!dealsOnly && currentPortalFilter === it.id) ? "active" : "";
     }
     const extraCls = it.isDeal ? "pill-deals" : "";
-    return `<button type="button" class="portal-pill ${extraCls} ${active}" data-portal="${escapeHtml(it.id)}">
+    return `<button type="button" class="portal-pill ${extraCls} ${it.unhealthy ? "health-bad" : ""} ${active}" data-portal="${escapeHtml(it.id)}" title="${escapeHtml(it.healthTitle || "")}">
       <span class="p-name">${escapeHtml(it.label)}</span>
       <span class="p-count">${it.count}</span>
     </button>`;
@@ -480,7 +505,7 @@ function renderPortalFilters(counts, dealCount) {
 
 // ---------- Formular ----------
 const NUMS = ["year_from","year_to","price_from","price_to","mileage_from","mileage_to","radius_km","power_from","power_to","ev_range_from","battery_from_kwh"];
-const SELS = ["make","model","country","fuel","transmission","body_type","seller","doors","emission_class","drivetrain"];
+const SELS = ["make","model","country","fuel","transmission","body_type","seller","doors","emission_class","drivetrain","unknown_policy"];
 
 function openForm(spec) {
   document.getElementById("form-error").textContent = "";
@@ -493,7 +518,7 @@ function openForm(spec) {
   document.getElementById("f-country").value = (spec && spec.country) || "DE";
   SELS.forEach((k) => { 
     const el = document.getElementById("f-" + k);
-    if (el) el.value = (spec && spec[k]) || (k === "country" ? "DE" : ""); 
+    if (el) el.value = (spec && spec[k]) || (k === "country" ? "DE" : k === "unknown_policy" ? "tolerant" : "");
   });
   NUMS.forEach((k) => { 
     const el = document.getElementById("f-" + k);
@@ -525,6 +550,7 @@ function collectForm() {
     body_type: val("f-body_type"), seller: val("f-seller"), doors: val("f-doors"),
     zip_code: val("f-zip_code"),
     emission_class: val("f-emission_class"), drivetrain: val("f-drivetrain"),
+    unknown_policy: val("f-unknown_policy") || "tolerant",
     include_damaged: document.getElementById("f-include_damaged").checked,
     keywords: val("f-keywords"), exclude_terms: val("f-exclude_terms"),
     equipment: getEquipment(),
@@ -642,4 +668,3 @@ function poll() {
   await refresh();
   setInterval(refresh, 20000);
 })();
-

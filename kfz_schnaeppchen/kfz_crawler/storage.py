@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import logging
 import sqlite3
 import threading
 import time
 import uuid
 from pathlib import Path
-from typing import List, Optional
+from typing import Dict, List, Optional, Set
 
 from .models import Listing
 
@@ -81,6 +82,17 @@ class SeenStore:
             "ALTER TABLE deals ADD COLUMN distance_km INTEGER",
             "ALTER TABLE deals ADD COLUMN country TEXT",
             "ALTER TABLE deals ADD COLUMN last_seen REAL",
+            "ALTER TABLE deals ADD COLUMN power_ps INTEGER",
+            "ALTER TABLE deals ADD COLUMN transmission TEXT",
+            "ALTER TABLE deals ADD COLUMN body_type TEXT",
+            "ALTER TABLE deals ADD COLUMN battery_net_kwh REAL",
+            "ALTER TABLE deals ADD COLUMN battery_gross_kwh REAL",
+            "ALTER TABLE deals ADD COLUMN evidence_json TEXT",
+            "ALTER TABLE deals ADD COLUMN quality_score REAL",
+            "ALTER TABLE deals ADD COLUMN unknown_fields TEXT",
+            "ALTER TABLE deals ADD COLUMN is_stale INTEGER DEFAULT 0",
+            "ALTER TABLE deals ADD COLUMN stale_since REAL",
+            "ALTER TABLE deals ADD COLUMN detector_version TEXT",
         ]:
             try:
                 self.conn.execute(ddl)
@@ -137,6 +149,32 @@ class SeenStore:
         self.conn.execute(
             "CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT)"
         )
+        self.conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS portal_health (
+                search_name   TEXT,
+                portal        TEXT,
+                status        TEXT,
+                raw_count     INTEGER DEFAULT 0,
+                kept_count    INTEGER DEFAULT 0,
+                excluded_json TEXT,
+                error         TEXT,
+                last_run      REAL,
+                last_success  REAL,
+                PRIMARY KEY (search_name, portal)
+            )
+            """
+        )
+        for ddl in [
+            "ALTER TABLE discovered_ev_models ADD COLUMN sample_fingerprints TEXT",
+            "ALTER TABLE discovered_ev_models ADD COLUMN portals TEXT",
+            "ALTER TABLE discovered_ev_models ADD COLUMN min_battery_kwh REAL",
+            "ALTER TABLE discovered_ev_models ADD COLUMN max_battery_kwh REAL",
+        ]:
+            try:
+                self.conn.execute(ddl)
+            except sqlite3.OperationalError:
+                pass
         self.conn.commit()
 
     # ---- Key-Value-Einstellungen --------------------------------------
@@ -268,22 +306,44 @@ class SeenStore:
             )
             self.conn.commit()
 
-    # ---- Inserate (für die Weboberfläche) -----------------------------
-    def record_listing(self, search_name: str, listing: Listing) -> None:
+    def mark_seen_many(self, listings: List[Listing]) -> None:
+        if not listings:
+            return
+        now = time.time()
         with self._lock:
+            self.conn.executemany(
+                "INSERT OR IGNORE INTO seen (fingerprint, portal, url, title, price, first_seen) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
+                [
+                    (item.fingerprint, item.portal, item.url, item.title, item.price, now)
+                    for item in listings
+                ],
+            )
+            self.conn.commit()
+
+    # ---- Inserate (für die Weboberfläche) -----------------------------
+    def _record_listing_no_commit(self, search_name: str, listing: Listing) -> None:
             imgs_json = json.dumps(listing.image_urls or [], ensure_ascii=False) if listing.image_urls else None
+            evidence_json = json.dumps(listing.field_evidence or {}, ensure_ascii=False)
+            unknown_json = json.dumps(listing.unknown_fields or [], ensure_ascii=False)
             now = time.time()
             self.conn.execute(
                 "INSERT INTO deals "
                 "(fingerprint, search_name, portal, title, url, price, market_price, "
-                " discount, year, mileage, fuel, battery_kwh, battery_soh, ev_range_km, is_deal, is_suspicious, "
-                " reasons, body, image_urls, warranty, location, location_zip, location_city, distance_km, country, first_seen, last_seen) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+                " discount, year, mileage, fuel, power_ps, transmission, body_type, "
+                " battery_kwh, battery_net_kwh, battery_gross_kwh, battery_soh, ev_range_km, is_deal, is_suspicious, "
+                " reasons, body, image_urls, warranty, location, location_zip, location_city, distance_km, country, "
+                " evidence_json, quality_score, unknown_fields, is_stale, stale_since, detector_version, first_seen, last_seen) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
                 " ON CONFLICT(fingerprint) DO UPDATE SET "
                 "search_name=excluded.search_name, portal=excluded.portal, title=excluded.title, "
                 "url=excluded.url, price=excluded.price, market_price=excluded.market_price, "
                 "discount=excluded.discount, year=excluded.year, mileage=excluded.mileage, "
-                "fuel=excluded.fuel, battery_kwh=excluded.battery_kwh, battery_soh=excluded.battery_soh, "
+                "fuel=excluded.fuel, power_ps=COALESCE(excluded.power_ps, deals.power_ps), "
+                "transmission=COALESCE(excluded.transmission, deals.transmission), "
+                "body_type=COALESCE(excluded.body_type, deals.body_type), "
+                "battery_kwh=excluded.battery_kwh, battery_net_kwh=excluded.battery_net_kwh, "
+                "battery_gross_kwh=excluded.battery_gross_kwh, battery_soh=COALESCE(excluded.battery_soh, deals.battery_soh), "
                 "ev_range_km=excluded.ev_range_km, is_deal=excluded.is_deal, is_suspicious=excluded.is_suspicious, "
                 "reasons=excluded.reasons, body=COALESCE(excluded.body, deals.body), "
                 "image_urls=COALESCE(excluded.image_urls, deals.image_urls), "
@@ -293,6 +353,9 @@ class SeenStore:
                 "location_city=COALESCE(excluded.location_city, deals.location_city), "
                 "distance_km=COALESCE(excluded.distance_km, deals.distance_km), "
                 "country=COALESCE(excluded.country, deals.country), "
+                "evidence_json=excluded.evidence_json, quality_score=excluded.quality_score, "
+                "unknown_fields=excluded.unknown_fields, is_stale=0, stale_since=NULL, "
+                "detector_version=excluded.detector_version, "
                 "last_seen=excluded.last_seen",
                 (
                     listing.fingerprint,
@@ -306,7 +369,12 @@ class SeenStore:
                     listing.year,
                     listing.mileage,
                     listing.fuel,
+                    listing.power_ps,
+                    listing.transmission,
+                    listing.body_type,
                     listing.battery_kwh,
+                    listing.battery_net_kwh,
+                    listing.battery_gross_kwh,
                     listing.battery_soh,
                     listing.ev_range_km,
                     1 if listing.is_deal else 0,
@@ -320,10 +388,64 @@ class SeenStore:
                     listing.location_city,
                     listing.distance_km,
                     listing.country,
+                    evidence_json,
+                    listing.quality_score,
+                    unknown_json,
+                    1 if listing.is_stale else 0,
+                    listing.stale_since,
+                    listing.detector_version,
                     now,
                     now,
                 ),
             )
+
+    def record_listing(self, search_name: str, listing: Listing) -> None:
+        with self._lock:
+            self._record_listing_no_commit(search_name, listing)
+            self.conn.commit()
+
+    def record_listings(self, search_name: str, listings: List[Listing]) -> None:
+        """Speichert einen kompletten Lauf in einer Transaktion."""
+        if not listings:
+            return
+        with self._lock:
+            for listing in listings:
+                self._record_listing_no_commit(search_name, listing)
+            self.conn.commit()
+
+    def update_enrichments(self, updates: List[dict]) -> None:
+        """Schreibt Detail-/OCR-Anreicherungen gesammelt und mit Herkunft."""
+        if not updates:
+            return
+        with self._lock:
+            for update in updates:
+                fingerprint = update["fingerprint"]
+                row = self.conn.execute(
+                    "SELECT evidence_json FROM deals WHERE fingerprint = ?", (fingerprint,)
+                ).fetchone()
+                try:
+                    evidence = json.loads(row["evidence_json"] or "{}") if row else {}
+                except (TypeError, ValueError):
+                    evidence = {}
+                if update.get("battery_soh") is not None:
+                    evidence["battery_soh"] = {
+                        "source": update.get("soh_source", "detail_text"),
+                        "confidence": update.get("soh_confidence", 0.9),
+                        "evidence": update.get("soh_evidence", "Hintergrundanalyse"),
+                        "detector_version": update.get("detector_version", "1.1.0"),
+                    }
+                self.conn.execute(
+                    "UPDATE deals SET battery_soh=COALESCE(?, battery_soh), "
+                    "ev_range_km=COALESCE(?, ev_range_km), battery_kwh=COALESCE(?, battery_kwh), "
+                    "warranty=COALESCE(?, warranty), image_urls=COALESCE(?, image_urls), "
+                    "evidence_json=? WHERE fingerprint=?",
+                    (
+                        update.get("battery_soh"), update.get("ev_range_km"),
+                        update.get("battery_kwh"), update.get("warranty"),
+                        update.get("image_urls"), json.dumps(evidence, ensure_ascii=False),
+                        fingerprint,
+                    ),
+                )
             self.conn.commit()
 
     # Rückwärtskompatibler Alias.
@@ -465,17 +587,25 @@ class SeenStore:
         search_name: str,
         portal_active_fps: Dict[str, Set[str]],
     ) -> int:
-        """Entfernt Inserate aus der Datenbank, die auf dem jeweiligen Portal nicht mehr existieren.
+        """Markiert nicht mehr bestätigte Inserate als veraltet.
 
         Sicherheitsgarantie: Nur Portale, die im aktuellen Lauf erfolgreich Treffer
         geliefert haben, werden bereinigt (schützt vor Datenverlust bei temporären Portal-Ausfällen).
         """
-        deleted_count = 0
+        stale_count = 0
         with self._lock:
             for portal, active_fps in portal_active_fps.items():
                 if not active_fps:
-                    # Keine aktiven Treffer gemeldet (z. B. Portal geblockt) -> bestehende Einträge schützen
+                    # Ein leerer Satz kann auch "Abruf fehlgeschlagen" bedeuten.
+                    # Bestätigte Leerseiten werden vom Aufrufer explizit als stale
+                    # markiert; hier schützen wir bestehende Daten.
                     continue
+                if active_fps:
+                    placeholders = ",".join("?" * len(active_fps))
+                    self.conn.execute(
+                        f"UPDATE deals SET is_stale = 0, stale_since = NULL WHERE search_name = ? AND portal = ? AND fingerprint IN ({placeholders})",
+                        [search_name, portal, *active_fps],
+                    )
                 cur = self.conn.execute(
                     "SELECT fingerprint FROM deals WHERE search_name = ? AND portal = ?",
                     (search_name, portal),
@@ -484,14 +614,76 @@ class SeenStore:
                 stale_fps = list(db_fps - active_fps)
                 if stale_fps:
                     placeholders = ",".join("?" * len(stale_fps))
-                    self.conn.execute(
-                        f"DELETE FROM deals WHERE search_name = ? AND portal = ? AND fingerprint IN ({placeholders})",
-                        [search_name, portal, *stale_fps],
+                    changed = self.conn.execute(
+                        f"UPDATE deals SET is_stale = 1, stale_since = COALESCE(stale_since, ?) "
+                        f"WHERE search_name = ? AND portal = ? AND fingerprint IN ({placeholders}) AND is_stale = 0",
+                        [time.time(), search_name, portal, *stale_fps],
                     )
-                    deleted_count += len(stale_fps)
-            if deleted_count > 0:
+                    stale_count += changed.rowcount
+            if stale_count > 0:
                 self.conn.commit()
-        return deleted_count
+        return stale_count
+
+    def mark_portal_stale(self, search_name: str, portal: str) -> int:
+        """Kennzeichnet Bestandsdaten nach einem fehlgeschlagenen Portalabruf."""
+        with self._lock:
+            cur = self.conn.execute(
+                "UPDATE deals SET is_stale = 1, stale_since = COALESCE(stale_since, ?) "
+                "WHERE search_name = ? AND portal = ? AND is_stale = 0",
+                (time.time(), search_name, portal),
+            )
+            self.conn.commit()
+            return cur.rowcount
+
+    def record_portal_run(
+        self,
+        search_name: str,
+        portal: str,
+        status: str,
+        raw_count: int = 0,
+        kept_count: int = 0,
+        exclusions: Optional[dict] = None,
+        error: str = "",
+    ) -> None:
+        now = time.time()
+        with self._lock:
+            self.conn.execute(
+                """
+                INSERT INTO portal_health
+                (search_name, portal, status, raw_count, kept_count, excluded_json, error, last_run, last_success)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(search_name, portal) DO UPDATE SET
+                    status=excluded.status, raw_count=excluded.raw_count,
+                    kept_count=excluded.kept_count, excluded_json=excluded.excluded_json,
+                    error=excluded.error, last_run=excluded.last_run,
+                    last_success=CASE WHEN excluded.status = 'ok' THEN excluded.last_run ELSE portal_health.last_success END
+                """,
+                (
+                    search_name, portal, status, raw_count, kept_count,
+                    json.dumps(exclusions or {}, ensure_ascii=False), error[:500], now,
+                    now if status == "ok" else None,
+                ),
+            )
+            self.conn.commit()
+
+    def list_portal_health(self, search_name: Optional[str] = None) -> List[dict]:
+        with self._lock:
+            if search_name:
+                cur = self.conn.execute(
+                    "SELECT * FROM portal_health WHERE search_name = ? ORDER BY portal",
+                    (search_name,),
+                )
+            else:
+                cur = self.conn.execute("SELECT * FROM portal_health ORDER BY search_name, portal")
+            rows = []
+            for row in cur.fetchall():
+                item = dict(row)
+                try:
+                    item["exclusions"] = json.loads(item.pop("excluded_json") or "{}")
+                except (TypeError, ValueError):
+                    item["exclusions"] = {}
+                rows.append(item)
+            return rows
 
     # ---- Selbstlernender EV-Modellspeicher ----------------------------
     def record_discovered_ev_model(
@@ -501,6 +693,8 @@ class SeenStore:
         ev_range_km: Optional[int] = None,
         power_kw: Optional[int] = None,
         power_ps: Optional[int] = None,
+        fingerprint: str = "",
+        portal: str = "",
     ) -> tuple[bool, Optional[dict]]:
         """Registriert oder aktualisiert ein unbekanntes E-Auto-Modell.
         
@@ -528,6 +722,9 @@ class SeenStore:
         if ev_range_km is not None and (ev_range_km < 100 or ev_range_km > 1200):
             ev_range_km = None
 
+        sample_id = fingerprint or hashlib.sha1(
+            f"{title}|{battery_kwh}|{ev_range_km}|{portal}".encode("utf-8")
+        ).hexdigest()
         now = time.time()
         with self._lock:
             cur = self.conn.execute(
@@ -536,33 +733,52 @@ class SeenStore:
             )
             row = cur.fetchone()
             if row:
-                old_count = row["count"]
-                new_count = old_count + 1
+                sample_ids = set(json.loads(row["sample_fingerprints"] or "[]"))
+                portals = set(json.loads(row["portals"] or "[]"))
+                if sample_id in sample_ids:
+                    return False, dict(row)
+                sample_ids.add(sample_id)
+                if portal:
+                    portals.add(portal)
+                old_count = len(sample_ids) - 1
+                new_count = len(sample_ids)
                 
                 # Inkrementelle Durchschnittsberechnung
                 old_kwh = row["avg_battery_kwh"]
                 new_kwh = old_kwh
+                status = row["status"]
                 if battery_kwh is not None:
-                    new_kwh = round(((old_kwh or battery_kwh) * old_count + battery_kwh) / new_count, 1)
+                    if old_kwh is not None and abs(old_kwh - battery_kwh) > 4.0:
+                        status = "conflict"
+                    else:
+                        new_kwh = round(((old_kwh or battery_kwh) * old_count + battery_kwh) / new_count, 1)
                     
                 old_rng = row["avg_range_km"]
                 new_rng = old_rng
                 if ev_range_km is not None:
                     new_rng = round(((old_rng or ev_range_km) * old_count + ev_range_km) / new_count)
                 
-                status = row["status"]
-                # Sichere Qualifikation: Ab 2 unabhängigen Funden mit plausiblen Werten automatisch aktiv
-                if status == "discovered" and new_count >= 2 and (new_kwh is not None and new_kwh >= 20.0):
-                    status = "approved"
-                    logger.info("🤖 E-Modell sicher qualifiziert & freigeschaltet: %s (~%.1f kWh, ~%d km)", model_key, new_kwh or 0, new_rng or 0)
+                # Automatisches Lernen erzeugt nur einen Prüfkandidaten. Eine
+                # Freigabe darf niemals allein aus wiederholten Inseratstexten
+                # entstehen und bleibt einer kuratierten Prüfung vorbehalten.
+                if status == "discovered" and new_count >= 3 and len(portals) >= 2 and new_kwh is not None:
+                    status = "review"
+                    logger.info("EV-Variante zur Prüfung vorgemerkt: %s", model_key)
                     
                 self.conn.execute(
                     """
                     UPDATE discovered_ev_models
-                    SET count = ?, avg_battery_kwh = ?, avg_range_km = ?, status = ?, last_seen = ?
+                    SET count = ?, avg_battery_kwh = ?, avg_range_km = ?, status = ?, last_seen = ?,
+                        sample_fingerprints = ?, portals = ?,
+                        min_battery_kwh = CASE WHEN min_battery_kwh IS NULL THEN ? ELSE MIN(min_battery_kwh, ?) END,
+                        max_battery_kwh = CASE WHEN max_battery_kwh IS NULL THEN ? ELSE MAX(max_battery_kwh, ?) END
                     WHERE model_key = ?
                     """,
-                    (new_count, new_kwh, new_rng, status, now, model_key)
+                    (
+                        new_count, new_kwh, new_rng, status, now,
+                        json.dumps(sorted(sample_ids)), json.dumps(sorted(portals)),
+                        battery_kwh, battery_kwh, battery_kwh, battery_kwh, model_key,
+                    )
                 )
                 self.conn.commit()
                 return False, {
@@ -577,8 +793,10 @@ class SeenStore:
                 self.conn.execute(
                     """
                     INSERT INTO discovered_ev_models
-                    (model_key, make, model, sample_title, count, avg_battery_kwh, avg_range_km, power_kw, power_ps, status, first_seen, last_seen)
-                    VALUES (?, ?, ?, ?, 1, ?, ?, ?, ?, 'discovered', ?, ?)
+                    (model_key, make, model, sample_title, count, avg_battery_kwh, avg_range_km,
+                     power_kw, power_ps, status, first_seen, last_seen, sample_fingerprints, portals,
+                     min_battery_kwh, max_battery_kwh)
+                    VALUES (?, ?, ?, ?, 1, ?, ?, ?, ?, 'discovered', ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         model_key,
@@ -591,6 +809,10 @@ class SeenStore:
                         power_ps,
                         now,
                         now,
+                        json.dumps([sample_id]),
+                        json.dumps([portal] if portal else []),
+                        battery_kwh,
+                        battery_kwh,
                     )
                 )
                 self.conn.commit()

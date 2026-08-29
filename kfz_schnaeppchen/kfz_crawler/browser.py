@@ -8,11 +8,14 @@ Sperren (Status 200) passiert.
 from __future__ import annotations
 
 import logging
+import os
+import random
 import sys
 import threading
 import time
+from contextlib import contextmanager
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Callable, Dict, Iterator, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 _lock = threading.Lock()
@@ -54,6 +57,7 @@ class BrowserBlocked(RuntimeError):
 PROFILE_DIR = Path("/data/firefox_profile")
 if not Path("/data").exists():
     PROFILE_DIR = Path(__file__).parent.parent / "firefox_profile"
+MOBILE_STATE_PATH = PROFILE_DIR.parent / "mobile_browser_state.json"
 
 
 STEALTH_JS = """
@@ -72,6 +76,30 @@ CHROMIUM_ARGS = [
     "--disable-infobars",
     "--window-size=1920,1080",
 ]
+
+
+_BLOCK_MARKERS = (
+    "zugriff verweigert",
+    "access denied",
+    "temporarily blocked",
+    "unusual traffic",
+    "captcha",
+)
+
+
+def _is_block_page(html: str) -> bool:
+    head = (html or "").lower()[:5000]
+    return any(marker in head for marker in _BLOCK_MARKERS)
+
+
+def _matching_user_agent(browser) -> str:
+    """Nutzt exakt die installierte Browser-Version, ohne Headless-Mismatch."""
+    probe_context = browser.new_context()
+    try:
+        probe_page = probe_context.new_page()
+        return probe_page.evaluate("navigator.userAgent").replace("HeadlessChrome", "Chrome")
+    finally:
+        probe_context.close()
 
 
 def fetch_rendered(
@@ -93,9 +121,10 @@ def fetch_rendered(
 
     from .tor_service import is_tor_available, renew_tor_identity
 
-    # Falls kein Proxy explizit angegeben ist, nutze lokalen Tor-Dienst für mobile.de
+    # Tor-Exit-Nodes sind bei großen Portalen oft bereits reputationsbelastet.
+    # Deshalb nur auf ausdrückliche Konfiguration verwenden, nie automatisch.
     effective_proxy = proxy
-    if not effective_proxy and "mobile.de" in url and is_tor_available():
+    if not effective_proxy and os.environ.get("KFZ_USE_TOR") == "1" and "mobile.de" in url and is_tor_available():
         effective_proxy = "socks5://127.0.0.1:9050"
 
     with _lock:
@@ -118,7 +147,7 @@ def fetch_rendered(
                     locale="de-DE",
                     timezone_id="Europe/Berlin",
                     viewport={"width": 1440, "height": 900},
-                    user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+                    user_agent=_matching_user_agent(browser),
                 )
                 page = ctx.new_page()
                 try:
@@ -151,11 +180,12 @@ def fetch_rendered(
                     html = page.content()
 
                     # Prüfe auf Blockseite
-                    if "zugriff verweigert" in html.lower()[:1000] or "access denied" in html.lower()[:1000]:
+                    if _is_block_page(html):
                         if attempt < max_retries and effective_proxy and "9050" in effective_proxy:
                             logger.info("mobile.de blockiert Tor-Node. Fordere neue Tor-Identität (Circuit) an (Versuch %d/%d)...", attempt + 1, max_retries)
                             renew_tor_identity()
                             continue
+                        raise BrowserBlocked(f"Browserzugriff blockiert: {url}")
 
                     return html
                 finally:
@@ -163,6 +193,108 @@ def fetch_rendered(
                     browser.close()
 
         return html
+
+
+@contextmanager
+def rendered_session(
+    proxy: Optional[str] = None,
+    engine: str = "chromium",
+    timeout_ms: int = 30000,
+) -> Iterator[Callable[..., str]]:
+    """Öffnet eine wiederverwendbare Browser-Session für mehrere Seiten.
+
+    Cookies, TLS-/Akamai-Session und Browser-Fingerprint bleiben über die
+    komplette Pagination erhalten. Das spart Browserstarts und reduziert
+    Blockaden erheblich.
+    """
+    try:
+        from playwright.sync_api import sync_playwright
+    except ImportError as exc:
+        raise BrowserUnavailable("Playwright nicht installiert.") from exc
+    effective_proxy = proxy
+
+    with _lock:
+        with sync_playwright() as playwright:
+            engine_obj = getattr(playwright, engine, playwright.chromium)
+            launch_kwargs: dict = {"headless": True}
+            if engine == "chromium":
+                launch_kwargs["args"] = CHROMIUM_ARGS
+            if effective_proxy:
+                launch_kwargs["proxy"] = {"server": effective_proxy}
+            browser = engine_obj.launch(**launch_kwargs)
+            context_kwargs = dict(
+                locale="de-DE",
+                timezone_id="Europe/Berlin",
+                viewport={"width": 1440, "height": 900},
+                user_agent=_matching_user_agent(browser),
+            )
+            if MOBILE_STATE_PATH.exists():
+                context_kwargs["storage_state"] = str(MOBILE_STATE_PATH)
+            try:
+                context = browser.new_context(**context_kwargs)
+            except Exception:
+                context_kwargs.pop("storage_state", None)
+                context = browser.new_context(**context_kwargs)
+            page = context.new_page()
+            page.add_init_script(STEALTH_JS)
+            last_request_at = 0.0
+            had_success = False
+            blocked_seen = False
+            try:
+                try:
+                    page.goto("https://www.mobile.de/", wait_until="domcontentloaded", timeout=15000)
+                    time.sleep(1.0)
+                except Exception:
+                    pass
+
+                def fetch(
+                    url: str,
+                    wait_selector: Optional[str] = None,
+                    render_delay: float = 0.8,
+                    max_retries: int = 2,
+                ) -> str:
+                    nonlocal last_request_at, had_success, blocked_seen
+                    for attempt in range(max_retries + 1):
+                        elapsed = time.monotonic() - last_request_at
+                        polite_delay = random.uniform(1.7, 3.2)
+                        if last_request_at and elapsed < polite_delay:
+                            time.sleep(polite_delay - elapsed)
+                        response = page.goto(url, wait_until="domcontentloaded", timeout=timeout_ms)
+                        last_request_at = time.monotonic()
+                        status = response.status if response else 0
+                        if wait_selector:
+                            try:
+                                page.wait_for_selector(wait_selector, timeout=18000)
+                            except Exception:
+                                logger.debug("Session-Selektor nicht erschienen: %s", wait_selector)
+                            _wait_stable(page, wait_selector)
+                        if render_delay:
+                            time.sleep(render_delay)
+                        html = page.content()
+                        if status not in (403, 429) and not _is_block_page(html):
+                            had_success = True
+                            return html
+                        blocked_seen = True
+                        if attempt < max_retries:
+                            wait_seconds = 6.0 * (attempt + 1)
+                            logger.warning("mobile.de antwortet mit Block/HTTP %s; %.0f s Backoff (%d/%d)", status or "HTML", wait_seconds, attempt + 1, max_retries)
+                            context.clear_cookies()
+                            time.sleep(wait_seconds)
+                            continue
+                        raise BrowserBlocked(f"Browserzugriff blockiert: {url}")
+                    raise BrowserBlocked(f"Browserzugriff blockiert: {url}")
+
+                yield fetch
+            finally:
+                if had_success and not blocked_seen:
+                    try:
+                        MOBILE_STATE_PATH.parent.mkdir(parents=True, exist_ok=True)
+                        context.storage_state(path=str(MOBILE_STATE_PATH))
+                    except Exception as exc:
+                        logger.debug("Browser-Sessionzustand konnte nicht gespeichert werden: %s", exc)
+                page.close()
+                context.close()
+                browser.close()
 
 
 def fetch_rendered_batch(
@@ -238,4 +370,3 @@ def fetch_rendered_batch(
                     page.close()
             finally:
                 browser.close()
-

@@ -47,3 +47,21 @@ def test_is_potential_document_or_screen():
     # 2. Helles Dokument (Weiß mit Kontrast) -> True
     doc = Image.new("RGB", (200, 200), color=(250, 250, 250))
     assert is_potential_document_or_screen(doc) is True
+
+
+def test_ocr_uses_consensus_and_rejects_conflict():
+    def close_values(url, session, timeout):
+        return url, {"a": 94.0, "b": 95.0, "c": 94.5}[url]
+
+    with patch("kfz_crawler.battery_analyzer.HAS_OCR", True), patch(
+        "kfz_crawler.battery_analyzer._fetch_and_ocr_single_image", side_effect=close_values
+    ):
+        assert extract_soh_from_image_urls(["a", "b", "c"]) == 94.5
+
+    def conflicts(url, session, timeout):
+        return url, {"a": 71.0, "b": 85.0, "c": 98.0}[url]
+
+    with patch("kfz_crawler.battery_analyzer.HAS_OCR", True), patch(
+        "kfz_crawler.battery_analyzer._fetch_and_ocr_single_image", side_effect=conflicts
+    ):
+        assert extract_soh_from_image_urls(["a", "b", "c"]) is None

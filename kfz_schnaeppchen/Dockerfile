@@ -14,6 +14,8 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 ENV PLAYWRIGHT_BROWSERS_PATH=/opt/playwright-browsers
 
+COPY requirements.txt /tmp/requirements.txt
+
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         python3 \
@@ -31,11 +33,11 @@ RUN apt-get update \
         gosu \
         netbase \
         ca-certificates \
-    && python3 -m pip install --no-cache-dir --break-system-packages rich PySocks fastapi uvicorn curl_cffi playwright pytesseract pillow \
+    && python3 -m pip install --no-cache-dir --break-system-packages -r /tmp/requirements.txt \
     && mkdir -p /opt/playwright-browsers \
-    && playwright install --with-deps chromium firefox \
+    && playwright install --with-deps chromium \
     && chmod -R a+rx /opt/playwright-browsers \
-    && echo -e "SocksPort 127.0.0.1:9050\nControlPort 127.0.0.1:9051\nCookieAuthentication 0\nDataDirectory /data/tor" > /etc/tor/torrc \
+    && printf '%s\n' 'SocksPort 127.0.0.1:9050' 'ControlPort 127.0.0.1:9051' 'CookieAuthentication 1' 'DataDirectory /data/tor' > /etc/tor/torrc \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 

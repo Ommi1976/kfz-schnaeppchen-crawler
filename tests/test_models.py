@@ -8,6 +8,7 @@ from kfz_crawler.models import (
     infer_listing_battery,
     infer_listing_range,
     is_non_pkw,
+    evaluate_query,
     matches_query,
 )
 
@@ -35,6 +36,18 @@ def test_extract_battery_soh():
     assert extract_battery_soh("Batterie-Information Batterie-Status 94.6% Sehr gut Reichweite (WLTP) 546 km") == 94.6
     assert extract_battery_soh("Batterie-Status: 94,8 %") == 94.8
     assert extract_battery_soh("94.6% Sehr gut") == 94.6
+    assert extract_battery_soh("94.6%") is None
+
+
+def test_unknown_battery_is_kept_when_range_matches():
+    listing = Listing(portal="KA", title="E-Auto", url="https://example.test/1", ev_range_km=470)
+    tolerant = SearchQuery(name="EV", battery_from_kwh=62, ev_range_from=450)
+    decision = evaluate_query(listing, tolerant)
+    assert decision.passed is True
+    assert "battery_kwh" in decision.unknown_fields
+
+    strict = SearchQuery(name="EV", battery_from_kwh=62, ev_range_from=450, unknown_policy="strict")
+    assert evaluate_query(listing, strict).passed is False
     # AVILOO / DEKRA Batteriezertifikat (OCR-Text)
     assert extract_battery_soh("GESUNDHEITSZUSTAND (SOH) 96,9 %") == 96.9
     assert extract_battery_soh("Gesundheitszustand (SOH) 94.5 %") == 94.5

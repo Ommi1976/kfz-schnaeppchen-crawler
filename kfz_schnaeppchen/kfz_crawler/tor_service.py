@@ -5,12 +5,14 @@ from __future__ import annotations
 import logging
 import socket
 import time
+from pathlib import Path
 from typing import Optional
 
 logger = logging.getLogger(__name__)
 
 TOR_SOCKS_PORT = 9050
 TOR_CONTROL_PORT = 9051
+TOR_COOKIE_FILE = Path("/data/tor/control_auth_cookie")
 
 
 def is_tor_available(host: str = "127.0.0.1", port: int = TOR_SOCKS_PORT, timeout: float = 1.5) -> bool:
@@ -26,7 +28,11 @@ def renew_tor_identity(host: str = "127.0.0.1", control_port: int = TOR_CONTROL_
     """Sendet SIGNAL NEWNYM an den Tor Control-Port, um eine neue IP / Circuit zu erhalten."""
     try:
         with socket.create_connection((host, control_port), timeout=timeout) as s:
-            s.sendall(b'AUTHENTICATE ""\r\n')
+            if not TOR_COOKIE_FILE.exists():
+                logger.warning("Tor-Control-Cookie fehlt: %s", TOR_COOKIE_FILE)
+                return False
+            cookie_hex = TOR_COOKIE_FILE.read_bytes().hex().encode("ascii")
+            s.sendall(b"AUTHENTICATE " + cookie_hex + b"\r\n")
             resp = s.recv(1024).decode("utf-8", errors="ignore")
             if "250" not in resp:
                 logger.warning("Tor Authentifizierung fehlgeschlagen: %s", resp.strip())

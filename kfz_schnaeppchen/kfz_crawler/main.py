@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import argparse
+import logging
 import sys
 from collections import Counter
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from typing import List
+from dataclasses import dataclass, field
+from typing import Dict, List, Set
 
 from rich.console import Console
 
@@ -18,7 +20,8 @@ from .models import (
     infer_listing_battery,
     infer_listing_details,
     infer_listing_range,
-    matches_query,
+    evaluate_query,
+    ensure_portal_evidence,
 )
 from .notify import notify_all
 from .portals import REGISTRY
@@ -26,14 +29,25 @@ from .portals.base import PortalError
 from .storage import SeenStore
 
 console = Console()
+logger = logging.getLogger(__name__)
 
 
-def _search_one_portal(cfg: Config, key: str, query: SearchQuery, store=None) -> List[Listing]:
+@dataclass
+class PortalSearchResult:
+    portal_name: str
+    listings: List[Listing] = field(default_factory=list)
+    raw_count: int = 0
+    status: str = "ok"
+    error: str = ""
+    exclusions: Dict[str, int] = field(default_factory=dict)
+
+
+def _search_one_portal(cfg: Config, key: str, query: SearchQuery, store=None) -> PortalSearchResult:
     """Ein Portal abfragen (+ ggf. anreichern). Läuft in eigenem Thread."""
     portal_cls = REGISTRY.get(key)
     if portal_cls is None:
         console.print(f"[yellow]Unbekanntes Portal in config: {key}[/yellow]")
-        return []
+        return PortalSearchResult(key, status="error", error="Unbekanntes Portal")
     portal = portal_cls(
         request_delay=cfg.settings.request_delay,
         max_pages=cfg.settings.max_pages,
@@ -51,8 +65,10 @@ def _search_one_portal(cfg: Config, key: str, query: SearchQuery, store=None) ->
         # asynchron im Hintergrund-Daemon (run_background_image_enrichment) und
         # blockiert damit weder den Suchlauf noch die CPU während der Suche.
         matching = []
+        exclusions: Counter = Counter()
         home_zip = getattr(cfg.settings, "home_zip", "") or None
         for listing in found:
+            ensure_portal_evidence(listing)
             infer_listing_battery(listing, check_images=False)
             infer_listing_range(listing)
             if home_zip:
@@ -71,26 +87,41 @@ def _search_one_portal(cfg: Config, key: str, query: SearchQuery, store=None) ->
                                 battery_kwh=listing.battery_kwh,
                                 ev_range_km=listing.ev_range_km,
                                 power_ps=listing.power_ps,
+                                fingerprint=listing.fingerprint,
+                                portal=listing.portal,
                             )
                             if is_new:
                                 logger.info("💡 Neues E-Modell entdeckt: %s (~%.1f kWh, ~%d km)", listing.title, listing.battery_kwh or 0, listing.ev_range_km or 0)
                 except Exception:
                     pass
 
-            if matches_query(listing, query):
+            decision = evaluate_query(listing, query)
+            listing.unknown_fields = list(decision.unknown_fields)
+            known_quality_fields = sum(
+                value is not None
+                for value in (
+                    listing.price, listing.year, listing.mileage, listing.power_ps,
+                    listing.battery_kwh, listing.ev_range_km,
+                )
+            )
+            listing.quality_score = round(known_quality_fields / 6.0, 2)
+            if decision.passed:
                 matching.append(listing)
-                if store and hasattr(store, "record_listing"):
-                    try:
-                        store.record_listing(query.name, listing)
-                    except Exception:
-                        pass
+            else:
+                exclusions.update(decision.reasons)
         console.print(f"  [dim]{portal.name}: {len(matching)}/{len(found)} Treffer (passend/Roh)[/dim]")
-        return matching
+        return PortalSearchResult(
+            portal.name,
+            matching,
+            raw_count=len(found),
+            exclusions=dict(exclusions),
+        )
     except PortalError as e:
         console.print(f"  [yellow]{e}[/yellow]")
+        return PortalSearchResult(portal.name, status="blocked", error=str(e))
     except Exception as e:  # pragma: no cover - robuster Lauf trotz Portalfehler
         console.print(f"  [red]{portal.name}: Fehler – {e}[/red]")
-    return []
+        return PortalSearchResult(portal.name, status="error", error=str(e))
 
 
 def run_search(cfg: Config, query: SearchQuery, store: SeenStore) -> List[Listing]:
@@ -102,13 +133,26 @@ def run_search(cfg: Config, query: SearchQuery, store: SeenStore) -> List[Listin
     """
     active = [k for k, on in cfg.portals.items() if on and REGISTRY.get(k)]
     all_listings: List[Listing] = []
+    portal_results: Dict[str, PortalSearchResult] = {}
     if not active:
         return []
 
     with ThreadPoolExecutor(max_workers=len(active)) as ex:
         futures = {ex.submit(_search_one_portal, cfg, k, query, store): k for k in active}
         for fut in as_completed(futures):
-            all_listings.extend(fut.result())
+            portal_result = fut.result()
+            portal_results[portal_result.portal_name] = portal_result
+            all_listings.extend(portal_result.listings)
+            if hasattr(store, "record_portal_run"):
+                store.record_portal_run(
+                    query.name,
+                    portal_result.portal_name,
+                    portal_result.status,
+                    portal_result.raw_count,
+                    len(portal_result.listings),
+                    portal_result.exclusions,
+                    portal_result.error,
+                )
 
     # Entfernung zur eigenen PLZ (Home) für alle Treffer berechnen.
     home_zip = getattr(cfg.settings, "home_zip", "") or None
@@ -123,7 +167,9 @@ def run_search(cfg: Config, query: SearchQuery, store: SeenStore) -> List[Listin
     # E-Auto-Reichweite …) portalübergreifend anwenden. Die Aufteilung wird
     # protokolliert, damit ein Portal mit Roh-Treffern nicht stillschweigend
     # aus der Anzeige verschwindet.
-    before_filter = Counter(l.portal for l in all_listings)
+    before_filter = Counter(
+        {result.portal_name: result.raw_count for result in portal_results.values()}
+    )
     # #2 Portal-Health: liefert ein aktives Portal 0 Roh-Treffer, obwohl insgesamt
     # genug zusammenkommt, deutet das auf einen Parser-Bruch oder Block hin.
     total_raw = sum(before_filter.values())
@@ -135,7 +181,7 @@ def run_search(cfg: Config, query: SearchQuery, store: SeenStore) -> List[Listin
                     f"  [yellow]⚠ Portal-Health: {pname} lieferte 0 Treffer – "
                     f"Parser/Block prüfen.[/yellow]"
                 )
-    all_listings = [l for l in all_listings if matches_query(l, query)]
+    all_listings = [l for l in all_listings if evaluate_query(l, query).passed]
     after_filter = Counter(l.portal for l in all_listings)
     if before_filter:
         portal_counts = ", ".join(
@@ -165,31 +211,35 @@ def run_search(cfg: Config, query: SearchQuery, store: SeenStore) -> List[Listin
     # is_deal markiert. Der seen-Store steuert nur Benachrichtigungen, nicht die
     # Anzeige: bekannte Fahrzeuge werden bei jedem Lauf aktualisiert.
     new_deals = []
-    portal_active_fps: Dict[str, Set[str]] = {}
-    for p_name, count in before_filter.items():
-        if count > 0:
-            portal_active_fps[p_name] = set()
+    portal_active_fps: Dict[str, Set[str]] = {
+        portal_name: {listing.fingerprint for listing in portal_result.listings}
+        for portal_name, portal_result in portal_results.items()
+        if portal_result.status == "ok" and portal_result.listings
+    }
 
     for l in result.priced:
-        if l.portal in portal_active_fps:
-            portal_active_fps[l.portal].add(l.fingerprint)
         is_new = store.is_new(l)
-        # Cross-Lauf-Dublette nur für neue Inserate unterdrücken; bekannte
-        # Inserate werden trotzdem für die aktuelle UI-Anzeige aktualisiert.
-        if is_new and hasattr(store, "similar_exists") and store.similar_exists(
-            l.year, l.mileage, l.price
-        ):
-            store.mark_seen(l)  # merken, aber nicht doppelt anzeigen
-            continue
-        if is_new:
-            store.mark_seen(l)
-        if hasattr(store, "record_listing"):
-            store.record_listing(query.name, l)
         if is_new and l.is_deal:
             new_deals.append(l)
 
+    new_items = [listing for listing in result.priced if store.is_new(listing)]
+    if hasattr(store, "mark_seen_many"):
+        store.mark_seen_many(new_items)
+    else:
+        for listing in new_items:
+            store.mark_seen(listing)
+    if hasattr(store, "record_listings"):
+        store.record_listings(query.name, result.priced)
+    else:
+        for listing in result.priced:
+            store.record_listing(query.name, listing)
+
     if hasattr(store, "sync_active_deals"):
         store.sync_active_deals(query.name, portal_active_fps)
+    for portal_name, portal_result in portal_results.items():
+        if portal_result.status != "ok" or not portal_result.listings:
+            if hasattr(store, "mark_portal_stale"):
+                store.mark_portal_stale(query.name, portal_name)
     if hasattr(store, "purge_unmatching_deals"):
         store.purge_unmatching_deals(query.name, query)
     if hasattr(store, "prune"):

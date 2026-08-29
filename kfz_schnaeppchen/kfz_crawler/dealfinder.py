@@ -214,14 +214,64 @@ def find_deals(
         return DealResult(deals=[], suspicious=[], priced=priced,
                           market_median=None, used_regression=False)
 
-    model = build_price_model(priced)
-    if model is None:
+    # Bei E-Autos dürfen unterschiedliche Modelle und Akkuvarianten nicht in
+    # ein gemeinsames Preisniveau fallen. Varianten werden zuerst, Modellfamilien
+    # als vorsichtiger Fallback verwendet. Nicht-EV-Suchen behalten das globale
+    # Modell für Rückwärtskompatibilität.
+    ev_specs: dict[int, object] = {}
+    try:
+        from .ev_database import lookup_ev_spec
+        for listing in priced:
+            spec = lookup_ev_spec(listing.title, listing.body, power_ps=listing.power_ps)
+            if spec:
+                ev_specs[id(listing)] = spec
+    except Exception:
+        ev_specs = {}
+
+    models: dict[int, PriceModel] = {}
+    built_models: list[PriceModel] = []
+    if ev_specs:
+        variant_groups: dict[tuple, list[Listing]] = {}
+        family_groups: dict[tuple, list[Listing]] = {}
+        for listing in priced:
+            spec = ev_specs.get(id(listing))
+            if not spec:
+                continue
+            variant_groups.setdefault((spec.make, spec.model, spec.variant), []).append(listing)
+            family_groups.setdefault((spec.make, spec.model), []).append(listing)
+        for listing in priced:
+            spec = ev_specs.get(id(listing))
+            if not spec:
+                continue
+            candidates = variant_groups[(spec.make, spec.model, spec.variant)]
+            if len(candidates) < min_comparables:
+                candidates = family_groups[(spec.make, spec.model)]
+            if len(candidates) < min_comparables:
+                continue
+            model = build_price_model(candidates)
+            if model:
+                models[id(listing)] = model
+                if model not in built_models:
+                    built_models.append(model)
+    else:
+        model = build_price_model(priced)
+        if model:
+            built_models.append(model)
+            models = {id(listing): model for listing in priced}
+
+    if not models:
         return DealResult(deals=[], suspicious=[], priced=priced,
                           market_median=None, used_regression=False)
 
     deals: List[Listing] = []
     suspicious: List[Listing] = []
     for l in priced:
+        model = models.get(id(l))
+        if model is None:
+            l.market_price = None
+            l.discount = None
+            l.is_deal = False
+            continue
         exp = model.expected(l)
         if exp <= 0:
             continue
@@ -241,9 +291,40 @@ def find_deals(
         deals=deals,
         suspicious=suspicious,
         priced=priced,
-        market_median=model.median,
-        used_regression=model.coeffs is not None,
+        market_median=int(statistics.median(m.median for m in built_models)),
+        used_regression=any(m.coeffs is not None for m in built_models),
     )
+
+
+def _identity_tokens(title: str) -> set[str]:
+    normalized = re.sub(r"[^a-z0-9äöüß]+", " ", (title or "").lower())
+    normalized = re.sub(r"\bvw\b", "volkswagen", normalized)
+    stop = {
+        "navi", "klima", "automatik", "led", "pdc", "shz", "top", "neu",
+        "elektro", "electric", "unfallfrei", "sofort", "verfügbar",
+    }
+    return {token for token in normalized.split() if len(token) > 1 and token not in stop and not token.isdigit()}
+
+
+def _same_vehicle_identity(left: Listing, right: Listing) -> bool:
+    try:
+        from .ev_database import lookup_ev_spec
+        lspec = lookup_ev_spec(left.title, left.body, power_ps=left.power_ps)
+        rspec = lookup_ev_spec(right.title, right.body, power_ps=right.power_ps)
+        if lspec and rspec:
+            return (
+                lspec.make == rspec.make
+                and lspec.model == rspec.model
+                and abs(lspec.battery_gross_kwh - rspec.battery_gross_kwh) <= 2.0
+            )
+    except Exception:
+        pass
+    lt, rt = _identity_tokens(left.title), _identity_tokens(right.title)
+    if not lt or not rt:
+        return False
+    similarity = len(lt & rt) / len(lt | rt)
+    image_overlap = bool(set(left.image_urls or []) & set(right.image_urls or []))
+    return similarity >= 0.45 or image_overlap
 
 
 def dedupe(listings: List[Listing]) -> List[Listing]:
@@ -264,6 +345,9 @@ def dedupe(listings: List[Listing]) -> List[Listing]:
             continue
         i = index[k]
         other = kept[i]
+        if not _same_vehicle_identity(l, other):
+            kept.append(l)
+            continue
         lp, op = l.price or 0, other.price or 0
         close = lp and op and min(lp, op) >= 0.7 * max(lp, op)
         if close:

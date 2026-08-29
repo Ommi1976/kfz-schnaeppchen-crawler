@@ -94,6 +94,26 @@ class MobileDe(BasePortal):
             raise PortalError(f"mobile.de: Abruf fehlgeschlagen – {e}")
 
     def search(self, query: SearchQuery) -> List[Listing]:
+        # In Produktion wird genau eine Browser-Session für alle Ergebnisseiten
+        # verwendet. Bei Tests/Overrides bleibt _fetch als kompatibler Hook.
+        original_fetch = getattr(self._fetch, "__func__", None) is MobileDe._fetch
+        if original_fetch:
+            try:
+                from ..browser import rendered_session
+                with rendered_session(proxy=self.proxy, engine="chromium") as session_fetch:
+                    return self._crawl_pages(
+                        query,
+                        lambda url: session_fetch(
+                            url,
+                            wait_selector="article a[href*='details.html']",
+                            render_delay=0.8,
+                        ),
+                    )
+            except Exception as exc:
+                raise PortalError(f"mobile.de: Abruf fehlgeschlagen – {exc}") from exc
+        return self._crawl_pages(query, self._fetch)
+
+    def _crawl_pages(self, query: SearchQuery, fetcher) -> List[Listing]:
         results: List[Listing] = []
         seen_ids = set()
         # Die Einstellung max_pages war ursprünglich eine Stichprobengröße.
@@ -103,10 +123,11 @@ class MobileDe(BasePortal):
         max_limit = max(self.max_pages or 0, self.FULL_CRAWL_MAX_PAGES)
         for page in range(1, max_limit + 1):
             try:
-                html = self._fetch(self._build_url(query, page))
+                html = fetcher(self._build_url(query, page))
             except Exception as e:
-                logger.warning("mobile.de: Fehler beim Abruf von Seite %d: %s", page, e)
-                break
+                # Teilresultate sind gefährlich: Sie würden nicht geladene
+                # Folgeseiten als gelöschte Inserate erscheinen lassen.
+                raise PortalError(f"mobile.de: Seite {page} konnte nicht vollständig geladen werden – {e}") from e
             cards = self._parse_cards(html)
             if not cards:
                 break

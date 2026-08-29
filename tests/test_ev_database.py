@@ -1,5 +1,5 @@
 from kfz_crawler.models import Listing, infer_listing_battery, infer_listing_range
-from kfz_crawler.ev_database import lookup_ev_spec
+from kfz_crawler.ev_database import lookup_ev_spec, lookup_ev_spec_match
 
 def test_ev_database_lookup():
     spec1 = lookup_ev_spec("Volkswagen ID.3 Pure Performance 110 kW LED NAVI")
@@ -62,6 +62,17 @@ def test_cupra_born_capacity_variant_is_not_promoted_to_large_battery():
     # 170 kW/e-Boost allein ist bei beiden Batteriegrößen möglich und darf
     # daher nicht mehr fälschlich als große Variante ausgegeben werden.
     assert lookup_ev_spec("Cupra Born e-Boost 170 kW") is None
+
+
+def test_match_exposes_confidence_and_net_gross_evidence():
+    match = lookup_ev_spec_match("Cupra Born 58 kWh 150 kW")
+    assert match is not None
+    assert match.confidence >= 0.95
+    listing = Listing(portal="mobile.de", title="Cupra Born 58 kWh 150 kW", url="https://example.test/born")
+    infer_listing_battery(listing)
+    assert listing.battery_net_kwh == 58.0
+    assert listing.battery_gross_kwh == 62.0
+    assert listing.field_evidence["battery_kwh"]["source"] == "title"
 
 
 def test_byd_dolphin_surf_wltp_plausibility():

@@ -8,6 +8,7 @@ import logging
 import re
 import threading
 import time
+from statistics import median
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import List, Optional, Tuple
 import requests
@@ -220,7 +221,7 @@ def _fetch_and_ocr_single_image(url: str, sess: requests.Session, timeout: float
 
 
 def extract_soh_from_image_urls(image_urls: List[str], max_images: int = 15, timeout: float = 4.0) -> Optional[float]:
-    """Prüft Inseratsbilder parallel mit Vorfilter und Early-Exit."""
+    """Prüft Bilder parallel und löst widersprüchliche OCR-Werte per Konsens."""
     if not HAS_OCR or not image_urls:
         return None
 
@@ -238,18 +239,58 @@ def extract_soh_from_image_urls(image_urls: List[str], max_images: int = 15, tim
 
     # Nur 3 Worker: die OCR ist CPU-lastig und läuft im Hintergrund – so bleibt
     # die Box benutzbar, während der Early-Exit die Latenz kurz hält.
+    values: list[tuple[str, float]] = []
     with ThreadPoolExecutor(max_workers=3) as executor:
         futures = {executor.submit(_fetch_and_ocr_single_image, u, sess, timeout): u for u in sorted_urls}
         for fut in as_completed(futures):
             try:
                 url, soh = fut.result()
                 if soh is not None:
-                    logger.info("⚡ SoH=%.1f%% per Turbo-OCR gefunden in %s", soh, url)
-                    return soh
+                    values.append((url, soh))
             except Exception:
                 continue
 
+    if not values:
+        return None
+    if len(values) == 1:
+        url, soh = values[0]
+        logger.info("SoH=%.1f%% per OCR gefunden in %s", soh, url)
+        return soh
+    numbers = [value for _, value in values]
+    if max(numbers) - min(numbers) <= 2.5:
+        result = round(float(median(numbers)), 1)
+        logger.info("SoH=%.1f%% per OCR-Konsens aus %d Bildern", result, len(numbers))
+        return result
+    for candidate in numbers:
+        cluster = [value for value in numbers if abs(value - candidate) <= 1.5]
+        if len(cluster) >= 2:
+            result = round(float(median(cluster)), 1)
+            logger.info("SoH=%.1f%% per Mehrheitskonsens (%d/%d)", result, len(cluster), len(numbers))
+            return result
+    logger.warning("Widersprüchliche SoH-OCR-Werte verworfen: %s", numbers)
     return None
+
+
+def _relevant_detail_text(soup: BeautifulSoup) -> str:
+    """Begrenzt Felderkennung auf das eigentliche Inserat statt Empfehlungen."""
+    selectors = (
+        "h1",
+        "[data-testid*='battery']",
+        "[data-testid*='description']",
+        "[data-testid*='vehicle']",
+        "main",
+    )
+    parts: list[str] = []
+    seen: set[str] = set()
+    for selector in selectors:
+        for node in soup.select(selector):
+            text = node.get_text(" ", strip=True)
+            if text and text not in seen:
+                seen.add(text)
+                parts.append(text)
+    if not parts:
+        return soup.get_text(" ", strip=True)[:30000]
+    return " ".join(parts)[:30000]
 
 
 def fetch_mobile_de_detail_data(raw_id: str) -> dict:
@@ -280,7 +321,7 @@ def fetch_mobile_de_detail_data(raw_id: str) -> dict:
     if not html:
         try:
             from kfz_crawler.browser import fetch_rendered
-            html = fetch_rendered(target_urls[0], engine="firefox")
+            html = fetch_rendered(target_urls[0], engine="chromium")
         except Exception:
             pass
 
@@ -288,7 +329,7 @@ def fetch_mobile_de_detail_data(raw_id: str) -> dict:
         return {}
 
     soup = BeautifulSoup(html, "lxml")
-    full_text = soup.get_text(" ", strip=True)
+    full_text = _relevant_detail_text(soup)
 
     # 1. SoH
     soh = extract_battery_soh(full_text)
@@ -336,11 +377,14 @@ _BG_MAX_LISTINGS_PER_PASS = 40
 def run_background_image_enrichment(store, max_listings: int = _BG_MAX_LISTINGS_PER_PASS) -> int:
     """Scannt im Hintergrund E-Auto-Inserate ohne SoH (inkl. blockfreiem mobile.de Detailabruf & Turbo-OCR)."""
     rows = store.conn.execute(
-        "SELECT fingerprint, portal, url, title, image_urls FROM deals WHERE (fuel LIKE '%elektro%' OR fuel LIKE '%electric%') AND battery_soh IS NULL"
+        "SELECT fingerprint, portal, url, title, image_urls FROM deals "
+        "WHERE (fuel LIKE '%elektro%' OR fuel LIKE '%electric%') "
+        "AND battery_soh IS NULL AND COALESCE(is_stale, 0) = 0 ORDER BY last_seen DESC"
     ).fetchall()
 
     found = 0
     processed = 0
+    updates: list[dict] = []
     for r in rows:
         fp = r["fingerprint"]
         if fp in _OCR_TRIED_FP:
@@ -367,17 +411,17 @@ def run_background_image_enrichment(store, max_listings: int = _BG_MAX_LISTINGS_
                         new_imgs = det.get("image_urls")
                         imgs_str = json.dumps(new_imgs, ensure_ascii=False) if new_imgs else None
 
-                        store.conn.execute(
-                            "UPDATE deals SET "
-                            "battery_soh = COALESCE(?, battery_soh), "
-                            "ev_range_km = COALESCE(?, ev_range_km), "
-                            "battery_kwh = COALESCE(?, battery_kwh), "
-                            "warranty = COALESCE(?, warranty), "
-                            "image_urls = COALESCE(?, image_urls) "
-                            "WHERE fingerprint = ?",
-                            (soh, rng, kwh, warr, imgs_str, fp)
-                        )
-                        store.conn.commit()
+                        updates.append({
+                            "fingerprint": fp,
+                            "battery_soh": soh,
+                            "ev_range_km": rng,
+                            "battery_kwh": kwh,
+                            "warranty": warr,
+                            "image_urls": imgs_str,
+                            "soh_source": "detail_text",
+                            "soh_confidence": 0.93,
+                            "soh_evidence": "mobile.de Batterie-Information",
+                        })
                         if soh:
                             found += 1
                             logger.info("⚡ mobile.de Detail-Sync: SoH=%.1f%% für %s gespeichert", soh, title[:50])
@@ -399,13 +443,28 @@ def run_background_image_enrichment(store, max_listings: int = _BG_MAX_LISTINGS_
             _OCR_TRIED_FP.add(fp)
             soh = extract_soh_from_image_urls(urls, max_images=10)
             if soh:
-                store.conn.execute("UPDATE deals SET battery_soh = ? WHERE fingerprint = ?", (soh, fp))
-                store.conn.commit()
+                updates.append({
+                    "fingerprint": fp,
+                    "battery_soh": soh,
+                    "soh_source": "ocr_consensus",
+                    "soh_confidence": 0.86,
+                    "soh_evidence": "Bild-/Dokumentanalyse",
+                })
                 found += 1
                 logger.info("Hintergrund-OCR: SoH=%.1f%% für %s gespeichert", soh, title[:50])
         except Exception as e:
             logger.debug("Hintergrund-OCR Fehler für %s: %s", title[:40], e)
 
+    if updates:
+        if hasattr(store, "update_enrichments"):
+            store.update_enrichments(updates)
+        else:
+            for update in updates:
+                store.conn.execute(
+                    "UPDATE deals SET battery_soh=COALESCE(?, battery_soh) WHERE fingerprint=?",
+                    (update.get("battery_soh"), update["fingerprint"]),
+                )
+            store.conn.commit()
     return found
 
 
@@ -415,7 +474,7 @@ def parse_mobile_de_detail_html(html: str, listing: Listing) -> None:
         return
     soup = BeautifulSoup(html, "lxml")
 
-    full_text = soup.get_text(" ", strip=True)
+    full_text = _relevant_detail_text(soup)
     if full_text:
         listing.body = f"{getattr(listing, 'body', '') or ''} {full_text}".strip()
 

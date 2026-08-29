@@ -94,14 +94,16 @@ def test_sync_active_deals(store):
         "mobile.de": set(),  # leer -> keine Bereinigung für mobile.de
     }
 
-    deleted = store.sync_active_deals("Suche 1", portal_active)
-    assert deleted == 1  # l2 gelöscht
-    assert store.total_count() == 2
+    stale = store.sync_active_deals("Suche 1", portal_active)
+    assert stale == 1
+    assert store.total_count() == 3  # Historie bleibt nachvollziehbar erhalten
 
     remaining_titles = {d["title"] for d in store.list_deals()}
     assert "Car 1" in remaining_titles
     assert "Car 3" in remaining_titles
-    assert "Car 2" not in remaining_titles
+    assert "Car 2" in remaining_titles
+    car2 = next(d for d in store.list_deals() if d["title"] == "Car 2")
+    assert car2["is_stale"] == 1
 
 
 def test_discovered_ev_models(store):
@@ -118,8 +120,9 @@ def test_discovered_ev_models(store):
 
     discovered = store.list_discovered_ev_models()
     assert len(discovered) == 1
-    assert discovered[0]["status"] == "approved"  # Automatisch qualifiziert ab 2 Funden
-    assert len(store.get_approved_ev_models()) == 1
+    # Inseratsdaten werden nie ungeprüft als Referenzdaten freigeschaltet.
+    assert discovered[0]["status"] == "discovered"
+    assert len(store.get_approved_ev_models()) == 0
 
     # Status manuell ändern (z. B. auf rejected)
     ok = store.set_discovered_ev_status(rec["model_key"], "rejected")
@@ -127,3 +130,13 @@ def test_discovered_ev_models(store):
     assert len(store.list_discovered_ev_models(status="rejected")) == 1
     assert len(store.list_discovered_ev_models(status="approved")) == 0
 
+
+def test_portal_health_and_failed_run_marks_stale(store):
+    listing = Listing(portal="mobile.de", title="EV", url="https://example.test/ev")
+    store.record_listing("EV-Suche", listing)
+    store.record_portal_run("EV-Suche", "mobile.de", "blocked", error="HTTP 429")
+    assert store.mark_portal_stale("EV-Suche", "mobile.de") == 1
+    health = store.list_portal_health("EV-Suche")[0]
+    assert health["status"] == "blocked"
+    assert health["error"] == "HTTP 429"
+    assert store.list_deals()[0]["is_stale"] == 1

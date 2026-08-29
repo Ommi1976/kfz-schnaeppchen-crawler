@@ -415,3 +415,15 @@ th.sortable.active-sort .sort-icon {
   color: var(--danger);
   border-color: var(--danger);
 }
+
+.row-stale { opacity: .62; }
+.row-stale td { background-image: linear-gradient(rgba(148,163,184,.035), rgba(148,163,184,.035)); }
+.data-quality { display: flex; gap: 5px; margin-top: 4px; flex-wrap: wrap; }
+.data-badge {
+  display: inline-flex; align-items: center; padding: 1px 6px; border-radius: 999px;
+  font-size: 10px; border: 1px solid var(--line); color: var(--muted);
+}
+.data-badge.stale { color: #fbbf24; border-color: rgba(251,191,36,.45); background: rgba(251,191,36,.08); }
+.data-badge.unknown { color: #94a3b8; background: rgba(148,163,184,.07); }
+.portal-pill.health-bad { border-color: rgba(248,113,113,.55); }
+.portal-pill.health-bad .p-name::after { content: " ⚠"; color: #f87171; }

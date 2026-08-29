@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>KFZ Schnäppchen Crawler</title>
-  <link rel="stylesheet" href="static/style.css?v=1.0.54">
+  <link rel="stylesheet" href="static/style.css?v=1.1.0">
 </head>
 <body>
   <header>
@@ -169,6 +169,8 @@
           <div class="grid">
             <label>Reichweite ab (km) <input id="f-ev_range_from" type="number" min="0" placeholder="450"></label>
             <label>Akku ab (kWh) <input id="f-battery_from_kwh" type="number" min="0" step="0.1" placeholder="62"></label>
+            <label class="full">Fehlende Angaben <select id="f-unknown_policy"></select></label>
+            <div class="full section-note">Empfohlen: Unbekannte Akkuwerte bleiben erhalten, wenn bekannte Kriterien wie Reichweite passen. In der Trefferliste werden fehlende Angaben sichtbar markiert.</div>
           </div>
         </div>
 
@@ -197,6 +199,6 @@
     </div>
   </div>
 
-  <script src="static/app.js?v=1.0.54"></script>
+  <script src="static/app.js?v=1.1.0"></script>
 </body>
 </html>
