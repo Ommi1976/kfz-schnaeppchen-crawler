@@ -100,7 +100,11 @@ class MobileDe(BasePortal):
         if original_fetch:
             try:
                 from ..browser import rendered_session
-                with rendered_session(proxy=self.proxy, engine="firefox") as session_fetch:
+                from ..cookie_storage import get_mobile_cookies
+                # Gespeicherte Akamai-Cookies stammen typischerweise aus einem
+                # Chromium-Browser; ohne solche Cookies ist Gecko unauffälliger.
+                engine = "chromium" if get_mobile_cookies() else "firefox"
+                with rendered_session(proxy=self.proxy, engine=engine) as session_fetch:
                     return self._crawl_pages(
                         query,
                         lambda url: session_fetch(

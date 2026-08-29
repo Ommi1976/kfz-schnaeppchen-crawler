@@ -105,6 +105,30 @@ def _matching_user_agent(browser) -> str:
         probe_context.close()
 
 
+def _inject_saved_mobile_cookies(context) -> int:
+    """Übernimmt nur explizit im Add-on gespeicherte mobile.de-Cookies."""
+    try:
+        from .cookie_storage import get_mobile_cookies
+        saved = get_mobile_cookies()
+        cookies = [
+            {
+                "name": str(name),
+                "value": str(value),
+                "domain": ".mobile.de",
+                "path": "/",
+                "secure": True,
+            }
+            for name, value in saved.items()
+            if name and value
+        ]
+        if cookies:
+            context.add_cookies(cookies)
+        return len(cookies)
+    except Exception as exc:
+        logger.debug("Gespeicherte mobile.de-Cookies konnten nicht geladen werden: %s", exc)
+        return 0
+
+
 def fetch_rendered(
     url: str,
     proxy: Optional[str] = None,
@@ -240,6 +264,9 @@ def rendered_session(
                 context = browser.new_context(**context_kwargs)
             page = context.new_page()
             page.add_init_script(CHROMIUM_STEALTH_JS if engine == "chromium" else STEALTH_JS)
+            saved_cookie_count = _inject_saved_mobile_cookies(context)
+            if saved_cookie_count:
+                logger.info("mobile.de: %d gespeicherte Session-Cookies geladen", saved_cookie_count)
             last_request_at = 0.0
             had_success = False
             blocked_seen = False
@@ -282,6 +309,7 @@ def rendered_session(
                             wait_seconds = 6.0 * (attempt + 1)
                             logger.warning("mobile.de antwortet mit Block/HTTP %s; %.0f s Backoff (%d/%d)", status or "HTML", wait_seconds, attempt + 1, max_retries)
                             context.clear_cookies()
+                            _inject_saved_mobile_cookies(context)
                             time.sleep(wait_seconds)
                             continue
                         raise BrowserBlocked(f"Browserzugriff blockiert: {url}")
