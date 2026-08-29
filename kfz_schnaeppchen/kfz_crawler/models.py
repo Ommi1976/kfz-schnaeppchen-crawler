@@ -290,7 +290,10 @@ def extract_warranty(text: str | None) -> Optional[str]:
 
 
 def infer_listing_details(listing: "Listing", query_zip: Optional[str] = None) -> None:
-    """Extrahiert Garantie, Standort-PLZ, Stadt und Distanz."""
+    """Extrahiert Akku/WLTP-Reichweite, Garantie, Standort-PLZ, Stadt und Distanz."""
+    infer_listing_battery(listing)
+    infer_listing_range(listing)
+
     text = f"{listing.title or ''} {getattr(listing, 'body', '') or ''}"
     if listing.warranty is None:
         listing.warranty = extract_warranty(text)
