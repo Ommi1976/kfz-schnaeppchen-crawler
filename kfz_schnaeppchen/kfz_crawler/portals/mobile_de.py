@@ -100,7 +100,7 @@ class MobileDe(BasePortal):
         if original_fetch:
             try:
                 from ..browser import rendered_session
-                with rendered_session(proxy=self.proxy, engine="chromium") as session_fetch:
+                with rendered_session(proxy=self.proxy, engine="firefox") as session_fetch:
                     return self._crawl_pages(
                         query,
                         lambda url: session_fetch(

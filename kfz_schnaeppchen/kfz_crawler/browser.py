@@ -63,9 +63,12 @@ MOBILE_STATE_PATH = PROFILE_DIR.parent / "mobile_browser_state.json"
 STEALTH_JS = """
 Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
 delete Object.getPrototypeOf(navigator).webdriver;
-window.chrome = { runtime: {}, loadTimes: function() {}, csi: function() {}, app: {} };
 Object.defineProperty(navigator, 'plugins', { get: () => [1, 2, 3, 4, 5] });
 Object.defineProperty(navigator, 'languages', { get: () => ['de-DE', 'de', 'en-US', 'en'] });
+"""
+
+CHROMIUM_STEALTH_JS = STEALTH_JS + """
+window.chrome = { runtime: {}, loadTimes: function() {}, csi: function() {}, app: {} };
 """
 
 CHROMIUM_ARGS = [
@@ -151,7 +154,7 @@ def fetch_rendered(
                 )
                 page = ctx.new_page()
                 try:
-                    page.add_init_script(STEALTH_JS)
+                    page.add_init_script(CHROMIUM_STEALTH_JS if engine == "chromium" else STEALTH_JS)
                 except Exception:
                     pass
 
@@ -236,7 +239,7 @@ def rendered_session(
                 context_kwargs.pop("storage_state", None)
                 context = browser.new_context(**context_kwargs)
             page = context.new_page()
-            page.add_init_script(STEALTH_JS)
+            page.add_init_script(CHROMIUM_STEALTH_JS if engine == "chromium" else STEALTH_JS)
             last_request_at = 0.0
             had_success = False
             blocked_seen = False

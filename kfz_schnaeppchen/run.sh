@@ -12,8 +12,10 @@ if [ "$(id -u)" = "0" ]; then
     mkdir -p /data/tor /data/firefox_profile
     chown -R crawler:crawler /data
     chmod 700 /data/tor
-    echo "[KFZ Schnäppchen] Starte integrierten Tor-Dienst..."
-    gosu crawler tor --RunAsDaemon 1 || true
+    if [ "${KFZ_USE_TOR:-0}" = "1" ]; then
+        echo "[KFZ Schnäppchen] Starte optionalen Tor-Dienst..."
+        gosu crawler tor --RunAsDaemon 1 || true
+    fi
     exec gosu crawler /run.sh
 fi
 

@@ -35,7 +35,7 @@ RUN apt-get update \
         ca-certificates \
     && python3 -m pip install --no-cache-dir --break-system-packages -r /tmp/requirements.txt \
     && mkdir -p /opt/playwright-browsers \
-    && playwright install --with-deps chromium \
+    && playwright install --with-deps chromium firefox \
     && chmod -R a+rx /opt/playwright-browsers \
     && printf '%s\n' 'SocksPort 127.0.0.1:9050' 'ControlPort 127.0.0.1:9051' 'CookieAuthentication 1' 'DataDirectory /data/tor' > /etc/tor/torrc \
     && apt-get clean \
