@@ -83,7 +83,21 @@ class SeenStore:
                 self.conn.execute(ddl)
             except sqlite3.OperationalError:
                 pass  # Spalte existiert bereits
+
+        # WAL-Modus & Performance-Pragmas für unterbrechungsfreies paralleles Lesen/Schreiben
+        try:
+            self.conn.execute("PRAGMA journal_mode=WAL")
+            self.conn.execute("PRAGMA synchronous=NORMAL")
+            self.conn.execute("PRAGMA cache_size = -64000")  # 64 MB Cache
+            self.conn.execute("PRAGMA temp_store = MEMORY")
+        except Exception:
+            pass
+
         self.conn.execute("CREATE INDEX IF NOT EXISTS idx_deals_ym ON deals(year, mileage)")
+        self.conn.execute("CREATE INDEX IF NOT EXISTS idx_deals_filter ON deals(search_name, is_deal, price, year, mileage)")
+        self.conn.execute("CREATE INDEX IF NOT EXISTS idx_deals_portal ON deals(portal, search_name)")
+        self.conn.execute("CREATE INDEX IF NOT EXISTS idx_deals_first_seen ON deals(first_seen DESC)")
+        self.conn.execute("CREATE INDEX IF NOT EXISTS idx_seen_fp ON seen(fingerprint)")
         # In der UI verwaltete Suchen.
         self.conn.execute(
             """

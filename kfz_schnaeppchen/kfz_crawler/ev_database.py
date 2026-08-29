@@ -201,7 +201,21 @@ _EV_DATABASE: List[EVSpec] = [
         re.compile(r"\be-niro\b|\bniro\s*ev\b|\bniro\s+elektro\b", re.I),
     ]),
 
-    # --- RENAULT, PEUGEOT, OPEL, FIAT, NISSAN, MG ---
+    # --- RENAULT & DACIA ---
+    EVSpec("Renault", "Scenic E-Tech", "EV87 (87 kWh)", 92.0, 87.0, 625, 160, 218, [
+        re.compile(r"\bscenic\b.*?\b(?:ev87|87\s*kwh|220\s*ps)\b", re.I),
+        re.compile(r"\bscenic\b", re.I),
+    ]),
+    EVSpec("Renault", "Scenic E-Tech", "EV60 (60 kWh)", 65.0, 60.0, 430, 125, 170, [
+        re.compile(r"\bscenic\b.*?\b(?:ev60|60\s*kwh|170\s*ps)\b", re.I),
+    ]),
+    EVSpec("Renault", "Megane E-Tech", "EV60 (60 kWh)", 65.0, 60.0, 450, 160, 218, [
+        re.compile(r"\bmegane\b.*?\b(?:ev60|60\s*kwh|220\s*ps)\b", re.I),
+        re.compile(r"\bmegane\b", re.I),
+    ]),
+    EVSpec("Renault", "Megane E-Tech", "EV40 (40 kWh)", 45.0, 40.0, 300, 96, 130, [
+        re.compile(r"\bmegane\b.*?\b(?:ev40|40\s*kwh|130\s*ps)\b", re.I),
+    ]),
     EVSpec("Renault", "Zoe", "Z.E. 50 (52 kWh)", 54.7, 52.0, 395, 80, 108, [
         re.compile(r"\bzoe\b.*?\b(?:ze\s*50|52|r110|r135)\b", re.I),
         re.compile(r"\bzoe\b", re.I),
@@ -209,18 +223,61 @@ _EV_DATABASE: List[EVSpec] = [
     EVSpec("Renault", "Zoe", "Z.E. 40 (41 kWh)", 44.1, 41.0, 300, 68, 92, [
         re.compile(r"\bzoe\b.*?\b(?:ze\s*40|41)\b", re.I),
     ]),
-    EVSpec("Renault", "Megane E-Tech", "EV60", 60.0, 60.0, 450, 160, 218, [
-        re.compile(r"\bmegane\b.*?\b(?:ev60|60\s*kwh|220\s*ps)\b", re.I),
-        re.compile(r"\bmegane\b", re.I),
+    EVSpec("Renault", "5 E-Tech", "52 kWh", 55.0, 52.0, 410, 110, 150, [
+        re.compile(r"\brenault\s*5\b|\br5\s*e-tech\b", re.I),
+    ]),
+    EVSpec("Dacia", "Spring", "26.8 kWh", 26.8, 25.0, 230, 33, 45, [
+        re.compile(r"\bspring\b|\bdacia\s+spring\b", re.I),
+    ]),
+
+    # --- PEUGEOT, OPEL, CITROEN, FIAT, JEEP, ALFA ---
+    EVSpec("Peugeot", "e-3008 / e-5008", "Long Range (98 kWh)", 103.0, 98.0, 700, 170, 231, [
+        re.compile(r"\be-?(?:3008|5008)\b.*?\b(?:long\s*range|98\s*kwh|700\s*km)\b", re.I),
+    ]),
+    EVSpec("Peugeot", "e-3008 / e-5008", "Standard (73 kWh)", 77.0, 73.0, 525, 157, 213, [
+        re.compile(r"\be-?(?:3008|5008)\b", re.I),
+    ]),
+    EVSpec("Peugeot", "e-308", "54 kWh", 54.0, 51.0, 410, 115, 156, [
+        re.compile(r"\be-?308\b", re.I),
+    ]),
+    EVSpec("Peugeot", "e-208 / e-2008", "50 / 54 kWh", 54.0, 51.0, 400, 115, 156, [
+        re.compile(r"\be-?208\b|\be-?2008\b", re.I),
+    ]),
+    EVSpec("Opel", "Grandland Electric", "73 / 82 / 98 kWh", 98.0, 98.0, 700, 157, 213, [
+        re.compile(r"\bgrandland\s*electric\b|\bgrandland\s*e\b", re.I),
+    ]),
+    EVSpec("Opel", "Astra Electric", "54 kWh", 54.0, 51.0, 418, 115, 156, [
+        re.compile(r"\bastra\s*electric\b|\bastra-?e\b", re.I),
+    ]),
+    EVSpec("Opel", "Corsa-e / Mokka-e", "50 / 54 kWh", 54.0, 51.0, 400, 100, 136, [
+        re.compile(r"\bcorsa-?e\b|\bmokka-?e\b|\bcorsa\s*electric\b|\bmokka\s*electric\b", re.I),
+    ]),
+    EVSpec("Fiat", "600e", "54 kWh", 54.0, 51.0, 409, 115, 156, [
+        re.compile(r"\b600e\b|\bfiat\s*600\s*e\b", re.I),
     ]),
     EVSpec("Fiat", "500e", "42 kWh", 42.0, 37.3, 320, 87, 118, [
         re.compile(r"\b500e\b|\bfiat\s*500\s*e\b", re.I),
     ]),
-    EVSpec("Peugeot", "e-208 / e-2008", "50 kWh", 50.0, 46.3, 362, 100, 136, [
-        re.compile(r"\be-?208\b|\be-?2008\b", re.I),
+    EVSpec("Jeep", "Avenger", "54 kWh", 54.0, 51.0, 400, 115, 156, [
+        re.compile(r"\bavenger\b|\bjeep\s*avenger\b", re.I),
     ]),
-    EVSpec("Opel", "Corsa-e / Mokka-e", "50 kWh", 50.0, 46.3, 353, 100, 136, [
-        re.compile(r"\bcorsa-?e\b|\bmokka-?e\b", re.I),
+    EVSpec("Alfa Romeo", "Junior Elettrica", "54 kWh", 54.0, 51.0, 410, 115, 156, [
+        re.compile(r"\bjunior\s*elettrica\b|\bmilano\s*elettrica\b", re.I),
+    ]),
+    EVSpec("Citroen", "e-C4 / e-C4 X", "50 / 54 kWh", 54.0, 51.0, 420, 100, 136, [
+        re.compile(r"\be-?c4\b", re.I),
+    ]),
+    EVSpec("Citroen", "e-C3", "44 kWh (LFP)", 44.0, 44.0, 320, 83, 113, [
+        re.compile(r"\be-?c3\b", re.I),
+    ]),
+
+    # --- NISSAN, TOYOTA, SUBARU, LEXUS ---
+    EVSpec("Nissan", "Ariya", "87 kWh", 91.0, 87.0, 533, 178, 242, [
+        re.compile(r"\bariya\b.*?\b(?:87|e-4orce|evolve|242\s*ps)\b", re.I),
+        re.compile(r"\bariya\b", re.I),
+    ]),
+    EVSpec("Nissan", "Ariya", "63 kWh", 65.0, 63.0, 403, 160, 218, [
+        re.compile(r"\bariya\b.*?\b(?:63|218\s*ps)\b", re.I),
     ]),
     EVSpec("Nissan", "Leaf", "e+ (62 kWh)", 62.0, 59.0, 385, 160, 217, [
         re.compile(r"\bnissan\s*leaf\b.*?\b(?:e\+|62|217\s*ps)\b", re.I),
@@ -228,26 +285,92 @@ _EV_DATABASE: List[EVSpec] = [
     EVSpec("Nissan", "Leaf", "40 kWh", 40.0, 39.0, 270, 110, 150, [
         re.compile(r"\bnissan\s*leaf\b", re.I),
     ]),
-    EVSpec("MG", "MG4", "Standard (51 kWh) / Comfort (64 kWh)", 64.0, 61.7, 450, 150, 204, [
-        re.compile(r"\bmg4\b", re.I),
+    EVSpec("Toyota", "bZ4X", "71.4 kWh", 71.4, 64.0, 513, 150, 204, [
+        re.compile(r"\bbz4x\b", re.I),
     ]),
-    EVSpec("Smart", "#1", "66 kWh", 66.0, 62.0, 440, 200, 272, [
-        re.compile(r"\bsmart\s*#1\b", re.I),
+    EVSpec("Subaru", "Solterra", "71.4 kWh", 71.4, 64.0, 465, 160, 218, [
+        re.compile(r"\bsolterra\b", re.I),
     ]),
+    EVSpec("Lexus", "RZ 450e", "71.4 kWh", 71.4, 64.0, 440, 230, 313, [
+        re.compile(r"\brz\s*450e\b|\brz\b", re.I),
+    ]),
+    EVSpec("Lexus", "UX 300e", "72.8 kWh", 72.8, 64.0, 450, 150, 204, [
+        re.compile(r"\bux\s*300e\b.*?\b72\b", re.I),
+    ]),
+
+    # --- PORSCHE & AUDI SPORT ---
+    EVSpec("Porsche", "Taycan", "Performance Plus (93.4 / 105 kWh)", 93.4, 83.7, 505, 280, 380, [
+        re.compile(r"\btaycan\b.*?\b(?:plus|4s|turbo|gts|105|93)\b", re.I),
+        re.compile(r"\btaycan\b", re.I),
+    ]),
+    EVSpec("Porsche", "Taycan", "Performance (79.2 / 89 kWh)", 79.2, 71.0, 430, 240, 326, [
+        re.compile(r"\btaycan\b.*?\b(?:79|89)\b", re.I),
+    ]),
+    EVSpec("Audi", "Q6 e-tron", "100 kWh (800V)", 100.0, 94.9, 625, 285, 387, [
+        re.compile(r"\bq6\s*e-tron\b|\bq6\b", re.I),
+    ]),
+    EVSpec("Audi", "e-tron GT", "93.4 / 105 kWh", 93.4, 85.0, 488, 350, 476, [
+        re.compile(r"\be-tron\s*gt\b|\brs\s*e-tron\s*gt\b", re.I),
+    ]),
+
+    # --- GENESIS ---
+    EVSpec("Genesis", "GV60", "77.4 kWh (800V)", 77.4, 74.0, 517, 168, 229, [
+        re.compile(r"\bgv60\b", re.I),
+    ]),
+    EVSpec("Genesis", "Electrified GV70", "77.4 kWh", 77.4, 74.0, 455, 360, 490, [
+        re.compile(r"\bgv70\b", re.I),
+    ]),
+    EVSpec("Genesis", "Electrified G80", "87.2 kWh", 87.2, 87.2, 520, 272, 370, [
+        re.compile(r"\bg80\b", re.I),
+    ]),
+
+    # --- FORD ---
     EVSpec("Ford", "Mustang Mach-E", "Extended Range (98.7 kWh)", 98.7, 91.0, 600, 216, 294, [
         re.compile(r"\bmach-?e\b.*?\b(?:er|extended|98|91|awd|4x)\b", re.I),
     ]),
     EVSpec("Ford", "Mustang Mach-E", "Standard Range (75.7 kWh)", 75.7, 70.0, 440, 198, 269, [
         re.compile(r"\bmach-?e\b", re.I),
     ]),
-    EVSpec("VinFast", "VF 8", "ECO / PLUS (87.7 kWh)", 87.7, 87.7, 471, 260, 353, [
-        re.compile(r"\bvf\s*8\b|\bvinfast\b", re.I),
+    EVSpec("Ford", "Explorer Electric", "Extended (77 / 79 kWh)", 82.0, 77.0, 602, 210, 286, [
+        re.compile(r"\bexplorer\s*electric\b|\bexplorer\s*ev\b", re.I),
+    ]),
+    EVSpec("Ford", "Capri Electric", "Extended (77 / 79 kWh)", 82.0, 77.0, 627, 210, 286, [
+        re.compile(r"\bcapri\s*electric\b|\bcapri\s*ev\b", re.I),
+    ]),
+
+    # --- MG & SMART ---
+    EVSpec("MG", "MG4", "Trophy Extended Range (77 kWh)", 77.0, 74.4, 520, 180, 245, [
+        re.compile(r"\bmg4\b.*?\b(?:extended|77|trophy)\b", re.I),
+    ]),
+    EVSpec("MG", "MG4", "Comfort / Luxury (64 kWh)", 64.0, 61.7, 450, 150, 204, [
+        re.compile(r"\bmg4\b.*?\b(?:comfort|luxury|64)\b", re.I),
+        re.compile(r"\bmg4\b", re.I),
+    ]),
+    EVSpec("MG", "MG4", "Standard (51 kWh)", 51.0, 50.8, 350, 125, 170, [
+        re.compile(r"\bmg4\b.*?\b(?:standard|51)\b", re.I),
+    ]),
+    EVSpec("MG", "MG5", "Maxi (61.1 kWh)", 61.1, 57.4, 400, 115, 156, [
+        re.compile(r"\bmg5\b", re.I),
+    ]),
+    EVSpec("MG", "ZS EV", "Long Range (70 kWh)", 72.6, 68.3, 440, 115, 156, [
+        re.compile(r"\bzs\s*ev\b.*?\b(?:long|70|72)\b", re.I),
+        re.compile(r"\bzs\s*ev\b", re.I),
+    ]),
+    EVSpec("MG", "Marvel R", "70 kWh", 70.0, 65.0, 402, 132, 180, [
+        re.compile(r"\bmarvel\s*r\b", re.I),
+    ]),
+    EVSpec("Smart", "#1", "Pro+ / Premium / Brabus (66 kWh)", 66.0, 62.0, 440, 200, 272, [
+        re.compile(r"\bsmart\s*#1\b.*?\b(?:premium|pro\+|brabus|66)\b", re.I),
+        re.compile(r"\bsmart\s*#1\b", re.I),
+    ]),
+    EVSpec("Smart", "#1", "Pro (49 kWh LFP)", 49.0, 47.0, 310, 200, 272, [
+        re.compile(r"\bsmart\s*#1\b.*?\b(?:pro\b(?!.*?pro\+)|49)\b", re.I),
+    ]),
+    EVSpec("Smart", "#3", "Pro+ / Premium / Brabus (66 kWh)", 66.0, 62.0, 455, 200, 272, [
+        re.compile(r"\bsmart\s*#3\b", re.I),
     ]),
     EVSpec("Smart", "EQ fortwo / forfour", "17.6 kWh", 17.6, 16.7, 135, 60, 82, [
         re.compile(r"\bsmart\s*eq\b|\bfortwo\s*eq\b|\bforfour\s*eq\b", re.I),
-    ]),
-    EVSpec("Ora", "03 / Funky Cat", "48 / 63 kWh", 48.0, 45.4, 310, 126, 171, [
-        re.compile(r"\bora\s*(?:03|funky\s*cat)\b", re.I),
     ]),
 
     # --- BYD ---
@@ -260,33 +383,84 @@ _EV_DATABASE: List[EVSpec] = [
     EVSpec("BYD", "Atto 3", "60.5 kWh", 60.5, 60.5, 420, 150, 204, [
         re.compile(r"\b(?:byd\b.*?\batto\s*3\b|\batto\s*3\b)", re.I),
     ]),
-    EVSpec("BYD", "Seal", "Design / Excellence", 82.5, 82.5, 570, 230, 313, [
+    EVSpec("BYD", "Seal", "Design / Excellence (82.5 kWh)", 82.5, 82.5, 570, 230, 313, [
         re.compile(r"\b(?:byd\b.*?\bseal\b|\bseal\s+rwd|\bseal\s+awd)\b", re.I),
     ]),
     EVSpec("BYD", "Seal U", "71.8 / 87 kWh", 87.0, 87.0, 500, 160, 218, [
         re.compile(r"\bseal\s*u\b", re.I),
     ]),
+    EVSpec("BYD", "Han", "85.4 kWh", 85.4, 85.4, 521, 380, 517, [
+        re.compile(r"\bbyd\s*han\b|\bhan\s*ev\b", re.I),
+    ]),
+    EVSpec("BYD", "Tang", "86.4 / 108.8 kWh", 108.8, 108.8, 530, 380, 517, [
+        re.compile(r"\bbyd\s*tang\b|\btang\s*ev\b", re.I),
+    ]),
+
+    # --- NIO, FISKER, LUCID, VINFAST, ORA ---
+    EVSpec("Nio", "ET5 / ET5 Touring", "100 kWh", 100.0, 90.0, 590, 360, 490, [
+        re.compile(r"\bet5\b.*?\b100\b", re.I),
+    ]),
+    EVSpec("Nio", "ET5 / ET5 Touring", "75 kWh", 75.0, 70.0, 456, 360, 490, [
+        re.compile(r"\bet5\b", re.I),
+    ]),
+    EVSpec("Nio", "ET7", "75 / 100 kWh", 100.0, 90.0, 580, 480, 653, [
+        re.compile(r"\bet7\b", re.I),
+    ]),
+    EVSpec("Nio", "EL6 / EL7 / EL8", "75 / 100 kWh", 100.0, 90.0, 529, 360, 490, [
+        re.compile(r"\b(?:el6|el7|el8)\b", re.I),
+    ]),
+    EVSpec("Fisker", "Ocean", "Extreme / One / Ultra (113 kWh)", 113.0, 106.0, 707, 420, 571, [
+        re.compile(r"\bocean\b|\bfisker\b", re.I),
+    ]),
+    EVSpec("Lucid", "Air", "Pure / Touring / GT (88-118 kWh)", 112.0, 112.0, 725, 456, 620, [
+        re.compile(r"\blucid\b|\blucid\s*air\b", re.I),
+    ]),
+    EVSpec("VinFast", "VF 8", "ECO / PLUS (87.7 kWh)", 87.7, 87.7, 471, 260, 353, [
+        re.compile(r"\bvf\s*8\b|\bvinfast\b", re.I),
+    ]),
+    EVSpec("Ora", "03 / Funky Cat", "400 (63 kWh)", 63.0, 59.3, 420, 126, 171, [
+        re.compile(r"\bora\s*(?:03|funky\s*cat)\b.*?\b(?:400|63|gt)\b", re.I),
+    ]),
+    EVSpec("Ora", "03 / Funky Cat", "300 (48 kWh LFP)", 48.0, 45.4, 310, 126, 171, [
+        re.compile(r"\bora\s*(?:03|funky\s*cat)\b", re.I),
+    ]),
 
     # --- VOLVO & POLESTAR ---
-    EVSpec("Volvo", "EX30", "Single Motor (51 kWh)", 51.0, 49.0, 344, 200, 272, [
+    EVSpec("Volvo", "EX30", "Single Motor Extended Range / Twin (69 kWh)", 69.0, 64.0, 476, 200, 272, [
+        re.compile(r"\bex30\b.*?\b(?:extended|twin|plus|ultra|69)\b", re.I),
+        re.compile(r"\bex30\b", re.I),
+    ]),
+    EVSpec("Volvo", "EX30", "Single Motor (51 kWh LFP)", 51.0, 49.0, 344, 200, 272, [
         re.compile(r"\bex30\b.*?\b(?:single\s+motor\b(?!.*?extended)|core\b(?!.*?extended)|51\s*kwh)\b", re.I),
     ]),
-    EVSpec("Volvo", "EX30", "Single Motor Extended Range / Twin (69 kWh)", 69.0, 64.0, 476, 200, 272, [
-        re.compile(r"\bex30\b", re.I),
+    EVSpec("Volvo", "XC40 / EX40 / C40 / EC40", "Extended / Twin (78 / 82 kWh)", 82.0, 79.0, 575, 185, 252, [
+        re.compile(r"\b(?:xc40|ex40|c40|ec40)\b.*?\b(?:extended|twin|82|78)\b", re.I),
+        re.compile(r"\b(?:xc40|ex40|c40|ec40)\b", re.I),
+    ]),
+    EVSpec("Volvo", "XC40 / EX40 / C40 / EC40", "Standard Range (69 kWh)", 69.0, 67.0, 425, 170, 231, [
+        re.compile(r"\b(?:xc40|ex40|c40|ec40)\b.*?\b(?:standard|69)\b", re.I),
+    ]),
+    EVSpec("Polestar", "2", "Long Range (78 / 82 kWh)", 82.0, 79.0, 551, 220, 299, [
+        re.compile(r"\bpolestar\s*2\b.*?\b(?:long\s*range|dual\s*motor|82|78)\b", re.I),
+        re.compile(r"\bpolestar\s*2\b", re.I),
     ]),
     EVSpec("Polestar", "2", "Standard Range (69 kWh)", 69.0, 67.0, 478, 170, 231, [
         re.compile(r"\bpolestar\s*2\b.*?\b(?:standard\s*range|69\s*kwh)\b", re.I),
     ]),
-    EVSpec("Polestar", "2", "Long Range (78 / 82 kWh)", 82.0, 79.0, 551, 220, 299, [
-        re.compile(r"\bpolestar\s*2\b", re.I),
+    EVSpec("Polestar", "3 / 4", "100 / 111 kWh", 111.0, 107.0, 610, 360, 490, [
+        re.compile(r"\bpolestar\s*(?:3|4)\b", re.I),
     ]),
 
     # --- KIA & HYUNDAI NEU ---
+    EVSpec("Kia", "EV3", "Long Range (81.4 kWh)", 81.4, 81.4, 605, 150, 204, [
+        re.compile(r"\bev3\b.*?\b(?:long|81|605)\b", re.I),
+        re.compile(r"\bev3\b", re.I),
+    ]),
     EVSpec("Kia", "EV3", "Standard (58.3 kWh)", 58.3, 58.3, 436, 150, 204, [
         re.compile(r"\bev3\b.*?\b(?:standard|58\s*kwh)\b", re.I),
     ]),
-    EVSpec("Kia", "EV3", "Long Range (81.4 kWh)", 81.4, 81.4, 605, 150, 204, [
-        re.compile(r"\bev3\b", re.I),
+    EVSpec("Kia", "EV9", "99.8 kWh (800V)", 99.8, 99.8, 563, 283, 385, [
+        re.compile(r"\bev9\b", re.I),
     ]),
     EVSpec("Dacia", "Spring", "26.8 kWh", 26.8, 25.0, 230, 33, 45, [
         re.compile(r"\bspring\b|\bdacia\s+spring\b", re.I),
