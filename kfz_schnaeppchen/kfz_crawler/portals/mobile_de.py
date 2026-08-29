@@ -103,7 +103,7 @@ class MobileDe(BasePortal):
                 from ..cookie_storage import get_mobile_cookies
                 # Gespeicherte Akamai-Cookies stammen typischerweise aus einem
                 # Chromium-Browser; ohne solche Cookies ist Gecko unauffälliger.
-                engine = "chromium" if get_mobile_cookies() else "firefox"
+                engine = "chromium" if get_mobile_cookies(max_age_seconds=12 * 3600) else "firefox"
                 with rendered_session(proxy=self.proxy, engine=engine) as session_fetch:
                     return self._crawl_pages(
                         query,

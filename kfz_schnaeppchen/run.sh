@@ -16,6 +16,9 @@ if [ "$(id -u)" = "0" ]; then
         echo "[KFZ Schnäppchen] Starte optionalen Tor-Dienst..."
         gosu crawler tor --RunAsDaemon 1 || true
     fi
+    echo "[KFZ Schnäppchen] Starte virtuellen Browser-Bildschirm..."
+    gosu crawler Xvfb :99 -screen 0 1440x900x24 -nolisten tcp >/tmp/kfz-xvfb.log 2>&1 &
+    export DISPLAY=:99
     exec gosu crawler /run.sh
 fi
 

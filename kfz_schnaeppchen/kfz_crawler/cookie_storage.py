@@ -48,12 +48,17 @@ def save_mobile_cookies(raw_cookies: str | dict) -> Dict[str, str]:
     return cookie_dict
 
 
-def get_mobile_cookies() -> Dict[str, str]:
+def get_mobile_cookies(max_age_seconds: Optional[float] = None) -> Dict[str, str]:
     """Liefert die gespeicherten mobile.de Cookies oder ein leeres Dict."""
     if not COOKIE_FILE.exists():
         return {}
     try:
         data = json.loads(COOKIE_FILE.read_text(encoding="utf-8"))
+        updated = data.get("updated_at")
+        if max_age_seconds is not None and (
+            not updated or time.time() - float(updated) > max_age_seconds
+        ):
+            return {}
         return data.get("cookies", {})
     except Exception as e:
         logger.debug("Konnte mobile.de Cookies nicht lesen: %s", e)

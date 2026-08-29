@@ -109,7 +109,7 @@ def _inject_saved_mobile_cookies(context) -> int:
     """Übernimmt nur explizit im Add-on gespeicherte mobile.de-Cookies."""
     try:
         from .cookie_storage import get_mobile_cookies
-        saved = get_mobile_cookies()
+        saved = get_mobile_cookies(max_age_seconds=12 * 3600)
         cookies = [
             {
                 "name": str(name),
@@ -158,7 +158,7 @@ def fetch_rendered(
         for attempt in range(max_retries + 1):
             with sync_playwright() as p:
                 engine_obj = getattr(p, engine, p.chromium)
-                launch_kwargs: dict = {"headless": True}
+                launch_kwargs: dict = {"headless": not bool(os.environ.get("DISPLAY"))}
                 if engine == "chromium":
                     launch_kwargs["args"] = CHROMIUM_ARGS
                 if effective_proxy:
@@ -248,6 +248,7 @@ def rendered_session(
                 launch_kwargs["args"] = CHROMIUM_ARGS
             if effective_proxy:
                 launch_kwargs["proxy"] = {"server": effective_proxy}
+            launch_kwargs["headless"] = not bool(os.environ.get("DISPLAY"))
             browser = engine_obj.launch(**launch_kwargs)
             context_kwargs = dict(
                 locale="de-DE",
@@ -308,8 +309,9 @@ def rendered_session(
                         if attempt < max_retries:
                             wait_seconds = 6.0 * (attempt + 1)
                             logger.warning("mobile.de antwortet mit Block/HTTP %s; %.0f s Backoff (%d/%d)", status or "HTML", wait_seconds, attempt + 1, max_retries)
+                            # Ein abgewiesener Schutz-Cookie wird beim Retry nicht
+                            # erneut gesendet; die Session darf sich frisch aufbauen.
                             context.clear_cookies()
-                            _inject_saved_mobile_cookies(context)
                             time.sleep(wait_seconds)
                             continue
                         raise BrowserBlocked(f"Browserzugriff blockiert: {url}")
