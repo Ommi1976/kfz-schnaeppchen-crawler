@@ -114,10 +114,10 @@ class Kleinanzeigen(BasePortal):
 
         if not has_specific_car and query.fuel == "elektro" and (query.battery_from_kwh or query.ev_range_from or query.power_from):
             terms: List[Optional[str]] = list(_EXPANSION_EV_MODELS)
-            pages_per_term = 1
+            pages_per_term = 3
         else:
             terms = [None]
-            pages_per_term = max(self.max_pages, 3)
+            pages_per_term = max(self.max_pages, 20)
 
         for term in terms:
             for page in range(1, pages_per_term + 1):

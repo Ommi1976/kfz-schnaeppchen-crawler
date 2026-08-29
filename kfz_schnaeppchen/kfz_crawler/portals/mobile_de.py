@@ -78,9 +78,13 @@ class MobileDe(BasePortal):
     def search(self, query: SearchQuery) -> List[Listing]:
         results: List[Listing] = []
         seen_ids = set()
-        pages_to_fetch = max(self.max_pages, 5)
-        for page in range(1, pages_to_fetch + 1):
-            html = self._fetch(self._build_url(query, page))
+        max_limit = max(self.max_pages, 50)  # Dynamisch bis zu 50 Seiten (~1.000 Inserate)
+        for page in range(1, max_limit + 1):
+            try:
+                html = self._fetch(self._build_url(query, page))
+            except Exception as e:
+                logger.warning("mobile.de: Fehler beim Abruf von Seite %d: %s", page, e)
+                break
             cards = self._parse_cards(html)
             new = 0
             for l in cards:

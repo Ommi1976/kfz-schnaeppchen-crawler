@@ -107,9 +107,14 @@ class AutoScout24(BasePortal):
 
     def search(self, query: SearchQuery) -> List[Listing]:
         results: List[Listing] = []
-        for page in range(1, self.max_pages + 1):
+        max_limit = max(self.max_pages, 50)  # Bis zu 50 Seiten
+        for page in range(1, max_limit + 1):
             url = self._build_url(query, page)
-            resp = self._get(url)
+            try:
+                resp = self._get(url)
+            except Exception as e:
+                logger.warning("AutoScout24: Fehler beim Abruf von Seite %d: %s", page, e)
+                break
             page_items = self._parse(resp.text)
             if not page_items:
                 break
