@@ -8,6 +8,7 @@ server-gerenderten Ergebnis-Cards (data-testid) heran, ganz ohne Session-Cookies
 
 from __future__ import annotations
 
+import logging
 import re
 from typing import List, Optional
 from urllib.parse import quote_plus
@@ -16,6 +17,8 @@ from bs4 import BeautifulSoup
 
 from ..models import Listing, SearchQuery
 from .base import BasePortal, PortalError
+
+logger = logging.getLogger(__name__)
 
 FUEL_MAP = {"benzin": "PETROL", "diesel": "DIESEL", "elektro": "ELECTRICITY", "hybrid": "HYBRID"}
 GEAR_MAP = {"schaltgetriebe": "MANUAL_GEAR", "automatik": "AUTOMATIC_GEAR"}
