@@ -229,6 +229,24 @@ function mobileSearchUrl(s) {
   if (s.ev_range_from) params.set("re", String(Math.max(50, Math.floor(Number(s.ev_range_from) / 100) * 100)));
   if (s.battery_from_kwh) params.set("bc", String(Math.max(10, Math.floor(Number(s.battery_from_kwh) / 10) * 10)));
   if (s.make || s.model) params.set("q", [s.make, s.model].filter(Boolean).join(" "));
+  const EQ_TO_MOBILE = {
+    4: "SUNROOF", 5: "MANUAL_CLIMATISATION", 6: "FULL_LEATHER", 11: "FOUR_WHEEL_DRIVE",
+    13: "ELECTRIC_WINDOWS", 15: "ALLOY_WHEELS", 16: "ELECTRIC_ADJUSTABLE_SEATS",
+    20: "TRAILER_COUPLING", 23: "NAVIGATION_SYSTEM", 27: "ROOF_RAILS",
+    30: "AUTOMATIC_CLIMATISATION", 34: "ELECTRIC_HEATED_SEATS", 38: "CRUISE_CONTROL",
+    39: "XENON_HEADLIGHTS", 40: "PARKING_ASSISTANTS", 50: "PANORAMIC_GLASS_ROOF",
+    52: "AUXILIARY_HEATING", 114: "MULTIFUNCTIONAL_WHEEL", 122: "BLUETOOTH",
+    123: "HEAD_UP_DISPLAY", 125: "ISOFIX", 130: "REAR_VIEW_CAM",
+    133: "ADAPTIVE_CRUISE_CONTROL", 135: "HEATED_WINDSHIELD", 136: "HEATED_STEERING_WHEEL",
+    138: "DAB_RADIO", 139: "ELECTRIC_TAILGATE", 140: "LED_HEADLIGHTS",
+    145: "MASSAGE_SEATS", 153: "KEYLESS_ENTRY", 154: "VENTILATED_SEATS",
+    155: "SOUND_SYSTEM", 157: "LANE_DEPARTURE_WARNING", 158: "BLIND_SPOT_MONITOR",
+    187: "CAMERA_360", 221: "APPLE_CARPLAY", 222: "ANDROID_AUTO",
+    223: "WIRELESS_CHARGING", 224: "DIGITAL_COCKPIT", 249: "HEAT_PUMP"
+  };
+  (s.equipment || []).forEach((eqId) => {
+    if (EQ_TO_MOBILE[eqId]) params.append("fe", EQ_TO_MOBILE[eqId]);
+  });
   return "https://suchen.mobile.de/fahrzeuge/search.html?" + params.toString();
 }
 

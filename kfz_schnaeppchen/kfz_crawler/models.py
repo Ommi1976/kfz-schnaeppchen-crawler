@@ -639,6 +639,16 @@ def matches_query(l: Listing, q: SearchQuery) -> bool:
         if l.country.upper() != q.country.upper():
             return False
 
+    # Ausstattungsfilter-Nachprüfung (insb. für Kleinanzeigen ohne native URL-Filter):
+    if getattr(q, "equipment", None):
+        from .portals.as24_taxonomy import EQUIPMENT_SYNONYMS
+        hay = f"{l.title or ''} {l.body or ''}".lower()
+        if l.portal.lower() in ("kleinanzeigen", "ebay_kleinanzeigen"):
+            for eq_id in q.equipment:
+                synonyms = EQUIPMENT_SYNONYMS.get(eq_id)
+                if synonyms and not any(syn in hay for syn in synonyms):
+                    return False
+
     # Ausstattung / Freitext: Stichwörter müssen ALLE vorkommen, Ausschluss keiner.
     hay = f"{l.title or ''} {l.body or ''}".lower()
     for term in getattr(q, "keywords", []) or []:

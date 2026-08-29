@@ -74,6 +74,7 @@ def test_mobile_de_url_builder():
         zip_code="10115",
         radius_km=100,
         ev_range_from=300,
+        equipment=[34, 133],
     )
     url = p._build_url(q, page=1)
     assert "suchen.mobile.de/fahrzeuge/search.html?" in url
@@ -84,6 +85,8 @@ def test_mobile_de_url_builder():
     assert "ambc=10115" in url
     assert "rad=100" in url
     assert "q=bmw+320" in url
+    assert "fe=ELECTRIC_HEATED_SEATS" in url
+    assert "fe=ADAPTIVE_CRUISE_CONTROL" in url
 
 
 def test_autouncle_url_builder():

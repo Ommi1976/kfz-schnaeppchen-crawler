@@ -235,3 +235,11 @@ def test_matches_query_filtering():
     # ID.3 mit 420 km und 58 kWh muss abgewiesen werden
     l_id3_small = Listing(portal="AS24", title="VW ID.3", url="http://x/id3", fuel="elektro", ev_range_km=420, battery_kwh=58.0)
     assert matches_query(l_id3_small, q_ev) is False
+
+    # 11. Ausstattungsfilter auf Kleinanzeigen (Text-Nachprüfung)
+    q_eq = SearchQuery(name="Mit Ausstattung", equipment=[34, 133])  # 34: Sitzheizung, 133: Abstandstempomat (ACC)
+    l_ka_match = Listing(portal="Kleinanzeigen", title="VW Golf 8 mit SHZ und ACC Abstandstempomat", body="Top Zustand", url="http://ka/1")
+    assert matches_query(l_ka_match, q_eq) is True
+
+    l_ka_missing = Listing(portal="Kleinanzeigen", title="VW Golf 8 Basis", body="Nur Radio und Klima", url="http://ka/2")
+    assert matches_query(l_ka_missing, q_eq) is False

@@ -65,6 +65,11 @@ class MobileDe(BasePortal):
             pass  # Europaweit / alle Länder
         else:
             params.append(f"cn={country}")
+        # Ausstattung (fe=<feature>)
+        from .as24_taxonomy import EQUIPMENT_TO_MOBILE_DE
+        for eq_id in (query.equipment or []):
+            if eq_id in EQUIPMENT_TO_MOBILE_DE:
+                params.append(f"fe={EQUIPMENT_TO_MOBILE_DE[eq_id]}")
         term = " ".join(p for p in (query.make, query.model) if p)
         if term:
             params.append(f"q={quote_plus(term)}")
