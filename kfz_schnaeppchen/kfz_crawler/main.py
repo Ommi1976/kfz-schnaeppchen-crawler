@@ -50,11 +50,25 @@ def _search_one_portal(cfg: Config, key: str, query: SearchQuery, store=None) ->
         # WICHTIG: hier NUR Text-Auswertung (billig). Die teure Bild-OCR läuft
         # asynchron im Hintergrund-Daemon (run_background_image_enrichment) und
         # blockiert damit weder den Suchlauf noch die CPU während der Suche.
+        matching = []
+        home_zip = getattr(cfg.settings, "home_zip", "") or None
         for listing in found:
             infer_listing_battery(listing, check_images=False)
             infer_listing_range(listing)
-        console.print(f"  [dim]{portal.name}: {len(found)} Treffer[/dim]")
-        return found
+            if home_zip:
+                try:
+                    infer_listing_details(listing, home_zip)
+                except Exception:
+                    pass
+            if matches_query(listing, query):
+                matching.append(listing)
+                if store and hasattr(store, "record_listing"):
+                    try:
+                        store.record_listing(query.name, listing)
+                    except Exception:
+                        pass
+        console.print(f"  [dim]{portal.name}: {len(matching)}/{len(found)} Treffer (passend/Roh)[/dim]")
+        return matching
     except PortalError as e:
         console.print(f"  [yellow]{e}[/yellow]")
     except Exception as e:  # pragma: no cover - robuster Lauf trotz Portalfehler

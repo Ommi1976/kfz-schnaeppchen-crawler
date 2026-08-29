@@ -133,7 +133,7 @@ class AutoScout24(BasePortal):
 
     def search(self, query: SearchQuery) -> List[Listing]:
         results: List[Listing] = []
-        max_limit = max(self.max_pages, 50)  # Bis zu 50 Seiten
+        max_limit = min(max(self.max_pages, 10), 20)  # Standard: 10 Seiten (~200 Neueste Inserate), max. 20
         for page in range(1, max_limit + 1):
             url = self._build_url(query, page)
             try:

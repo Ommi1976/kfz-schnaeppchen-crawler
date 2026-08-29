@@ -274,19 +274,29 @@ async def list_searches():
 
 @app.post("/api/searches", status_code=201)
 async def create_search(payload: dict = Body(...)):
-    return app.state.store.create_search(_validate_spec(payload))
+    spec = _validate_spec(payload)
+    created = app.state.store.create_search(spec)
+    query = SearchQuery.from_dict(spec)
+    app.state.store.purge_unmatching_deals(query.name, query)
+    return created
 
 
 @app.put("/api/searches/{search_id}")
 async def update_search(search_id: str, payload: dict = Body(...)):
-    updated = app.state.store.update_search(search_id, _validate_spec(payload))
+    spec = _validate_spec(payload)
+    updated = app.state.store.update_search(search_id, spec)
     if updated is None:
         raise HTTPException(status_code=404, detail="Suche nicht gefunden.")
+    query = SearchQuery.from_dict(spec)
+    app.state.store.purge_unmatching_deals(query.name, query)
     return updated
 
 
 @app.delete("/api/searches/{search_id}", status_code=204)
 async def delete_search(search_id: str):
+    s = app.state.store.get_search(search_id)
+    if s:
+        app.state.store.clear_deals(s.get("name"))
     if not app.state.store.delete_search(search_id):
         raise HTTPException(status_code=404, detail="Suche nicht gefunden.")
 
@@ -311,14 +321,23 @@ async def deals(search: str | None = None, limit: int = 400, deals_only: bool = 
     for row in rows:
         query = specs.get(row.get("search_name"))
         if query:
-            kwh = row.get("battery_kwh")
-            rng = row.get("ev_range_km")
-            if query.battery_from_kwh and query.ev_range_from:
-                if kwh is not None and rng is not None and kwh < query.battery_from_kwh and rng < query.ev_range_from:
-                    continue
-            elif query.battery_from_kwh and kwh is not None and kwh < query.battery_from_kwh:
-                continue
-            elif query.ev_range_from and rng is not None and rng < query.ev_range_from:
+            l = Listing(
+                portal=row.get("portal") or "",
+                title=row.get("title") or "",
+                url=row.get("url") or "",
+                price=row.get("price"),
+                year=row.get("year"),
+                mileage=row.get("mileage"),
+                fuel=row.get("fuel"),
+                power_ps=row.get("power_ps"),
+                battery_kwh=row.get("battery_kwh"),
+                battery_soh=row.get("battery_soh"),
+                ev_range_km=row.get("ev_range_km"),
+                location=row.get("location"),
+                body=row.get("body") or "",
+                country=row.get("country"),
+            )
+            if not matches_query(l, query):
                 continue
         filtered.append(row)
     rows = filtered
