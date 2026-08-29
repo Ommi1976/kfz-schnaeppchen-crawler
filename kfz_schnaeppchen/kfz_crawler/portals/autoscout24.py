@@ -130,7 +130,8 @@ class AutoScout24(BasePortal):
 
     def search(self, query: SearchQuery) -> List[Listing]:
         results: List[Listing] = []
-        max_limit = min(max(self.max_pages, 10), 20)  # Standard: 10 Seiten (~200 Neueste Inserate), max. 20
+        seen_ids = set()
+        max_limit = self.max_pages if (self.max_pages and self.max_pages > 0) else 100
         for page in range(1, max_limit + 1):
             url = self._build_url(query, page)
             try:
@@ -141,7 +142,16 @@ class AutoScout24(BasePortal):
             page_items = self._parse(resp.text)
             if not page_items:
                 break
-            results.extend(page_items)
+            new = 0
+            for it in page_items:
+                fid = it.fingerprint or it.url
+                if fid in seen_ids:
+                    continue
+                seen_ids.add(fid)
+                results.append(it)
+                new += 1
+            if new == 0:
+                break
         return results
 
     def _parse(self, html: str) -> List[Listing]:

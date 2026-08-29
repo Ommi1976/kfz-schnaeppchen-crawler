@@ -95,7 +95,7 @@ class MobileDe(BasePortal):
     def search(self, query: SearchQuery) -> List[Listing]:
         results: List[Listing] = []
         seen_ids = set()
-        max_limit = min(max(self.max_pages, 10), 20)  # Standard: 10 Seiten (~200 Neueste Inserate), max. 20
+        max_limit = self.max_pages if (self.max_pages and self.max_pages > 0) else 100
         for page in range(1, max_limit + 1):
             try:
                 html = self._fetch(self._build_url(query, page))
@@ -103,6 +103,8 @@ class MobileDe(BasePortal):
                 logger.warning("mobile.de: Fehler beim Abruf von Seite %d: %s", page, e)
                 break
             cards = self._parse_cards(html)
+            if not cards:
+                break
             new = 0
             for l in cards:
                 if l.raw_id and l.raw_id in seen_ids:
