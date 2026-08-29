@@ -174,10 +174,7 @@ function chips(spec) {
   if (spec.seller) c.push(label(spec.seller));
   if (spec.zip_code) c.push(`📍 ${spec.zip_code}${spec.radius_km ? ` (+${spec.radius_km} km)` : ""}`);
   if (spec.ev_range_from) c.push(`≥${spec.ev_range_from} km Reichw.`);
-  if (spec.battery_from_kwh) {
-    const fallback = spec.ev_range_from ? ` oder Reichw. ≥${spec.ev_range_from} km` : "";
-    c.push(`Akku ≥${spec.battery_from_kwh} kWh${fallback}`);
-  }
+  if (spec.battery_from_kwh) c.push(`Akku ≥${spec.battery_from_kwh} kWh`);
   if ((spec.equipment || []).length) c.push(`🔧 ${spec.equipment.length} Ausstattung`);
   (spec.keywords || []).forEach((k) => c.push("＋" + k));
   (spec.exclude_terms || []).forEach((k) => c.push("－" + k));

@@ -18,6 +18,11 @@ def test_extract_battery_kwh():
     assert extract_battery_kwh("Hyundai Ioniq 5 77.4 kWh AWD") == 77.4
     assert extract_battery_kwh("Golf 7 TDI 150 PS") is None
     assert extract_battery_kwh("Auto mit 500 kWh") is None  # Unplausibel
+    # Stromverbrauch darf NIEMALS als Akkugröße erkannt werden
+    assert extract_battery_kwh("153,0 kWh/100 km (komb.)") is None
+    assert extract_battery_kwh("Verbrauch: 17.5 kWh / 100 km") is None
+    assert extract_battery_kwh("14.2 kWh pro 100 km") is None
+    assert extract_battery_kwh("16 kWh/100km kombiniert") is None
 
 
 def test_extract_battery_soh():
@@ -209,16 +214,24 @@ def test_matches_query_filtering():
     q_damaged = SearchQuery(name="Schrottis", make="volkswagen", model="golf", include_damaged=True)
     assert matches_query(l6, q_damaged) is True
 
-    # 10. E-Auto Filter mit ODER-Logik (z.B. Akku >= 65 kWh ODER Reichweite >= 450 km)
+    # 10. E-Auto Filter: Strikte Prüfung aller gesetzten Kriterien (z.B. Akku >= 65 kWh & Reichweite >= 450 km)
     q_ev = SearchQuery(name="E-Autos", fuel="elektro", battery_from_kwh=65.0, ev_range_from=450)
-    # GWM mit 310 km Reichweite und ohne 65+ kWh Akku muss abgewiesen werden
+    # GWM mit 310 km Reichweite muss abgewiesen werden
     l_gwm = Listing(portal="AS24", title="GWM Sonstige", url="http://x/gwm", fuel="elektro", ev_range_km=310, battery_kwh=None)
     assert matches_query(l_gwm, q_ev) is False
+
+    # Mini mit 203 km Reichweite muss abgewiesen werden
+    l_mini = Listing(portal="AS24", title="MINI Cooper SE", url="http://x/mini", fuel="elektro", ev_range_km=203, battery_kwh=32.6)
+    assert matches_query(l_mini, q_ev) is False
+
+    # Audi e-tron 50 mit 282 km Reichweite (aber 71 kWh Akku) muss abgewiesen werden (Reichweite zu gering)
+    l_etron = Listing(portal="AS24", title="Audi e-tron 50", url="http://x/etron", fuel="elektro", ev_range_km=282, battery_kwh=71.0)
+    assert matches_query(l_etron, q_ev) is False
 
     # ID.4 mit 522 km und 82 kWh muss akzeptiert werden
     l_id4 = Listing(portal="AS24", title="VW ID.4", url="http://x/id4", fuel="elektro", ev_range_km=522, battery_kwh=82.0)
     assert matches_query(l_id4, q_ev) is True
 
-    # ID.3 mit 420 km aber 58 kWh (beides unter 450 km / 65 kWh) muss abgewiesen werden
+    # ID.3 mit 420 km und 58 kWh muss abgewiesen werden
     l_id3_small = Listing(portal="AS24", title="VW ID.3", url="http://x/id3", fuel="elektro", ev_range_km=420, battery_kwh=58.0)
     assert matches_query(l_id3_small, q_ev) is False
