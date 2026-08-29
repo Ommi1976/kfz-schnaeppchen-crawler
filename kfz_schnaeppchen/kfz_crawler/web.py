@@ -23,7 +23,7 @@ from . import __version__
 from .config import Config
 from .ha_run import build_config, load_options
 from .main import run_search
-from .models import SearchQuery, extract_battery_kwh, extract_ev_range_km
+from .models import SearchQuery, Listing, matches_query, extract_battery_kwh, extract_ev_range_km
 from .notify import notify_all
 from .portals import REGISTRY
 from .portals.as24_taxonomy import EQUIPMENT, EQUIPMENT_GROUPS
