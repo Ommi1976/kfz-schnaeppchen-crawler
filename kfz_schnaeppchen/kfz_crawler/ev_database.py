@@ -234,6 +234,15 @@ _EV_DATABASE: List[EVSpec] = [
     EVSpec("Smart", "#1", "66 kWh", 66.0, 62.0, 440, 200, 272, [
         re.compile(r"\bsmart\s*#1\b", re.I),
     ]),
+    EVSpec("Ford", "Mustang Mach-E", "Extended Range (98.7 kWh)", 98.7, 91.0, 600, 216, 294, [
+        re.compile(r"\bmach-?e\b.*?\b(?:er|extended|98|91|awd|4x)\b", re.I),
+    ]),
+    EVSpec("Ford", "Mustang Mach-E", "Standard Range (75.7 kWh)", 75.7, 70.0, 440, 198, 269, [
+        re.compile(r"\bmach-?e\b", re.I),
+    ]),
+    EVSpec("VinFast", "VF 8", "ECO / PLUS (87.7 kWh)", 87.7, 87.7, 471, 260, 353, [
+        re.compile(r"\bvf\s*8\b|\bvinfast\b", re.I),
+    ]),
     EVSpec("Smart", "EQ fortwo / forfour", "17.6 kWh", 17.6, 16.7, 135, 60, 82, [
         re.compile(r"\bsmart\s*eq\b|\bfortwo\s*eq\b|\bforfour\s*eq\b", re.I),
     ]),
@@ -285,9 +294,26 @@ _EV_DATABASE: List[EVSpec] = [
 ]
 
 
-def lookup_ev_spec(title: str | None, body: str | None = None) -> Optional[EVSpec]:
+def lookup_ev_spec(
+    title: str | None,
+    body: str | None = None,
+    power_ps: int | None = None,
+    power_kw: int | None = None,
+) -> Optional[EVSpec]:
     """Sucht in der internen EV-Referenzdatenbank nach dem passenden Modell."""
-    text = f"{title or ''} {body or ''}".strip()
+    parts = [str(title or ""), str(body or "")]
+    if power_ps:
+        parts.append(f"{power_ps} ps {power_ps}ps")
+        if not power_kw:
+            kw = round(power_ps / 1.35962)
+            parts.append(f"{kw} kw {kw}kw")
+    if power_kw:
+        parts.append(f"{power_kw} kw {power_kw}kw")
+        if not power_ps:
+            ps = round(power_kw * 1.35962)
+            parts.append(f"{ps} ps {ps}ps")
+
+    text = " ".join(parts).strip()
     if not text:
         return None
     for spec in _EV_DATABASE:

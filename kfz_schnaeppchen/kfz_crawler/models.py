@@ -177,6 +177,9 @@ _KNOWN_EV_CATALOG = [
     (re.compile(r"\bmini\b.*?\bcooper\s*e\b", re.I), 40.7, 305),
     (re.compile(r"\bcountryman\s*(?:se|all4)\b", re.I), 66.5, 433),
     (re.compile(r"\bcountryman\s*e\b", re.I), 66.5, 462),
+    (re.compile(r"\bmach-?e\b.*?\b(?:er|extended|98|91|awd|4x)\b", re.I), 98.7, 600),
+    (re.compile(r"\bmach-?e\b", re.I), 75.7, 440),
+    (re.compile(r"\bvf\s*8\b|\bvinfast\b", re.I), 87.7, 471),
     (re.compile(r"\bspring\b|\bdacia\s+spring\b", re.I), 26.8, 230),
 ]
 
@@ -202,7 +205,7 @@ def infer_listing_battery(listing: "Listing", check_images: bool = False) -> Non
     spec = None
     try:
         from kfz_crawler.ev_database import lookup_ev_spec
-        spec = lookup_ev_spec(listing.title, getattr(listing, "body", ""))
+        spec = lookup_ev_spec(listing.title, getattr(listing, "body", ""), power_ps=listing.power_ps)
     except Exception:
         pass
 
@@ -245,7 +248,7 @@ def infer_listing_range(listing: "Listing") -> None:
     spec = None
     try:
         from kfz_crawler.ev_database import lookup_ev_spec
-        spec = lookup_ev_spec(listing.title, getattr(listing, "body", ""))
+        spec = lookup_ev_spec(listing.title, getattr(listing, "body", ""), power_ps=listing.power_ps)
     except Exception:
         pass
 

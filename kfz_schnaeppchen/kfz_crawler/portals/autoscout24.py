@@ -78,9 +78,6 @@ class AutoScout24(BasePortal):
         doors = DOORS_TO_AS24.get(query.doors)
         if doors:
             params.append(f"doorfrom={doors[0]}&doorto={doors[1]}")
-        # E-Reichweite (erange) – server-seitig statt nur Nachfilter
-        if query.ev_range_from:
-            params.append(f"erange={query.ev_range_from}")
         # Schadstoffklasse (emclass=<id>)
         emc = EMCLASS_MAP.get(query.emission_class)
         if emc:
