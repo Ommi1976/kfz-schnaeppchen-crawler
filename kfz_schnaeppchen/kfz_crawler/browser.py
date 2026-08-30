@@ -265,6 +265,8 @@ def rendered_session(
     engine: str = "firefox",
     timeout_ms: int = 30000,
     request_delay_range: tuple[float, float] = (1.7, 3.2),
+    warmup_url: Optional[str] = "https://www.mobile.de/",
+    profile_dir: Optional[str | Path] = None,
 ) -> Iterator[Callable[..., str]]:
     """Öffnet eine wiederverwendbare Browser-Session für mehrere Seiten.
 
@@ -293,10 +295,11 @@ def rendered_session(
                 viewport={"width": 1440, "height": 900},
             )
             browser = None
+            session_profile = Path(profile_dir) if profile_dir else PROFILE_DIR
             if engine == "firefox" and not effective_proxy:
-                PROFILE_DIR.mkdir(parents=True, exist_ok=True)
+                session_profile.mkdir(parents=True, exist_ok=True)
                 context = engine_obj.launch_persistent_context(
-                    user_data_dir=str(PROFILE_DIR),
+                    user_data_dir=str(session_profile),
                     **launch_kwargs,
                     **context_kwargs,
                 )
@@ -310,11 +313,12 @@ def rendered_session(
             last_request_at = 0.0
 
             try:
-                try:
-                    page.goto("https://www.mobile.de/", wait_until="domcontentloaded", timeout=15000)
-                    last_request_at = time.monotonic()
-                except Exception:
-                    pass
+                if warmup_url:
+                    try:
+                        page.goto(warmup_url, wait_until="domcontentloaded", timeout=15000)
+                        last_request_at = time.monotonic()
+                    except Exception:
+                        pass
 
                 def fetch(
                     url: str,
@@ -322,6 +326,7 @@ def rendered_session(
                     render_delay: float = 0.8,
                     max_retries: int = 0,
                 ) -> str:
+                    nonlocal last_request_at
                     for attempt in range(max_retries + 1):
                         elapsed = time.monotonic() - last_request_at
                         polite_delay = random.uniform(*request_delay_range)

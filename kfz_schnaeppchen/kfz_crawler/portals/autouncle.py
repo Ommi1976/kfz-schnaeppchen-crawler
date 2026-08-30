@@ -9,14 +9,16 @@ JSON und fallen auf HTML-Karten zurück.
 from __future__ import annotations
 
 import json
+import os
 import re
+from pathlib import Path
 from typing import List, Optional
 from urllib.parse import quote
 
 from bs4 import BeautifulSoup
 
-from ..models import Listing, SearchQuery
-from .base import BasePortal
+from ..models import Listing, SearchQuery, extract_battery_soh, extract_battery_kwh, extract_ev_range_km
+from .base import BasePortal, PortalError, PortalPartialError
 
 FUEL_MAP = {"benzin": "petrol", "diesel": "diesel", "elektro": "electric", "hybrid": "hybrid"}
 
@@ -25,6 +27,17 @@ class AutoUncle(BasePortal):
     name = "AutoUncle"
     BASE = "https://www.autouncle.de"
     PREFERS_BROWSER = True   # ohne Browser 403
+
+    @property
+    def _use_browser(self) -> bool:
+        """AutoUncle wird immer mit einem echten Browser abgerufen.
+
+        Die öffentliche Seite antwortet auf reine HTTP-Anfragen regelmäßig mit
+        403. Der Portal-Schalter bleibt trotzdem erhalten: nur wenn AutoUncle
+        in der Konfiguration aktiviert ist, wird diese Klasse überhaupt
+        instanziiert.
+        """
+        return True
 
     def _build_url(self, query: SearchQuery, page: int) -> str:
         # AutoUncle filtert Marke/Modell PFADbasiert:
@@ -39,6 +52,34 @@ class AutoUncle(BasePortal):
         return f"{self.BASE}{path}?page={page}"
 
     def search(self, query: SearchQuery) -> List[Listing]:
+        # Eine konsistente Firefox-Session ist robuster als pro Seite ein neuer
+        # Browser. Das Profil bleibt lokal unter /data und enthält keine von
+        # uns abgefragten Zugangsdaten; eine bestehende AutoUncle-Anmeldung kann
+        # nur durch eine explizit auf dem HA-Host eingerichtete Session genutzt
+        # werden.
+        if self._use_browser:
+            try:
+                from ..browser import rendered_session
+                profile = os.environ.get("AUTO_UNCLE_PROFILE")
+                if not profile:
+                    profile = (
+                        "/data/autouncle_profile"
+                        if Path("/data").exists()
+                        else str(Path(__file__).parent.parent / "autouncle_profile")
+                    )
+                with rendered_session(
+                    proxy=self.proxy,
+                    engine="firefox",
+                    request_delay_range=(3.5, 6.5),
+                    warmup_url=f"{self.BASE}/",
+                    profile_dir=profile,
+                ) as fetch:
+                    return self._crawl_pages(query, fetch)
+            except PortalPartialError:
+                raise
+            except Exception as exc:
+                raise PortalError(f"AutoUncle: Browserabruf fehlgeschlagen – {exc}") from exc
+
         results: List[Listing] = []
         for page in range(1, self.max_pages + 1):
             url = self._build_url(query, page)
@@ -47,6 +88,41 @@ class AutoUncle(BasePortal):
             if not items:
                 break
             results.extend(items)
+        return results
+
+    def _crawl_pages(self, query: SearchQuery, fetcher) -> List[Listing]:
+        results: List[Listing] = []
+        seen_ids = set()
+        for page in range(1, max(1, self.max_pages) + 1):
+            try:
+                html = fetcher(
+                    self._build_url(query, page),
+                    wait_selector="article",
+                    render_delay=1.2,
+                    max_retries=0,
+                )
+            except Exception as exc:
+                if results:
+                    raise PortalPartialError(
+                        f"AutoUncle: {len(results)} Treffer bis Seite {page - 1}; "
+                        f"Seite {page} wurde nicht geladen – {exc}",
+                        listings=results,
+                        failed_page=page,
+                    ) from exc
+                raise
+            items = self._parse(html)
+            if not items:
+                break
+            new = 0
+            for item in items:
+                if item.raw_id and item.raw_id in seen_ids:
+                    continue
+                if item.raw_id:
+                    seen_ids.add(item.raw_id)
+                results.append(item)
+                new += 1
+            if not new:
+                break
         return results
 
     def _parse(self, html: str) -> List[Listing]:
@@ -79,6 +155,7 @@ class AutoUncle(BasePortal):
                     mileage=self._to_int(it.get("km") or it.get("mileage")),
                     fuel=it.get("fuel") or it.get("fuelType"),
                     location=it.get("city") or it.get("location"),
+                    body=json.dumps(it, ensure_ascii=False)[:6000],
                     raw_id=str(it.get("id") or ""),
                 )
             )
@@ -100,10 +177,24 @@ class AutoUncle(BasePortal):
             url = href if href.startswith("http") else self.BASE + href
             text = re.sub(r"\s+", " ", art.get_text(" ", strip=True))
 
+            # Der eigentliche Angebotslink ist stabiler und für den Nutzer
+            # nützlicher als die interne AutoUncle-Detail-URL.
+            offer = art.select_one("a[href*='/das_wiedersehen/']")
+            offer_href = offer.get("href", "") if offer else ""
+            offer_url = offer_href if offer_href.startswith("http") else (self.BASE + offer_href if offer_href else url)
+
+            heading = art.select_one("h2, h3, [data-testid*='title']")
+            subtitle = art.select_one("p")
+            card_title = heading.get_text(" ", strip=True) if heading else ""
+            if subtitle and subtitle is not heading:
+                subtext = subtitle.get_text(" ", strip=True)
+                if subtext and subtext.lower() not in card_title.lower():
+                    card_title = f"{card_title} {subtext}".strip()
+
             m_price = re.search(r"([\d][\d\.]{2,})\s*€", text)
             m_year = re.search(r"\b((?:19|20)\d{2})\b", text)
             m_km = re.search(r"([\d][\d\.]{2,})\s*km", text)
-            m_ps = re.search(r"(\d{2,4})\s*(?:PS|hp)\b", text)
+            m_ps = re.search(r"(?:\(|\s)(\d{2,4})\s*(?:PS|hp)\b", text, re.I)
             km = self._to_int(m_km.group(1)) if m_km else None
             if km and km > 500000:      # unplausibel -> verwerfen
                 km = None
@@ -114,21 +205,32 @@ class AutoUncle(BasePortal):
                     fuel = f
                     break
 
-            listings.append(
-                Listing(
+            listing = Listing(
                     portal=self.name,
-                    title=self._title_from_href(href) or a.get_text(" ", strip=True)[:120]
+                    title=card_title or self._title_from_href(href) or a.get_text(" ", strip=True)[:120]
                     or "AutoUncle-Inserat",
-                    url=url,
+                    url=offer_url,
                     price=self._to_int(m_price.group(1)) if m_price else None,
                     year=int(m_year.group(1)) if m_year else None,
                     mileage=km,
                     fuel=fuel,
                     power_ps=int(m_ps.group(1)) if m_ps else None,
+                    ev_range_km=extract_ev_range_km(text),
+                    battery_kwh=extract_battery_kwh(text),
+                    battery_soh=extract_battery_soh(text),
+                    location=self._extract_location(text),
+                    body=text,
                     raw_id=self._id_from_href(href),
                 )
-            )
+            from ..models import infer_listing_details
+            infer_listing_details(listing)
+            listings.append(listing)
         return listings
+
+    @staticmethod
+    def _extract_location(text: str) -> Optional[str]:
+        match = re.search(r"\b(\d{5})\s+([A-ZÄÖÜ][\wÄÖÜäöüß.\- ]{2,45})(?:,\s*[^\d]{2,35})?", text)
+        return f"{match.group(1)} {match.group(2).strip()}" if match else None
 
     @staticmethod
     def _id_from_href(href: str) -> str:

@@ -35,8 +35,9 @@ settings:
   # strukturiert zu prüfen (genauer, aber mehr Requests). true/false.
   verify_details: false
 
-  # #1: Playwright-Browser für geblockte Portale (mobile.de/AutoUncle/heycar)
-  # nutzen. Erfordert:  pip install playwright && playwright install chromium
+  # #1: Browser-Modus für geblockte Portale nutzen. AutoUncle verwendet seine
+  # eigene persistente Firefox-Session; mobile.de ebenfalls. Im Add-on-Image
+  # sind die Browser bereits enthalten.
   use_browser: false
 
 # --- Welche Portale aktiv sind ---

@@ -25,7 +25,7 @@ gemerkt – so bekommst du jedes Auto nur **einmal** gemeldet.
 | `max_pages` | Ergebnisseiten pro Portal & Suche. |
 | `suspicious_discount` | Ab wie viel **%** unter erwartetem Preis ein Inserat als verdächtig gilt und **nicht** gemeldet wird (z. B. `60`). |
 | `verify_details` | Kleinanzeigen-Detailseiten nachladen für exakte Kraftstoff/Getriebe/Leistung (genauer, mehr Requests). |
-| `use_browser` | Playwright-Browser für geblockte Portale nutzen. Umgeht AutoUncle-403 (dort aber dünne Liste), **nicht** mobile.de. Im Standard-Add-on-Image nicht enthalten. |
+| `use_browser` | Browser-Modus für Portale, die ihn unterstützen. AutoUncle nutzt den Browser unabhängig von dieser Option; mobile.de nutzt seine eigene Firefox-Session. |
 | `portals` | Aktive Portale: `autoscout24`, `kleinanzeigen`, `autouncle`, `mobile_de`, `heycar`. |
 | `searches` | Deine Suchen (siehe unten). |
 | `notify_persistent` | Persistente HA-Benachrichtigung bei neuen Schnäppchen. |
@@ -117,15 +117,24 @@ nicht nötig – das Add-on ruft die Dienste direkt auf.
   oder mit Rabatt ≥ `suspicious_discount` werden unterdrückt (im Log gezählt).
 
 ## Hinweise & Grenzen
-- **Bot-Schutz:** `mobile_de` liefert **HTTP 403** (DataDome – auch mit Browser).
-  `autouncle` ist ohne Browser 403; mit `use_browser` erreichbar, liefert aber
-  nur wenige vorgerenderte Angebote. `heycar` zeigt unter hey.car inzwischen
-  britische Inhalte und ist für DE nicht nutzbar. Verlässlich sind
-  **`autoscout24`** und **`kleinanzeigen`** (Standard). Ein blockiertes Portal
-  stoppt die anderen **nicht**.
-- **Browser-Modus (`use_browser`, #1):** benötigt Playwright + Chromium. Im
-  schlanken Standard-Add-on-Image nicht enthalten; primär für den
-  Standalone-Betrieb (`pip install -r requirements-browser.txt && playwright install chromium`).
+- **AutoUncle:** wird als zusätzlicher Discovery-Kanal über eine persistente
+  Firefox-Session abgefragt. Sichtbare Angebotskarten werden in URL, Preis, EZ,
+  km, Leistung, Reichweite, Akkuangabe und Standort normalisiert. AutoUncle
+  ist nicht als alleinige Quelle vorgesehen.
+- **Bot-Schutz:** `mobile_de` kann trotz Firefox-Session durch Akamai/DataDome
+  blockiert werden. Bestätigte Treffer bleiben dann erhalten und das Portal
+  erhält eine Schutzpause. `autouncle` wird bei einem Block ebenfalls isoliert;
+  die übrigen Portale laufen weiter. `heycar` zeigt unter hey.car inzwischen
+  britische Inhalte und ist für DE nicht nutzbar.
+- **Browser-Modus (`use_browser`, #1):** Das Add-on-Image enthält Playwright
+  sowie Chromium und Firefox. Eine AutoUncle-/mobile.de-Anmeldung aus einem
+  anderen Browser wird nicht automatisch übernommen. Für mobile.de kann die
+  bestehende Cookie-Synchronisierung genutzt werden; Zugangsdaten werden nicht
+  im Add-on gespeichert.
+- **Konten und Suchagenten:** Ein mobile.de-Konto erlaubt gespeicherte Suchen
+  und Benachrichtigungen, erweitert aber nicht automatisch den Datenzugriff des
+  Crawlers. Es kann die Session-Stabilität verbessern, ist aber keine API und
+  keine Garantie gegen Akamai-Blocks.
 - **Proxy/Tor (`proxy`):** hilft nur gegen IP-Rate-Limits, **nicht** gegen die
   403-Blocks. Für Tor z. B. `socks5h://127.0.0.1:9050`.
 - **Selektor-Änderungen:** Portale ändern regelmäßig ihr HTML/JSON. Liefert

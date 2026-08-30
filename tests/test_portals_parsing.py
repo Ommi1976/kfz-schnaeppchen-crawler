@@ -5,6 +5,7 @@ from kfz_crawler.models import Listing, SearchQuery
 from kfz_crawler.portals.autoscout24 import AutoScout24
 from kfz_crawler.portals.kleinanzeigen import Kleinanzeigen
 from kfz_crawler.portals.mobile_de import MobileDe
+from kfz_crawler.portals.autouncle import AutoUncle
 
 
 def test_autoscout24_parse_next_data():
@@ -117,3 +118,35 @@ def test_mobile_de_parse_details():
     det_dam = MobileDe._parse_details(text_damaged)
     assert det_dam["year"] == 2018
     assert det_dam["damaged"] is True
+
+
+def test_autouncle_parse_rendered_card_normalizes_ev_fields_and_offer_url():
+    sample_html = """
+    <article>
+      <a href="/de/d/226093647-gebraucht-2024-ford-explorer-286-ps">
+        <h3>Gebraucht (2024) Ford Explorer 286 PS | Guter Preis</h3>
+      </a>
+      <p>EV 77 kWh RWD AHK Fahrerass.-Paket</p>
+      <ul>
+        <li>Aug 2024</li><li>6.700 km</li>
+        <li>E-Auto (elektro)</li><li>602 km Reichweite</li>
+        <li>210 kW (286 PS)</li>
+      </ul>
+      <span>38.878 €</span>
+      <span>Unter dem Marktpreis 2.122 €</span>
+      <a href="/de/das_wiedersehen/autohausmoeller-de/226093647/398863180">Zum Angebot</a>
+      <div>99817 Eisenach, Thüringen</div>
+    </article>
+    """
+    listings = AutoUncle()._parse(sample_html)
+    assert len(listings) == 1
+    listing = listings[0]
+    assert listing.raw_id == "226093647"
+    assert listing.url.endswith("/398863180")
+    assert listing.price == 38878
+    assert listing.year == 2024
+    assert listing.mileage == 6700
+    assert listing.power_ps == 286
+    assert listing.ev_range_km == 602
+    assert listing.battery_kwh == 77.0
+    assert listing.location == "99817 Eisenach"
