@@ -227,6 +227,7 @@ def rendered_session(
     proxy: Optional[str] = None,
     engine: str = "chromium",
     timeout_ms: int = 30000,
+    request_delay_range: tuple[float, float] = (1.7, 3.2),
 ) -> Iterator[Callable[..., str]]:
     """Öffnet eine wiederverwendbare Browser-Session für mehrere Seiten.
 
@@ -256,7 +257,11 @@ def rendered_session(
                 viewport={"width": 1440, "height": 900},
                 user_agent=_matching_user_agent(browser),
             )
-            if MOBILE_STATE_PATH.exists():
+            state_is_fresh = (
+                MOBILE_STATE_PATH.exists()
+                and time.time() - MOBILE_STATE_PATH.stat().st_mtime <= 12 * 3600
+            )
+            if state_is_fresh:
                 context_kwargs["storage_state"] = str(MOBILE_STATE_PATH)
             try:
                 context = browser.new_context(**context_kwargs)
@@ -271,10 +276,19 @@ def rendered_session(
             last_request_at = 0.0
             had_success = False
             blocked_seen = False
+
+            def persist_accepted_state() -> None:
+                """Sichert nur den zuletzt nachweislich akzeptierten Zustand."""
+                try:
+                    MOBILE_STATE_PATH.parent.mkdir(parents=True, exist_ok=True)
+                    context.storage_state(path=str(MOBILE_STATE_PATH))
+                except Exception as exc:
+                    logger.debug("Browser-Sessionzustand konnte nicht gespeichert werden: %s", exc)
+
             try:
                 try:
                     page.goto("https://www.mobile.de/", wait_until="domcontentloaded", timeout=15000)
-                    time.sleep(1.0)
+                    last_request_at = time.monotonic()
                 except Exception:
                     pass
 
@@ -282,12 +296,12 @@ def rendered_session(
                     url: str,
                     wait_selector: Optional[str] = None,
                     render_delay: float = 0.8,
-                    max_retries: int = 2,
+                    max_retries: int = 0,
                 ) -> str:
                     nonlocal last_request_at, had_success, blocked_seen
                     for attempt in range(max_retries + 1):
                         elapsed = time.monotonic() - last_request_at
-                        polite_delay = random.uniform(1.7, 3.2)
+                        polite_delay = random.uniform(*request_delay_range)
                         if last_request_at and elapsed < polite_delay:
                             time.sleep(polite_delay - elapsed)
                         response = page.goto(url, wait_until="domcontentloaded", timeout=timeout_ms)
@@ -304,6 +318,9 @@ def rendered_session(
                         html = page.content()
                         if status not in (403, 429) and not _is_block_page(html):
                             had_success = True
+                            # Bei einem späteren Block bleibt so der Zustand der
+                            # letzten akzeptierten Seite für den nächsten Lauf.
+                            persist_accepted_state()
                             return html
                         blocked_seen = True
                         if attempt < max_retries:
@@ -320,11 +337,7 @@ def rendered_session(
                 yield fetch
             finally:
                 if had_success and not blocked_seen:
-                    try:
-                        MOBILE_STATE_PATH.parent.mkdir(parents=True, exist_ok=True)
-                        context.storage_state(path=str(MOBILE_STATE_PATH))
-                    except Exception as exc:
-                        logger.debug("Browser-Sessionzustand konnte nicht gespeichert werden: %s", exc)
+                    persist_accepted_state()
                 page.close()
                 context.close()
                 browser.close()

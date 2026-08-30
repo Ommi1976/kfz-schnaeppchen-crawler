@@ -140,3 +140,15 @@ def test_portal_health_and_failed_run_marks_stale(store):
     assert health["status"] == "blocked"
     assert health["error"] == "HTTP 429"
     assert store.list_deals()[0]["is_stale"] == 1
+
+
+def test_mobile_portal_cooldown_after_block_and_partial(store):
+    store.record_portal_run("EV-Suche", "mobile.de", "blocked", error="HTTP 403")
+    assert store.portal_cooldown_remaining("EV-Suche", "mobile.de") > 2.9 * 3600
+
+    store.record_portal_run("EV-Suche", "mobile.de", "partial", raw_count=20)
+    remaining = store.portal_cooldown_remaining("EV-Suche", "mobile.de")
+    assert 89 * 60 < remaining <= 90 * 60
+
+    store.record_portal_run("EV-Suche", "mobile.de", "ok", raw_count=159)
+    assert store.portal_cooldown_remaining("EV-Suche", "mobile.de") == 0

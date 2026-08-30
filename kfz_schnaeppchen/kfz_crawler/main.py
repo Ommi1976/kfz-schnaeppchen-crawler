@@ -25,7 +25,7 @@ from .models import (
 )
 from .notify import notify_all
 from .portals import REGISTRY
-from .portals.base import PortalError
+from .portals.base import PortalError, PortalPartialError
 from .storage import SeenStore
 
 console = Console()
@@ -48,6 +48,13 @@ def _search_one_portal(cfg: Config, key: str, query: SearchQuery, store=None) ->
     if portal_cls is None:
         console.print(f"[yellow]Unbekanntes Portal in config: {key}[/yellow]")
         return PortalSearchResult(key, status="error", error="Unbekanntes Portal")
+    if key == "mobile_de" and store and hasattr(store, "portal_cooldown_remaining"):
+        remaining = store.portal_cooldown_remaining(query.name, portal_cls.name)
+        if remaining > 0:
+            minutes = max(1, int((remaining + 59) // 60))
+            message = f"Schutzpause aktiv, neuer Versuch in ca. {minutes} min"
+            console.print(f"  [yellow]{portal_cls.name}: {message}[/yellow]")
+            return PortalSearchResult(portal_cls.name, status="cooldown", error=message)
     portal = portal_cls(
         request_delay=cfg.settings.request_delay,
         max_pages=cfg.settings.max_pages,
@@ -55,10 +62,18 @@ def _search_one_portal(cfg: Config, key: str, query: SearchQuery, store=None) ->
         render=cfg.settings.use_browser,
     )
     try:
-        found = portal.search(query)
+        result_status = "ok"
+        result_error = ""
+        try:
+            found = portal.search(query)
+        except PortalPartialError as exc:
+            found = exc.listings
+            result_status = "partial"
+            result_error = str(exc)
+            console.print(f"  [yellow]{exc}[/yellow]")
         # Homogenisierung: Felder, die die Trefferliste nicht liefert, per
         # Detailseite nachladen (verify_details erzwingt zusätzlich via force).
-        if hasattr(portal, "enrich"):
+        if result_status == "ok" and hasattr(portal, "enrich"):
             found = portal.enrich(found, query, force=cfg.settings.verify_details)
         # Viele Portale liefern die Akku-Kapazität nur im Titel (z. B. "62 kWh").
         # WICHTIG: hier NUR Text-Auswertung (billig). Die teure Bild-OCR läuft
@@ -114,6 +129,8 @@ def _search_one_portal(cfg: Config, key: str, query: SearchQuery, store=None) ->
             portal.name,
             matching,
             raw_count=len(found),
+            status=result_status,
+            error=result_error,
             exclusions=dict(exclusions),
         )
     except PortalError as e:
@@ -143,7 +160,7 @@ def run_search(cfg: Config, query: SearchQuery, store: SeenStore) -> List[Listin
             portal_result = fut.result()
             portal_results[portal_result.portal_name] = portal_result
             all_listings.extend(portal_result.listings)
-            if hasattr(store, "record_portal_run"):
+            if portal_result.status != "cooldown" and hasattr(store, "record_portal_run"):
                 store.record_portal_run(
                     query.name,
                     portal_result.portal_name,
@@ -237,7 +254,7 @@ def run_search(cfg: Config, query: SearchQuery, store: SeenStore) -> List[Listin
     if hasattr(store, "sync_active_deals"):
         store.sync_active_deals(query.name, portal_active_fps)
     for portal_name, portal_result in portal_results.items():
-        if portal_result.status != "ok" or not portal_result.listings:
+        if portal_result.status in {"blocked", "error"}:
             if hasattr(store, "mark_portal_stale"):
                 store.mark_portal_stale(query.name, portal_name)
     if hasattr(store, "purge_unmatching_deals"):

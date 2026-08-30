@@ -32,6 +32,20 @@ class PortalError(Exception):
     """Wird geworfen, wenn ein Portal nicht abgefragt werden kann (z. B. Block)."""
 
 
+class PortalPartialError(PortalError):
+    """Ein Portal lieferte verwertbare Treffer, brach aber später ab.
+
+    Die bereits geladenen Inserate dürfen angezeigt werden. Der Aufrufer darf
+    mit ihnen jedoch keinen Vollabgleich durchführen, weil nicht geladene
+    Folgeseiten sonst fälschlich als gelöschte Inserate gelten würden.
+    """
+
+    def __init__(self, message: str, listings: list, failed_page: int | None = None):
+        super().__init__(message)
+        self.listings = listings
+        self.failed_page = failed_page
+
+
 class CookiesExpired(PortalError):
     """Portal braucht (neue) Session-Cookies – z. B. mobile.de nach Ablauf."""
 

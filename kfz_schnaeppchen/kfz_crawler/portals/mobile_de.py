@@ -16,7 +16,7 @@ from urllib.parse import quote_plus
 from bs4 import BeautifulSoup
 
 from ..models import Listing, SearchQuery
-from .base import BasePortal, PortalError
+from .base import BasePortal, PortalError, PortalPartialError
 
 logger = logging.getLogger(__name__)
 
@@ -104,15 +104,22 @@ class MobileDe(BasePortal):
                 # Gespeicherte Akamai-Cookies stammen typischerweise aus einem
                 # Chromium-Browser; ohne solche Cookies ist Gecko unauffälliger.
                 engine = "chromium" if get_mobile_cookies(max_age_seconds=12 * 3600) else "firefox"
-                with rendered_session(proxy=self.proxy, engine=engine) as session_fetch:
+                with rendered_session(
+                    proxy=self.proxy,
+                    engine=engine,
+                    request_delay_range=(25.0, 40.0),
+                ) as session_fetch:
                     return self._crawl_pages(
                         query,
                         lambda url: session_fetch(
                             url,
                             wait_selector="article a[href*='details.html']",
                             render_delay=0.8,
+                            max_retries=0,
                         ),
                     )
+            except PortalPartialError:
+                raise
             except Exception as exc:
                 raise PortalError(f"mobile.de: Abruf fehlgeschlagen – {exc}") from exc
         return self._crawl_pages(query, self._fetch)
@@ -129,8 +136,13 @@ class MobileDe(BasePortal):
             try:
                 html = fetcher(self._build_url(query, page))
             except Exception as e:
-                # Teilresultate sind gefährlich: Sie würden nicht geladene
-                # Folgeseiten als gelöschte Inserate erscheinen lassen.
+                if results:
+                    raise PortalPartialError(
+                        f"mobile.de: {len(results)} Treffer bis Seite {page - 1}; "
+                        f"Seite {page} wurde blockiert – {e}",
+                        listings=results,
+                        failed_page=page,
+                    ) from e
                 raise PortalError(f"mobile.de: Seite {page} konnte nicht vollständig geladen werden – {e}") from e
             cards = self._parse_cards(html)
             if not cards:

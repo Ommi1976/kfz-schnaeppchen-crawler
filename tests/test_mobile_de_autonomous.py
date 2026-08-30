@@ -2,6 +2,7 @@ import pytest
 from unittest.mock import patch
 from kfz_crawler.models import SearchQuery
 from kfz_crawler.portals.mobile_de import MobileDe
+from kfz_crawler.portals.base import PortalPartialError
 
 SAMPLE_MOBILE_HTML = """
 <html>
@@ -71,3 +72,19 @@ def test_mobile_de_location_extraction():
     assert E("Golf · 12.345 km · 90 kW · Privat 70173 Stuttgart") == "70173 Stuttgart"
     # Ohne PLZ: Fallback auf Stadttext (keine Distanz, aber Anzeige bleibt).
     assert E("Nur Berlin ohne PLZ") == "Nur Berlin ohne PLZ"
+
+
+def test_mobile_de_preserves_results_when_later_page_is_blocked():
+    def fetch_page(url):
+        page = int(url.split("pageNumber=")[1].split("&", 1)[0])
+        if page == 2:
+            raise RuntimeError("HTTP 403")
+        return SAMPLE_MOBILE_HTML
+
+    with patch("kfz_crawler.portals.mobile_de.MobileDe._fetch", side_effect=fetch_page):
+        with pytest.raises(PortalPartialError) as raised:
+            MobileDe(max_pages=5).search(SearchQuery(name="Teilabruf"))
+
+    assert raised.value.failed_page == 2
+    assert len(raised.value.listings) == 1
+    assert raised.value.listings[0].raw_id == "11223344"

@@ -666,6 +666,31 @@ class SeenStore:
             )
             self.conn.commit()
 
+    def portal_cooldown_remaining(
+        self,
+        search_name: str,
+        portal: str,
+        blocked_seconds: float = 3 * 3600,
+        partial_seconds: float = 90 * 60,
+    ) -> float:
+        """Restzeit bis zu einem sicheren erneuten Portalabruf.
+
+        Ein Block wird nicht in jedem geplanten Suchlauf erneut provoziert.
+        Erfolgreiche Läufe und unbekannte Zustände haben keine Sperrzeit.
+        """
+        with self._lock:
+            row = self.conn.execute(
+                "SELECT status, last_run FROM portal_health WHERE search_name = ? AND portal = ?",
+                (search_name, portal),
+            ).fetchone()
+        if not row or not row["last_run"]:
+            return 0.0
+        cooldown = {
+            "blocked": blocked_seconds,
+            "partial": partial_seconds,
+        }.get(row["status"], 0.0)
+        return max(0.0, float(row["last_run"]) + cooldown - time.time())
+
     def list_portal_health(self, search_name: Optional[str] = None) -> List[dict]:
         with self._lock:
             if search_name:
