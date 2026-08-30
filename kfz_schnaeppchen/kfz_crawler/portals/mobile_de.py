@@ -11,7 +11,7 @@ from __future__ import annotations
 import logging
 import re
 from typing import List, Optional
-from urllib.parse import quote_plus
+from urllib.parse import parse_qs, quote_plus, urlparse
 
 from bs4 import BeautifulSoup
 
@@ -183,27 +183,58 @@ class MobileDe(BasePortal):
     def _parse_cards(self, html: str) -> List[Listing]:
         soup = BeautifulSoup(html, "lxml")
         listings: List[Listing] = []
-        for art in soup.select("article"):
-            link = art.select_one("a[href*='details.html']")
+        # mobile.de ändert gelegentlich die data-testid-Werte, die
+        # Kartenstruktur und der Detail-Link bleiben dagegen stabil.
+        cards = soup.select(
+            "article, [data-testid*='listing-card'], [data-testid*='listing-result']"
+        )
+        for art in cards:
+            link = art.select_one(
+                "a[href*='details.html'], a[href*='/auto-inserat/'], "
+                "a[href*='/fahrzeuge/']"
+            )
             if not link:
                 continue
             href = link.get("href", "")
             url = href if href.startswith("http") else "https://suchen.mobile.de" + href
-            m = re.search(r"id=(\d+)", href)
-            lid = m.group(1) if m else None
-            tnode = (art.select_one("[data-testid$='-title']")
-                     or art.select_one("[data-testid='listing-title-card-view']"))
-            title = (re.sub(r"^Gesponsert\s*", "", tnode.get_text(" ", strip=True))
-                     if tnode else "mobile.de-Inserat")
-            pnode = (art.select_one("[data-testid='main-price-label']")
-                     or art.select_one("[data-testid='price-label']"))
-            price = self._to_int(pnode.get_text() if pnode else "")
-            dnode = (art.select_one("[data-testid='listing-details-attributes']")
-                     or art.select_one("[data-testid='listing-details']"))
-            det = self._parse_details(dnode.get_text(" ", strip=True) if dnode else "")
-            snode = art.select_one("[data-testid='seller-info']")
+            lid = self._listing_id(href)
+            tnode = art.select_one(
+                "[data-testid$='-title'], [data-testid*='title'], h2, h3, "
+                "[class*='title']"
+            )
+            title = self._clean_title(
+                tnode.get_text(" ", strip=True) if tnode else ""
+            )
             full_card_text = art.get_text(" ", strip=True)
-            imgs = [img.get("src") or img.get("data-src") for img in art.select("img[src], img[data-src]")]
+            if not title:
+                title = self._clean_title(link.get("aria-label", ""))
+            pnode = art.select_one(
+                "[data-testid='main-price-label'], [data-testid='price-label'], "
+                "[data-testid*='price'], [class*='price']"
+            )
+            price = self._to_int(pnode.get_text() if pnode else "")
+            if price is None:
+                price = self._extract_price(full_card_text)
+            dnode = art.select_one(
+                "[data-testid='listing-details-attributes'], "
+                "[data-testid='listing-details'], [data-testid*='attributes'], "
+                "[class*='details']"
+            )
+            details_text = dnode.get_text(" ", strip=True) if dnode else full_card_text
+            det = self._parse_details(details_text)
+            # Einzelne Werte liegen je nach mobile.de-Layout außerhalb des
+            # Detail-Containers. Mit dem Kartentext werden diese nachgezogen,
+            # ohne bereits sicher erkannte Werte zu überschreiben.
+            if any(v is None for k, v in det.items() if k in ("year", "mileage", "power_ps", "fuel")):
+                fallback = self._parse_details(full_card_text)
+                for key in ("year", "mileage", "power_ps", "fuel"):
+                    if det[key] is None:
+                        det[key] = fallback[key]
+            snode = art.select_one("[data-testid='seller-info']")
+            imgs = [
+                img.get("src") or img.get("data-src") or img.get("data-lazy-src")
+                for img in art.select("img[src], img[data-src], img[data-lazy-src]")
+            ]
             image_urls = [u for u in imgs if u and u.startswith("http") and not u.endswith(".svg")]
             seller_txt = snode.get_text(" ", strip=True) if snode else ""
             # PLZ steht bei mobile.de oft HINTER dem langen Händlernamen – daher
@@ -211,7 +242,7 @@ class MobileDe(BasePortal):
             loc = self._extract_location(seller_txt, full_card_text)
             l = Listing(
                 portal=self.name,
-                title=title[:120],
+                title=(title or "mobile.de-Inserat")[:120],
                 url=url,
                 price=price,
                 year=det["year"],
@@ -229,28 +260,50 @@ class MobileDe(BasePortal):
         return listings
 
     @staticmethod
+    def _clean_title(value: str) -> str:
+        return re.sub(r"^(?:Gesponsert|Anzeige)\s*[:|-]?\s*", "", value or "", flags=re.I).strip()
+
+    @staticmethod
+    def _listing_id(href: str) -> Optional[str]:
+        query_id = parse_qs(urlparse(href).query).get("id", [None])[0]
+        if query_id and str(query_id).isdigit():
+            return str(query_id)
+        match = re.search(r"(?:/|[-_])([0-9]{7,})(?:\D|$)", href or "")
+        return match.group(1) if match else None
+
+    @staticmethod
+    def _extract_price(text: str) -> Optional[int]:
+        # Nur Eurobeträge verwenden; Monatsraten ohne Eurobetrag werden so
+        # nicht versehentlich als Kaufpreis gespeichert.
+        match = re.search(r"\b(\d{1,3}(?:[.\s]\d{3})+|\d{4,6})\s*€", text or "")
+        return MobileDe._to_int(match.group(1)) if match else None
+
+    @staticmethod
     def _parse_details(text: str) -> dict:
-        """Parst z. B. 'Unfallfrei • EZ 01/2019 • 195.500 km • 85 kW (116 PS) • Diesel'."""
+        """Parst die wechselnden Kurzangaben in einer mobile.de-Karte."""
         out = {"year": None, "mileage": None, "power_ps": None, "fuel": None, "damaged": False}
         if not text:
             return out
         t = text.replace("\xa0", " ")
-        m = re.search(r"EZ\s*\d{2}/(\d{4})", t)
+        m = re.search(
+            r"(?:\bEZ\b|erstzulassung|baujahr)\s*[:.]?\s*(?:\d{1,2}[./])?(\d{4})",
+            t,
+            re.I,
+        )
         if m:
             out["year"] = int(m.group(1))
-        m = re.search(r"([\d.]+)\s*km", t)
+        m = re.search(r"([\d.\s]+)\s*(?:km|kilometer)\b", t, re.I)
         if m:
             out["mileage"] = MobileDe._to_int(m.group(1))
-        m = re.search(r"\((\d{2,4})\s*PS\)", t)
+        m = re.search(r"(\d{2,4})\s*kW\s*(?:\(\s*(\d{2,4})\s*PS\s*\))?", t, re.I)
         if m:
-            out["power_ps"] = int(m.group(1))
+            out["power_ps"] = int(m.group(2) or round(int(m.group(1)) * PS_TO_KW))
+        else:
+            m = re.search(r"(?:\(|\b)(\d{2,4})\s*PS\b", t, re.I)
+            if m:
+                out["power_ps"] = int(m.group(1))
         low = t.lower()
-        for f in ("elektro", "diesel", "benzin", "hybrid"):
-            if f in low:
-                out["fuel"] = f
-                break
-        if out["fuel"] is None and ("autogas" in low or "lpg" in low):
-            out["fuel"] = "lpg"
+        out["fuel"] = MobileDe._norm_fuel(low)
         if "unfallfahrzeug" in low or ("unfall" in low and "unfallfrei" not in low) or ("beschädigt" in low and "unbeschädigt" not in low):
             out["damaged"] = True
         return out
@@ -271,6 +324,8 @@ class MobileDe(BasePortal):
         if not value:
             return None
         v = str(value).lower()
+        if any(token in v for token in ("elektro", "elektrisch", "electric", "bev", "stromer")):
+            return "elektro"
         for token in ("elektro", "diesel", "benzin", "hybrid"):
             if token in v:
                 return token

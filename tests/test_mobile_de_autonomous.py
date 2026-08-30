@@ -74,6 +74,30 @@ def test_mobile_de_location_extraction():
     assert E("Nur Berlin ohne PLZ") == "Nur Berlin ohne PLZ"
 
 
+def test_mobile_de_parser_accepts_layout_variants_and_fallback_fields():
+    html = """
+    <article class="listing-card">
+        <a href="/auto-inserat/car/12345678.html">
+            <h3>Volkswagen ID.4 Pro Performance</h3>
+        </a>
+        <div class="price">27.490 €</div>
+        <div class="details">Erstzulassung: 02/2022 · 73 835 km · 110 kW · Vollelektrisch</div>
+        <div class="seller">Autohaus Beispiel, DE-66111 Saarbrücken</div>
+    </article>
+    """
+
+    listing = MobileDe()._parse_cards(html)[0]
+
+    assert listing.raw_id == "12345678"
+    assert listing.title == "Volkswagen ID.4 Pro Performance"
+    assert listing.price == 27490
+    assert listing.year == 2022
+    assert listing.mileage == 73835
+    assert listing.power_ps == 150
+    assert listing.fuel == "elektro"
+    assert listing.location == "66111 Saarbrücken"
+
+
 def test_mobile_de_preserves_results_when_later_page_is_blocked():
     def fetch_page(url):
         page = int(url.split("pageNumber=")[1].split("&", 1)[0])

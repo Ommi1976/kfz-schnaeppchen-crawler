@@ -150,3 +150,50 @@ def test_autouncle_parse_rendered_card_normalizes_ev_fields_and_offer_url():
     assert listing.ev_range_km == 602
     assert listing.battery_kwh == 77.0
     assert listing.location == "99817 Eisenach"
+
+
+def test_autouncle_search_uses_broader_filter_when_original_is_empty():
+    query = SearchQuery(
+        name="EV", fuel="elektro", price_to=30000, mileage_to=75000,
+        year_from=2022, ev_range_from=450, power_from=150,
+    )
+    portal = AutoUncle()
+    calls = []
+
+    def crawl(variant, fetcher):
+        calls.append(variant)
+        if len(calls) == 1:
+            return []
+        return [Listing(
+            portal="AutoUncle", title="VW ID.4 Pro", url="https://autouncle/1",
+            price=29900, year=2022, mileage=74000, fuel="elektro",
+            power_ps=150, ev_range_km=450,
+        )]
+
+    portal._crawl_pages = crawl
+    listings = portal._search_variants(query, lambda url: "")
+
+    assert len(listings) == 1
+    assert len(calls) == 2
+    assert calls[1].price_to == 35000
+    assert calls[1].mileage_to == 100000
+    assert calls[1].year_from == 2021
+    assert calls[1].ev_range_from == 400
+    assert calls[1].power_from == 125
+
+
+def test_autouncle_url_contains_search_filters():
+    query = SearchQuery(
+        name="EV", fuel="elektro", make="vw", model="id.4", price_to=30000,
+        mileage_to=75000, year_from=2022, ev_range_from=450, power_from=150,
+        equipment=[133, 34],
+    )
+    url = AutoUncle()._build_url(query, page=1)
+
+    assert "mp-unter-30000-euro" in url
+    assert "s%5Bmax_km%5D=75000" in url
+    assert "s%5Bmin_year%5D=2022" in url
+    assert "s%5Bmin_electric_drive_range%5D=450" in url
+    assert "s%5Bmin_hp%5D=150" in url
+    assert "s%5Bhas_distance_control%5D=true" in url
+    assert "s%5Bhas_seat_heat%5D=true" in url

@@ -11,13 +11,21 @@ from __future__ import annotations
 import json
 import os
 import re
+from dataclasses import replace
 from pathlib import Path
 from typing import List, Optional
-from urllib.parse import quote
+from urllib.parse import quote, urlencode
 
 from bs4 import BeautifulSoup
 
-from ..models import Listing, SearchQuery, extract_battery_soh, extract_battery_kwh, extract_ev_range_km
+from ..models import (
+    Listing,
+    SearchQuery,
+    evaluate_query,
+    extract_battery_soh,
+    extract_battery_kwh,
+    extract_ev_range_km,
+)
 from .base import BasePortal, PortalError, PortalPartialError
 
 FUEL_MAP = {"benzin": "petrol", "diesel": "diesel", "elektro": "electric", "hybrid": "hybrid"}
@@ -54,7 +62,60 @@ class AutoUncle(BasePortal):
             path += f"/{quote(query.make)}"
             if query.model:
                 path += f"/{quote(query.model)}"
-        return f"{self.BASE}{path}?page={page}"
+        if query.price_to is not None:
+            path += f"/mp-unter-{int(query.price_to)}-euro"
+
+        params = [("page", page), ("s[order_by]", "price_asc")]
+        if query.make:
+            make = "VW" if query.make in ("vw", "volkswagen") else query.make.title()
+            params.append(("s[brands_models][][brand]", make))
+        if query.model:
+            params.append(("s[brands_models][][model]", query.model.title()))
+        if query.mileage_to is not None:
+            params.append(("s[max_km]", int(query.mileage_to)))
+        if query.year_from is not None:
+            params.append(("s[min_year]", int(query.year_from)))
+        if query.ev_range_from is not None:
+            params.append(("s[min_electric_drive_range]", int(query.ev_range_from)))
+        if query.power_from is not None:
+            params.append(("s[min_hp]", int(query.power_from)))
+        if query.equipment:
+            # Die beiden AutoUncle-Optionen existieren in der öffentlichen
+            # Suche; alle übrigen Ausstattungen werden weiterhin lokal geprüft.
+            if 133 in query.equipment or 38 in query.equipment:
+                params.append(("s[has_distance_control]", "true"))
+            if 34 in query.equipment:
+                params.append(("s[has_seat_heat]", "true"))
+        return f"{self.BASE}{path}?{urlencode(params, doseq=True)}"
+
+    @staticmethod
+    def _query_variants(query: SearchQuery) -> List[SearchQuery]:
+        """Erzeugt zwei kontrollierte, portalverträgliche Suchhüllen.
+
+        AutoUncle bietet nur grobe Filterstufen und kann bei einer zu engen
+        Kombination eine leere Liste zurückgeben. Die zweite/ dritte Hülle
+        erweitert daher obere Grenzen nach oben und Mindestwerte nach unten.
+        Die eigentliche Entscheidung bleibt danach immer der ursprüngliche
+        lokale Suchfilter.
+        """
+        variants = [query]
+        for step in (1, 2):
+            def lower(value, amount):
+                return None if value is None else max(0, value - amount * step)
+
+            def higher(value, amount):
+                return None if value is None else value + amount * step
+
+            variants.append(replace(
+                query,
+                price_to=higher(query.price_to, 5000),
+                mileage_to=higher(query.mileage_to, 25000),
+                year_from=lower(query.year_from, 1),
+                ev_range_from=lower(query.ev_range_from, 50),
+                power_from=lower(query.power_from, 25),
+                battery_from_kwh=lower(query.battery_from_kwh, 5),
+            ))
+        return variants
 
     def search(self, query: SearchQuery) -> List[Listing]:
         # Eine konsistente Firefox-Session ist robuster als pro Seite ein neuer
@@ -79,20 +140,29 @@ class AutoUncle(BasePortal):
                     warmup_url=f"{self.BASE}/",
                     profile_dir=profile,
                 ) as fetch:
-                    return self._crawl_pages(query, fetch)
+                    return self._search_variants(query, fetch)
             except PortalPartialError:
                 raise
             except Exception as exc:
                 raise PortalError(f"AutoUncle: Browserabruf fehlgeschlagen – {exc}") from exc
 
+        return self._search_variants(query, lambda url: self._get(url).text)
+
+    def _search_variants(self, query: SearchQuery, fetcher) -> List[Listing]:
         results: List[Listing] = []
-        for page in range(1, self.max_pages + 1):
-            url = self._build_url(query, page)
-            resp = self._get(url)
-            items = self._parse(resp.text)
-            if not items:
+        seen_ids = set()
+        for variant in self._query_variants(query):
+            items = self._crawl_pages(variant, fetcher)
+            for item in items:
+                key = item.raw_id or item.url
+                if key in seen_ids:
+                    continue
+                seen_ids.add(key)
+                results.append(item)
+            # Nur wenn die Originalkriterien wirklich keinen Treffer ergeben,
+            # wird die nächste größere Suchhülle abgerufen.
+            if any(evaluate_query(item, query).passed for item in results):
                 break
-            results.extend(items)
         return results
 
     def _crawl_pages(self, query: SearchQuery, fetcher) -> List[Listing]:
