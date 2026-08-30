@@ -95,6 +95,9 @@ def test_autouncle_url_builder():
     url = p._build_url(q, page=2)
     assert "/de/gebrauchtwagen/ford/focus?page=2" in url
 
+    ev_url = p._build_url(SearchQuery(name="EV", fuel="elektro"), page=1)
+    assert "/de/gebrauchtwagen/f-elektro?page=1" in ev_url
+
 
 def test_heycar_url_builder():
     p = Heycar()

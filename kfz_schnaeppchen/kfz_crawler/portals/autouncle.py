@@ -44,7 +44,11 @@ class AutoUncle(BasePortal):
         #   /de/gebrauchtwagen/<marke>[/<modell>]
         # Die weiteren Kriterien (Preis, Jahr, km, Kraftstoff) greifen über die
         # Query nicht zuverlässig und werden daher client-seitig nachgefiltert.
-        path = "/de/gebrauchtwagen"
+        # Für eine reine E-Auto-Suche gibt es eine eigene, deutlich ergiebigere
+        # Landingpage. Die allgemeine Auto-Seite enthält viele Verbrenner- und
+        # Neuwagen-Karten; dadurch kann eine korrekte Nachfilterung trotz vieler
+        # Rohkarten fälschlich bei null passenden Treffern landen.
+        path = "/de/gebrauchtwagen/f-elektro" if query.fuel == "elektro" and not query.make else "/de/gebrauchtwagen"
         if query.make:
             path += f"/{quote(query.make)}"
             if query.model:
