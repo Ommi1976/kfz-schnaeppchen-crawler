@@ -145,3 +145,20 @@ def test_dedupe_same_car():
     same_cars = [l for l in deduped if l.mileage == 85432]
     assert len(same_cars) == 1
     assert same_cars[0].price == 14500
+
+
+def test_dedupe_prefers_autouncle_url_for_same_car():
+    other = Listing(
+        portal="mobile.de", title="VW ID.4 Pro", url="http://mobile/1",
+        price=22000, year=2022, mileage=31000,
+    )
+    autouncle = Listing(
+        portal="AutoUncle", title="Volkswagen ID.4 Pro", url="http://autouncle/1",
+        price=22500, year=2022, mileage=31000,
+    )
+
+    deduped = dedupe([other, autouncle])
+
+    assert len(deduped) == 1
+    assert deduped[0].portal == "AutoUncle"
+    assert deduped[0].url == "http://autouncle/1"

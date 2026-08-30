@@ -3,6 +3,13 @@ const API = "api";
 let META = null;
 let statusCache = null;
 
+const PORTAL_LABELS = {
+  mobile_de: "mobile.de",
+  autoscout24: "AutoScout24",
+  kleinanzeigen: "Kleinanzeigen",
+  autouncle: "AutoUncle",
+};
+
 const LABELS = {
   "": "— egal —",
   benzin: "Benzin", diesel: "Diesel", elektro: "Elektro", hybrid: "Hybrid",
@@ -363,10 +370,6 @@ function renderDealsRows(deals) {
       ? `<div class="sub-info">${locBadge}${warrantyBadge}</div>`
       : "";
 
-    const unknown = d.unknown_fields_list || [];
-    const unknownBadge = unknown.length
-      ? `<span class="data-badge unknown" title="Nicht im Inserat vorhanden: ${escapeHtml(unknown.join(", "))}">? ${unknown.length} unbekannt</span>`
-      : "";
     const staleBadge = d.is_stale
       ? `<span class="data-badge stale" title="Das Portal konnte diesen Treffer im letzten Lauf nicht bestätigen">veraltet</span>`
       : "";
@@ -376,7 +379,7 @@ function renderDealsRows(deals) {
       <td><span class="portal-badge ${pcls}">${escapeHtml(d.portal || "")}</span></td>
       <td class="title">
         <div class="t-main">${escapeHtml(d.title || "")}</div>
-        ${subInfo}<div class="data-quality">${staleBadge}${unknownBadge}</div>
+        ${subInfo}<div class="data-quality">${staleBadge}</div>
         ${d.is_suspicious ? `<div class="reason">${escapeHtml(d.reasons || "")}</div>` : ""}
       </td>
       <td class="battery-col">${batteryCell}</td>
@@ -454,7 +457,19 @@ async function loadDeals() {
 function renderPortalFilters(counts, dealCount) {
   const box = document.getElementById("portal-filters");
   if (!box) return;
-  const portals = ["mobile.de", "AutoScout24", "Kleinanzeigen"];
+  // Die Konfiguration liefert technische Schlüssel (z. B. "autouncle"),
+  // die Trefferliste dagegen die Anzeigenamen. Beide Quellen zusammenführen,
+  // damit aktive Portale auch bei 0 Treffern sichtbar bleiben.
+  const activePortals = (statusCache?.portals_active || [])
+    .map((p) => PORTAL_LABELS[p] || p)
+    .filter(Boolean);
+  const configured = activePortals.length
+    ? activePortals
+    : Object.values(PORTAL_LABELS);
+  const portals = [...new Set([
+    ...configured,
+    ...Object.keys(counts || {}),
+  ])];
   let totalAll = 0;
   for (const k in counts) totalAll += counts[k];
 

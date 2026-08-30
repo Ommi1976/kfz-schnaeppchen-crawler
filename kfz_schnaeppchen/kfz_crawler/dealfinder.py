@@ -351,7 +351,13 @@ def dedupe(listings: List[Listing]) -> List[Listing]:
         lp, op = l.price or 0, other.price or 0
         close = lp and op and min(lp, op) >= 0.7 * max(lp, op)
         if close:
-            if lp and (op == 0 or lp < op):
+            # AutoUncle ist die portalübergreifende Quelle. Wenn dasselbe
+            # Fahrzeug dort ebenfalls gefunden wurde, bleibt deshalb immer
+            # der AutoUncle-Link erhalten – auch wenn ein anderes Portal den
+            # Preis geringfügig günstiger meldet.
+            if l.portal.lower() == "autouncle":
+                kept[i] = l
+            elif other.portal.lower() != "autouncle" and lp and (op == 0 or lp < op):
                 kept[i] = l   # günstigeres Angebot desselben Autos behalten
         else:
             kept.append(l)    # deutlich anderer Preis -> vermutlich anderes Auto

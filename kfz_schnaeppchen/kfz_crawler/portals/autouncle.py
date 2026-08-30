@@ -27,6 +27,7 @@ class AutoUncle(BasePortal):
     name = "AutoUncle"
     BASE = "https://www.autouncle.de"
     PREFERS_BROWSER = True   # ohne Browser 403
+    FULL_CRAWL_MAX_PAGES = 20  # Schutzgrenze; regulär endet der Crawl bei leerer Seite
 
     @property
     def _use_browser(self) -> bool:
@@ -97,7 +98,11 @@ class AutoUncle(BasePortal):
     def _crawl_pages(self, query: SearchQuery, fetcher) -> List[Listing]:
         results: List[Listing] = []
         seen_ids = set()
-        for page in range(1, max(1, self.max_pages) + 1):
+        # Die allgemeine Konfiguration ist eine Mindestgröße. Gerade die
+        # öffentliche E-Auto-Landingpage ist preislich nicht vorsortiert genug,
+        # um nach fünf Seiten zuverlässig alle passenden Fahrzeuge zu erfassen.
+        max_limit = max(self.max_pages or 0, self.FULL_CRAWL_MAX_PAGES)
+        for page in range(1, max_limit + 1):
             try:
                 html = fetcher(
                     self._build_url(query, page),
@@ -149,8 +154,7 @@ class AutoUncle(BasePortal):
         cars = _find_cars(data)
         listings: List[Listing] = []
         for it in cars:
-            listings.append(
-                Listing(
+            listing = Listing(
                     portal=self.name,
                     title=self._title(it),
                     url=self._url(it),
@@ -162,7 +166,9 @@ class AutoUncle(BasePortal):
                     body=json.dumps(it, ensure_ascii=False)[:6000],
                     raw_id=str(it.get("id") or ""),
                 )
-            )
+            from ..models import infer_listing_details
+            infer_listing_details(listing)
+            listings.append(listing)
         return listings
 
     def _parse_html(self, soup: BeautifulSoup) -> List[Listing]:
