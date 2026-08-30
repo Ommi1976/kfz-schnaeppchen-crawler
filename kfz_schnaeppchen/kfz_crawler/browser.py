@@ -16,6 +16,7 @@ import time
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Callable, Dict, Iterator, List, Optional, Tuple
+from urllib.parse import parse_qs, urlparse
 
 logger = logging.getLogger(__name__)
 _lock = threading.Lock()
@@ -57,7 +58,6 @@ class BrowserBlocked(RuntimeError):
 PROFILE_DIR = Path("/data/firefox_profile")
 if not Path("/data").exists():
     PROFILE_DIR = Path(__file__).parent.parent / "firefox_profile"
-MOBILE_STATE_PATH = PROFILE_DIR.parent / "mobile_browser_state.json"
 
 
 STEALTH_JS = """
@@ -93,6 +93,43 @@ _BLOCK_MARKERS = (
 def _is_block_page(html: str) -> bool:
     head = (html or "").lower()[:5000]
     return any(marker in head for marker in _BLOCK_MARKERS)
+
+
+def _page_number(url: str) -> Optional[str]:
+    """Liest die Zielseite aus einer mobilen Such-URL."""
+    return parse_qs(urlparse(url).query).get("pageNumber", [None])[0]
+
+
+def _click_matching_page_link(page, target_page: Optional[str]) -> bool:
+    """Folgt einer vorhandenen Seitennavigation wie im sichtbaren Browser.
+
+    Die Suchseite entscheidet damit selbst über die Navigations-URL. Ein
+    Fallback auf die übergebene URL bleibt nur für Layout-Änderungen erhalten.
+    """
+    if not target_page:
+        return False
+    selectors = [
+        f'a[href*="pageNumber={target_page}"]',
+        f'a[href*="pageNumber%3D{target_page}"]',
+    ]
+    if target_page.isdigit() and int(target_page) > 1:
+        selectors.extend([
+            "a[aria-label*='Nächste']",
+            "a[aria-label*='Weiter']",
+            "button[aria-label*='Nächste']",
+            "button[aria-label*='Weiter']",
+        ])
+    for selector in selectors:
+        try:
+            locator = page.locator(selector).first
+            if locator.count() == 0:
+                continue
+            locator.click(timeout=8000)
+            page.wait_for_load_state("domcontentloaded", timeout=20000)
+            return True
+        except Exception:
+            continue
+    return False
 
 
 def _matching_user_agent(browser) -> str:
@@ -225,15 +262,15 @@ def fetch_rendered(
 @contextmanager
 def rendered_session(
     proxy: Optional[str] = None,
-    engine: str = "chromium",
+    engine: str = "firefox",
     timeout_ms: int = 30000,
     request_delay_range: tuple[float, float] = (1.7, 3.2),
 ) -> Iterator[Callable[..., str]]:
     """Öffnet eine wiederverwendbare Browser-Session für mehrere Seiten.
 
-    Cookies, TLS-/Akamai-Session und Browser-Fingerprint bleiben über die
-    komplette Pagination erhalten. Das spart Browserstarts und reduziert
-    Blockaden erheblich.
+    Für mobile.de wird ein dauerhaftes Firefox-Profil verwendet. Das ergibt
+    über Läufe hinweg eine konsistente, normale Browsersitzung ohne Cookie- oder
+    Engine-Wechsel.
     """
     try:
         from playwright.sync_api import sync_playwright
@@ -250,40 +287,27 @@ def rendered_session(
             if effective_proxy:
                 launch_kwargs["proxy"] = {"server": effective_proxy}
             launch_kwargs["headless"] = not bool(os.environ.get("DISPLAY"))
-            browser = engine_obj.launch(**launch_kwargs)
             context_kwargs = dict(
                 locale="de-DE",
                 timezone_id="Europe/Berlin",
                 viewport={"width": 1440, "height": 900},
-                user_agent=_matching_user_agent(browser),
             )
-            state_is_fresh = (
-                MOBILE_STATE_PATH.exists()
-                and time.time() - MOBILE_STATE_PATH.stat().st_mtime <= 12 * 3600
-            )
-            if state_is_fresh:
-                context_kwargs["storage_state"] = str(MOBILE_STATE_PATH)
-            try:
+            browser = None
+            if engine == "firefox" and not effective_proxy:
+                PROFILE_DIR.mkdir(parents=True, exist_ok=True)
+                context = engine_obj.launch_persistent_context(
+                    user_data_dir=str(PROFILE_DIR),
+                    **launch_kwargs,
+                    **context_kwargs,
+                )
+            else:
+                browser = engine_obj.launch(**launch_kwargs)
+                context_kwargs["user_agent"] = _matching_user_agent(browser)
                 context = browser.new_context(**context_kwargs)
-            except Exception:
-                context_kwargs.pop("storage_state", None)
-                context = browser.new_context(**context_kwargs)
-            page = context.new_page()
-            page.add_init_script(CHROMIUM_STEALTH_JS if engine == "chromium" else STEALTH_JS)
-            saved_cookie_count = _inject_saved_mobile_cookies(context)
-            if saved_cookie_count:
-                logger.info("mobile.de: %d gespeicherte Session-Cookies geladen", saved_cookie_count)
+                page_script = CHROMIUM_STEALTH_JS if engine == "chromium" else STEALTH_JS
+                context.add_init_script(page_script)
+            page = context.pages[0] if context.pages else context.new_page()
             last_request_at = 0.0
-            had_success = False
-            blocked_seen = False
-
-            def persist_accepted_state() -> None:
-                """Sichert nur den zuletzt nachweislich akzeptierten Zustand."""
-                try:
-                    MOBILE_STATE_PATH.parent.mkdir(parents=True, exist_ok=True)
-                    context.storage_state(path=str(MOBILE_STATE_PATH))
-                except Exception as exc:
-                    logger.debug("Browser-Sessionzustand konnte nicht gespeichert werden: %s", exc)
 
             try:
                 try:
@@ -298,13 +322,15 @@ def rendered_session(
                     render_delay: float = 0.8,
                     max_retries: int = 0,
                 ) -> str:
-                    nonlocal last_request_at, had_success, blocked_seen
                     for attempt in range(max_retries + 1):
                         elapsed = time.monotonic() - last_request_at
                         polite_delay = random.uniform(*request_delay_range)
                         if last_request_at and elapsed < polite_delay:
                             time.sleep(polite_delay - elapsed)
-                        response = page.goto(url, wait_until="domcontentloaded", timeout=timeout_ms)
+                        clicked = _click_matching_page_link(page, _page_number(url))
+                        response = None if clicked else page.goto(
+                            url, wait_until="domcontentloaded", timeout=timeout_ms
+                        )
                         last_request_at = time.monotonic()
                         status = response.status if response else 0
                         if wait_selector:
@@ -317,12 +343,7 @@ def rendered_session(
                             time.sleep(render_delay)
                         html = page.content()
                         if status not in (403, 429) and not _is_block_page(html):
-                            had_success = True
-                            # Bei einem späteren Block bleibt so der Zustand der
-                            # letzten akzeptierten Seite für den nächsten Lauf.
-                            persist_accepted_state()
                             return html
-                        blocked_seen = True
                         if attempt < max_retries:
                             wait_seconds = 6.0 * (attempt + 1)
                             logger.warning("mobile.de antwortet mit Block/HTTP %s; %.0f s Backoff (%d/%d)", status or "HTML", wait_seconds, attempt + 1, max_retries)
@@ -336,11 +357,10 @@ def rendered_session(
 
                 yield fetch
             finally:
-                if had_success and not blocked_seen:
-                    persist_accepted_state()
                 page.close()
                 context.close()
-                browser.close()
+                if browser is not None:
+                    browser.close()
 
 
 def fetch_rendered_batch(
