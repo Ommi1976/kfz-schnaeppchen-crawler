@@ -717,8 +717,10 @@ class SeenStore:
                     cur = self.conn.execute("DELETE FROM settings WHERE key = ?", (key,))
                     if cur.rowcount:
                         removed.append(key)
-                if removed:
-                    self.conn.commit()
+                # Immer abschliessen: ein DELETE oeffnet auch dann eine
+                # Transaktion, wenn es nichts trifft. Bliebe sie offen, wuerde
+                # ein spaeteres BEGIN (Migration) fehlschlagen.
+                self.conn.commit()
             except sqlite3.OperationalError:
                 return []
         return removed

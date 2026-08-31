@@ -180,6 +180,10 @@ def migriere(conn: sqlite3.Connection, db_path: str | Path) -> int:
             # ALTER) von sich aus keine Transaktion, sodass ein "with conn"
             # halbfertige Tabellen stehen liesse. SQLite selbst beherrscht
             # transaktionales DDL – es muss nur angefordert werden.
+            # Eine von aussen offen gelassene Transaktion wuerde BEGIN
+            # scheitern lassen. Sauber abschliessen, dann selbst oeffnen.
+            if conn.in_transaction:
+                conn.commit()
             conn.execute("BEGIN")
             funktion(conn)
             _schreibe_version(conn, ziel)

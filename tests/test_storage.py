@@ -290,3 +290,23 @@ def test_failed_migration_keeps_previous_version(tmp_path, monkeypatch):
     assert "halb" not in tabellen             # Teilzustand zurückgerollt
     assert "probe" in tabellen                # Bestand unberührt
     conn.close()
+
+
+def test_migration_survives_open_transaction_from_earlier_step(tmp_path):
+    """Eine offen gelassene Transaktion darf die Migration nicht scheitern lassen."""
+    import sqlite3
+    from kfz_crawler.migrations import migriere, SCHEMA_VERSION
+
+    db = tmp_path / "offen.sqlite"
+    conn = sqlite3.connect(str(db))
+    conn.execute("CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT)")
+    conn.commit()
+    # Ein DELETE ohne Treffer öffnet eine Transaktion, die offen bleibt.
+    conn.execute("DELETE FROM settings WHERE key = 'gibtsnicht'")
+    assert conn.in_transaction
+
+    assert migriere(conn, str(db)) == SCHEMA_VERSION
+    tabellen = {r[0] for r in conn.execute(
+        "SELECT name FROM sqlite_master WHERE type='table'")}
+    assert {"vehicles", "offers", "vehicle_links"} <= tabellen
+    conn.close()
