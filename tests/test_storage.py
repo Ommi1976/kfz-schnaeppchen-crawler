@@ -195,3 +195,48 @@ def test_purge_obsolete_settings_removes_dead_credentials(tmp_path):
     # Wiederholter Aufruf ist folgenlos.
     assert second.purge_obsolete_settings() == []
     second.close()
+
+
+def test_reevaluation_recovers_fields_without_network(tmp_path):
+    """Altbestände werden aus gespeichertem Text nachgezogen – ohne Portalabruf."""
+    from kfz_crawler.storage import SeenStore
+    from kfz_crawler.models import Listing, DETECTOR_VERSION
+    from kfz_crawler.reevaluate import reevaluate_stored_listings
+
+    store = SeenStore(str(tmp_path / "alt.sqlite"))
+    listing = Listing(
+        portal="mobile.de", url="https://example.test/1", title="VW ID.4 Pro",
+        price=25000, year=2022, mileage=50000,
+        body=("EZ 04/2022 110 kW (150 PS) Elektro 77 kWh netto "
+              "Reichweite (WLTP) 520 km AVILOO SoH 94,6 %"),
+    )
+    store.record_listing("EV", listing)
+    # Alten Stand simulieren: abgeleitete Felder leer, ältere Parser-Version.
+    store.conn.execute(
+        "UPDATE deals SET detector_version='0.9', power_ps=NULL, battery_kwh=NULL, "
+        "ev_range_km=NULL, battery_soh=NULL"
+    )
+    store.conn.commit()
+
+    stats = reevaluate_stored_listings(store)
+    assert stats["aktualisiert"] == 1
+
+    row = store.conn.execute(
+        "SELECT power_ps, battery_kwh, battery_observed_kind, ev_range_km, "
+        "ev_range_standard, battery_soh, battery_soh_level, year_kind, "
+        "first_registration_month, detector_version FROM deals"
+    ).fetchone()
+    assert row["power_ps"] == 150            # war 0 % gefüllt – jetzt zurück
+    assert row["battery_kwh"] == 77.0
+    assert row["battery_observed_kind"] == "netto"
+    assert row["ev_range_km"] == 520
+    assert row["ev_range_standard"] == "wltp"
+    assert row["battery_soh"] == 94.6
+    assert row["battery_soh_level"] == "bestaetigt"
+    assert row["year_kind"] == "ez"
+    assert row["first_registration_month"] == 4
+    assert row["detector_version"] == DETECTOR_VERSION
+
+    # Ein zweiter Lauf findet nichts mehr zu tun.
+    assert reevaluate_stored_listings(store) == {"geprueft": 0}
+    store.close()

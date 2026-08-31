@@ -142,6 +142,19 @@ async def _do_run(app: FastAPI, only_id: str | None = None) -> None:
         try:
             report = await asyncio.to_thread(_run_all, app, only_id)
             app.state.last_report = report
+
+            # Altbestand mit der aktuellen Erkennung nachziehen. Kostet keine
+            # Portalanfrage: es werden nur gespeicherte Texte neu ausgewertet.
+            try:
+                from kfz_crawler.reevaluate import reevaluate_stored_listings
+                home_zip = getattr(app.state.cfg.settings, "home_zip", "") or None
+                stats = await asyncio.to_thread(
+                    reevaluate_stored_listings, app.state.store, 200, home_zip
+                )
+                if stats.get("aktualisiert"):
+                    logger.info("Offline-Neuauswertung: %s", stats)
+            except Exception:
+                logger.exception("Offline-Neuauswertung fehlgeschlagen")
             # Asynchrone Hintergrund-Bildanalyse für SoH anstoßen (blockiert die UI/Suche nicht)
             try:
                 from kfz_crawler.battery_analyzer import run_background_image_enrichment

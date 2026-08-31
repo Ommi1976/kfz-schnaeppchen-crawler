@@ -8,7 +8,8 @@ from dataclasses import dataclass, field
 from typing import Any, Optional
 
 
-DETECTOR_VERSION = "1.1.0"
+PS_PER_KW = 1.35962   # Umrechnung kW -> PS
+DETECTOR_VERSION = "1.2.0"
 
 
 _BATTERY_KWH_RE = re.compile(
@@ -552,6 +553,36 @@ def extract_first_registration(text: str | None):
     return None, None, "unbekannt"
 
 
+# Leistungsangaben: "110 kW (150 PS)" bevorzugt, sonst einzeln.
+_POWER_KW_PS_RE = re.compile(r"(\d{2,3})\s*kw\s*[(/]\s*(\d{2,3})\s*ps", re.I)
+_POWER_PS_RE = re.compile(r"(\d{2,3})\s*ps\b", re.I)
+_POWER_KW_RE = re.compile(r"(\d{2,3})\s*kw\b", re.I)
+
+
+def extract_power_ps(text: str | None) -> Optional[int]:
+    """Liest die Motorleistung in PS aus einem Inseratstext.
+
+    Portale schreiben meist "110 kW (150 PS)". Fehlt die PS-Angabe, wird
+    aus kW umgerechnet. Werte ausserhalb eines plausiblen PKW-Bereichs
+    werden verworfen.
+    """
+    if not text:
+        return None
+    m = _POWER_KW_PS_RE.search(text)
+    if m:
+        ps = int(m.group(2))
+        return ps if 20 <= ps <= 1500 else None
+    m = _POWER_PS_RE.search(text)
+    if m:
+        ps = int(m.group(1))
+        return ps if 20 <= ps <= 1500 else None
+    m = _POWER_KW_RE.search(text)
+    if m:
+        ps = round(int(m.group(1)) * PS_PER_KW)
+        return ps if 20 <= ps <= 1500 else None
+    return None
+
+
 def infer_listing_details(listing: "Listing", query_zip: Optional[str] = None) -> None:
     """Extrahiert Akku/WLTP-Reichweite, Garantie, Standort-PLZ, Stadt und Distanz."""
     infer_listing_battery(listing)
@@ -563,6 +594,9 @@ def infer_listing_details(listing: "Listing", query_zip: Optional[str] = None) -
 
     # Zulassung: Monat und Art festhalten, damit ein Modelljahr nicht
     # stillschweigend als Erstzulassung gilt.
+    if listing.power_ps in (None, 0):
+        listing.power_ps = extract_power_ps(text)
+
     jahr, monat, art = extract_first_registration(text)
     if art != "unbekannt":
         if listing.first_registration_month is None and monat is not None:
