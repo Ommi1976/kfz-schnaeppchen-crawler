@@ -258,3 +258,47 @@ def test_matches_query_filtering():
 
     l_ka_missing = Listing(portal="Kleinanzeigen", title="VW Golf 8 Basis", body="Nur Radio und Klima", url="http://ka/2")
     assert matches_query(l_ka_missing, q_eq) is True
+
+
+def test_classify_battery_kind_uses_nearest_marker():
+    """Die Bezugsgröße kommt von der Wortmarke neben der jeweiligen Zahl."""
+    from kfz_crawler.models import classify_battery_kind as kind
+
+    assert kind("VW ID.3 Pro S 77 kWh netto", 77.0) == "netto"
+    assert kind("Akku 82 kWh brutto", 82.0) == "brutto"
+    # Beide Größen im selben Text: jede Zahl behält ihre eigene Marke.
+    assert kind("77 kWh netto (82 kWh brutto)", 77.0) == "netto"
+    assert kind("77 kWh netto (82 kWh brutto)", 82.0) == "brutto"
+    # Ohne Marke entscheidet der Abgleich mit den Referenzwerten des Modells.
+    assert kind("ID.3 Pro S 77kWh(82kWh)", 77.0, 77.0, 82.0) == "netto"
+    assert kind("ID.3 Pro S 77kWh(82kWh)", 82.0, 77.0, 82.0) == "brutto"
+    # Ohne beides wird nicht geraten.
+    assert kind("Elektro 62 kWh Navi", 62.0) == "unbekannt"
+    # "Nettopreis" ist keine Kapazitätsangabe.
+    assert kind("Nettopreis 20000 Euro, Akku 62 kWh", 62.0) == "unbekannt"
+    # Eine Marke darf nicht von der Nachbarzahl geliehen werden.
+    assert kind("Golf 77 kWh, daneben 45 kWh netto Zusatz", 77.0) == "unbekannt"
+
+
+def test_battery_filter_never_compares_netto_against_brutto_threshold():
+    """Ein reiner Nettowert schließt nicht aus, sondern gilt als unbekannt."""
+    from kfz_crawler.models import battery_for_filter, evaluate_query
+
+    query = SearchQuery(name="EV", battery_from_kwh=65)
+
+    # Brutto bekannt: normaler Vergleich.
+    gross = Listing(portal="p", title="ID.4", url="u", battery_gross_kwh=82.0)
+    assert battery_for_filter(gross) == 82.0
+    assert evaluate_query(gross, query).passed
+
+    # Nur ein Nettowert: die Bruttokapazität liegt höher, also nicht ausschließen.
+    netto = Listing(portal="p", title="ID.3", url="u", battery_kwh=64.0)
+    netto.battery_observed_kind = "netto"
+    assert battery_for_filter(netto) is None
+    entscheidung = evaluate_query(netto, query)
+    assert "Akkukapazität unter Mindestwert" not in entscheidung.reasons
+
+    # Unbekannte Bezugsgröße bleibt vergleichbar (bisheriges Verhalten).
+    unbekannt = Listing(portal="p", title="Zoe", url="u", battery_kwh=52.0)
+    assert battery_for_filter(unbekannt) == 52.0
+    assert "Akkukapazität unter Mindestwert" in evaluate_query(unbekannt, query).reasons

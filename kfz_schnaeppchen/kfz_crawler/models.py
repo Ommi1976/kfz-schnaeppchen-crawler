@@ -245,6 +245,49 @@ def ensure_portal_evidence(listing: "Listing") -> None:
             _record_evidence(listing, field_name, "portal_structured", 0.96, "Strukturiertes Trefferfeld")
 
 
+# Wortmarken, mit denen Inserate die Bezugsgröße benennen.
+_NETTO_MARKER = re.compile(r"\b(netto|nutzbar\w*|verf[üu]gbar\w*|usable)\b", re.I)
+_BRUTTO_MARKER = re.compile(r"\b(brutto|gesamt\w*|total)\b", re.I)
+
+
+def classify_battery_kind(text: str | None, value: Optional[float],
+                          spec_net: Optional[float] = None,
+                          spec_gross: Optional[float] = None) -> str:
+    """Bestimmt, ob ein gelesener kWh-Wert netto oder brutto meint.
+
+    Reihenfolge: ausdrückliche Wortmarke im Text, sonst Abgleich mit den
+    Referenzwerten des Modells. Ohne beides bleibt es "unbekannt" – geraten
+    wird nicht, weil eine falsche Bezugsgröße Filter kippen lässt.
+    """
+    if value is None:
+        return "unbekannt"
+    if text:
+        # Eine Wortmarke gehört zu der Zahl, neben der sie steht. Das Fenster
+        # endet deshalb an der nächsten kWh-Angabe – sonst würde bei
+        # "77 kWh netto (82 kWh brutto)" die Marke der Nachbarzahl gelesen.
+        treffer = list(re.finditer(r"(\d{1,3}(?:[.,]\d{1,2})?)\s*k\s*wh", text, re.I))
+        for i, m in enumerate(treffer):
+            try:
+                if abs(float(m.group(1).replace(",", ".")) - value) > 0.6:
+                    continue
+            except ValueError:
+                continue
+            nach_ende = treffer[i + 1].start() if i + 1 < len(treffer) else len(text)
+            vor_start = treffer[i - 1].end() if i else 0
+            danach = text[m.end():min(nach_ende, m.end() + 20)]
+            davor = text[max(vor_start, m.start() - 25):m.start()]
+            for umfeld in (danach, davor):
+                if _NETTO_MARKER.search(umfeld):
+                    return "netto"
+                if _BRUTTO_MARKER.search(umfeld):
+                    return "brutto"
+    if spec_net is not None and abs(value - spec_net) <= 1.0:
+        return "netto"
+    if spec_gross is not None and abs(value - spec_gross) <= 1.0:
+        return "brutto"
+    return "unbekannt"
+
+
 def infer_listing_battery(listing: "Listing", check_images: bool = False) -> None:
     """Füllt den Akkuwert und SoH nach:
     1. Priorität: Interne Referenzdatenbank (ev_database) für verifizierte Brutto-/Nettowerte.
@@ -288,6 +331,22 @@ def infer_listing_battery(listing: "Listing", check_images: bool = False) -> Non
     elif detail_kwh is not None:
         listing.battery_kwh = detail_kwh
         _record_evidence(listing, "battery_kwh", "detail_text", 0.88, f"{detail_kwh:g} kWh")
+
+    # Ohne Bezugsgroesse ist der gelesene Wert nicht sicher vergleichbar:
+    # netto und brutto liegen typisch fuenf kWh auseinander.
+    if listing.battery_kwh is not None:
+        listing.battery_observed_kind = classify_battery_kind(
+            f"{title} {detail_text}",
+            listing.battery_kwh,
+            listing.battery_net_kwh,
+            listing.battery_gross_kwh,
+        )
+        # Ist die Groesse bekannt, wird der Wert in das passende Feld
+        # uebernommen, sofern die Referenzdatenbank dort nichts geliefert hat.
+        if listing.battery_observed_kind == "netto" and listing.battery_net_kwh is None:
+            listing.battery_net_kwh = listing.battery_kwh
+        elif listing.battery_observed_kind == "brutto" and listing.battery_gross_kwh is None:
+            listing.battery_gross_kwh = listing.battery_kwh
     elif match:
         listing.battery_kwh = match.spec.battery_gross_kwh
         _record_evidence(listing, "battery_kwh", "ev_database", match.confidence, match.evidence)
@@ -420,7 +479,11 @@ class Listing:
     body: Optional[str] = None           # Beschreibungstext des Inserats
     body_type: Optional[str] = None      # Karosserieform (normalisiert)
     ev_range_km: Optional[int] = None     # elektrische Reichweite (km)
-    battery_kwh: Optional[float] = None   # Legacy/Filterwert: Bruttokapazität (kWh)
+    battery_kwh: Optional[float] = None   # tatsächlich im Inserat gelesener Wert
+    # Welche Größe battery_kwh bezeichnet: "netto", "brutto" oder "unbekannt".
+    # Ohne diese Angabe lässt sich der gelesene Wert nicht sicher mit einer
+    # Filterschwelle vergleichen – netto und brutto liegen typisch 5 kWh auseinander.
+    battery_observed_kind: str = "unbekannt"
     battery_net_kwh: Optional[float] = None
     battery_gross_kwh: Optional[float] = None
     battery_soh: Optional[float] = None   # Batteriezustand / State of Health (%)
@@ -703,98 +766,20 @@ def is_non_pkw(listing: "Listing") -> bool:
     return any(p.search(hay) for p in _NON_PKW_PATTERNS)
 
 
-def _matches_query_legacy(l: Listing, q: SearchQuery) -> bool:
-    """Clientseitiger Nachfilter.
+def battery_for_filter(l: "Listing") -> Optional[float]:
+    """Vergleichswert für die Akkuschwelle. Bezugsgröße ist brutto.
 
-    Grundsatz: Ein Kriterium schließt ein Inserat nur aus, wenn der Wert
-    bekannt ist UND ihn verletzt. Fehlt der Wert im Inserat, wird NICHT
-    ausgeschlossen (sonst würden brauchbare Treffer verloren gehen).
+    Ein reiner Nettowert wird NICHT gegen eine Brutto-Schwelle geprüft: die
+    Bruttokapazität liegt höher (typisch +5 kWh), ein Vergleich würde also
+    passende Fahrzeuge ausschließen. Solche Inserate gelten stattdessen als
+    unbekannt und landen in der Stufe "plausibel".
     """
-    # Kleinstfahrzeuge / Nicht-PKW grundsätzlich ausschließen (echte PKW-Suche).
-    if is_non_pkw(l):
-        return False
-
-    # Defekte / Schäden / reine Import-Export-Fahrzeuge grundsätzlich ausschließen
-    # (außer include_damaged ist in der Suche explizit aktiviert).
-    if not q.include_damaged and is_defective_or_restricted(l):
-        return False
-
-    # Marke/Modell nur prüfen, wenn ein Titel vorliegt (Portale, die nicht
-    # server-seitig nach Marke filtern, liefern gemischte Ergebnisse).
-    title = (l.title or "").lower()
-    if q.make and title:
-        if not any(tok in title for tok in _make_tokens(q.make)):
-            return False
-    if q.model and title:
-        if q.model not in title:
-            return False
-    # Ausschlüsse werden bewusst erst nach dem Portalabruf geprüft, weil die
-    # Portale dafür keine einheitliche serverseitige Schnittstelle haben.
-    if q.exclude_makes and title:
-        if any(
-            token in title
-            for make in q.exclude_makes
-            for token in _make_tokens(make.lower())
-        ):
-            return False
-    if q.exclude_models and title:
-        if any(model.lower() in title for model in q.exclude_models):
-            return False
-    if q.price_from and l.price is not None and l.price < q.price_from:
-        return False
-    if q.price_to and l.price is not None and l.price > q.price_to:
-        return False
-    if q.year_from and l.year is not None and l.year < q.year_from:
-        return False
-    if q.year_to and l.year is not None and l.year > q.year_to:
-        return False
-    if q.mileage_from and l.mileage is not None and l.mileage < q.mileage_from:
-        return False
-    if q.mileage_to and l.mileage is not None and l.mileage > q.mileage_to:
-        return False
-    if q.power_from and l.power_ps is not None and l.power_ps < q.power_from:
-        return False
-    if q.power_to and l.power_ps is not None and l.power_ps > q.power_to:
-        return False
-    if q.fuel and l.fuel:
-        if q.fuel not in l.fuel.strip().lower():
-            return False
-    if q.transmission and l.transmission:
-        if q.transmission not in l.transmission.strip().lower():
-            return False
-    # Karosserie wird bei AutoScout24 server-seitig gefiltert (body=<id>); ein
-    # Titel-Keyword-Abgleich würde korrekte Treffer fälschlich ausschließen
-    # (z. B. „Golf Variant" ohne das Wort „Kombi"), daher hier kein Nachfilter.
-    # E-Auto-Filter: Strikte Mindestwerte für Reichweite und Akkukapazität
-    if q.ev_range_from and l.ev_range_km is not None and l.ev_range_km < q.ev_range_from:
-        return False
-    if q.battery_from_kwh and l.battery_kwh is not None and l.battery_kwh < q.battery_from_kwh:
-        return False
-
-    # Länderfilter: Wenn spezifisches Land gewählt und Inseratsland bekannt ist
-    if q.country and q.country.upper() != "ALL" and l.country:
-        if l.country.upper() != q.country.upper():
-            return False
-
-    # Ausstattungsfilter-Nachprüfung:
-    # Kleinanzeigen stellt weder einen strukturierten Ausstattungsfilter noch
-    # verlässliche Ausstattungsdaten bereit. Eine fehlende Erwähnung im kurzen
-    # Anzeigentext bedeutet deshalb nicht, dass die Ausstattung fehlt. Solche
-    # Inserate bleiben bewusst erhalten; wer dort zwingende Begriffe verlangt,
-    # kann sie über "Stichwörter enthalten" als expliziten Textfilter setzen.
-    # AutoScout24 und mobile.de wenden ihre Ausstattungsfilter bereits
-    # serverseitig an. Weitere Quellen dürfen bei unbekannten Angaben ebenfalls
-    # nicht aufgrund fehlender Textfragmente ausgeschlossen werden.
-
-    # Ausstattung / Freitext: Stichwörter müssen ALLE vorkommen, Ausschluss keiner.
-    hay = f"{l.title or ''} {l.body or ''}".lower()
-    for term in getattr(q, "keywords", []) or []:
-        if term.lower() not in hay:
-            return False
-    for term in getattr(q, "exclude_terms", []) or []:
-        if term.lower() in hay:
-            return False
-    return True
+    if l.battery_gross_kwh is not None:
+        return l.battery_gross_kwh
+    kind = getattr(l, "battery_observed_kind", "unbekannt")
+    if l.battery_kwh is not None and kind != "netto":
+        return l.battery_kwh
+    return None
 
 
 @dataclass(frozen=True)
@@ -837,7 +822,7 @@ def evaluate_query(l: Listing, q: SearchQuery) -> FilterDecision:
         ("mileage", l.mileage, q.mileage_from, q.mileage_to, "Kilometerstand"),
         ("power_ps", l.power_ps, q.power_from, q.power_to, "Leistung"),
         ("ev_range_km", l.ev_range_km, q.ev_range_from, None, "Reichweite"),
-        ("battery_kwh", l.battery_gross_kwh or l.battery_kwh, q.battery_from_kwh, None, "Akkukapazität"),
+        ("battery_kwh", battery_for_filter(l), q.battery_from_kwh, None, "Akkukapazität"),
     )
     for field_name, value, minimum, maximum, label in numeric_checks:
         if minimum is None and maximum is None:
