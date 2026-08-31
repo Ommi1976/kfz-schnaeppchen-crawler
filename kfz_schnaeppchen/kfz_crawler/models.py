@@ -288,6 +288,35 @@ def classify_battery_kind(text: str | None, value: Optional[float],
     return "unbekannt"
 
 
+# Belegstufen fuer den Batteriezustand.
+_SOH_ZERTIFIKAT = re.compile(
+    r"\b(aviloo|dekra|t[uü]v|batteriezertifikat|pr[uü]fbericht|gutachten|batterietest)\b",
+    re.I,
+)
+_SOH_AUSDRUECKLICH = re.compile(
+    r"\b(soh|state\s+of\s+health|batteriezustand|batteriegesundheit|akkugesundheit|gesundheitszustand|batterie-?status|restkapazit(?:ae|[aä])t)\b",
+    re.I,
+)
+
+
+def classify_soh_level(text: str | None, value: Optional[float]) -> str:
+    """Bewertet, wie belastbar eine SoH-Angabe ist.
+
+    Ein Prozentwert allein sagt wenig: er koennte auch ein Ladestand sein.
+    Erst ein Zertifikatsbeleg oder eine ausdrueckliche SoH-Benennung macht
+    ihn belastbar. Die Stufe steuert, ob hart gefiltert werden darf.
+    """
+    if value is None:
+        return "unbekannt"
+    if not text:
+        return "kandidat"
+    if _SOH_ZERTIFIKAT.search(text):
+        return "bestaetigt"
+    if _SOH_AUSDRUECKLICH.search(text):
+        return "belegt"
+    return "kandidat"
+
+
 def infer_listing_battery(listing: "Listing", check_images: bool = False) -> None:
     """Füllt den Akkuwert und SoH nach:
     1. Priorität: Interne Referenzdatenbank (ev_database) für verifizierte Brutto-/Nettowerte.
@@ -369,6 +398,55 @@ def infer_listing_battery(listing: "Listing", check_images: bool = False) -> Non
             except Exception:
                 pass
 
+    # Belegstufe erst bewerten, wenn der SoH feststeht: ein Prozentwert ohne
+    # Batteriekontext koennte auch ein Ladestand sein.
+    if listing.battery_soh is not None and listing.battery_soh_level == "unbekannt":
+        listing.battery_soh_level = classify_soh_level(
+            f"{title} {detail_text}", listing.battery_soh
+        )
+
+
+# Messstandards fuer Reichweiten. Reihenfolge = Erkennungsprioritaet.
+_RANGE_STANDARDS = (
+    ("wltp", re.compile(r"\bwltp\b", re.I)),
+    ("nefz", re.compile(r"\b(nefz|nedc)\b", re.I)),
+    ("epa", re.compile(r"\bepa\b", re.I)),
+    ("real", re.compile(r"\b(real\w*|praxis\w*|alltag\w*)\b", re.I)),
+)
+
+
+def classify_range_standard(text: str | None, value: Optional[int]) -> str:
+    """Bestimmt den Messstandard einer Reichweitenangabe aus dem Text.
+
+    Wie bei der Akku-Bezugsgroesse zaehlt nur die Umgebung der Zahl, damit
+    ein Standard nicht von einer anderen Angabe geliehen wird. Ohne Marke
+    bleibt es "unbekannt".
+    """
+    if value is None or not text:
+        return "unbekannt"
+    treffer = list(re.finditer(r"(\d{2,4})\s*km", text, re.I))
+    for i, m in enumerate(treffer):
+        try:
+            if int(m.group(1)) != int(value):
+                continue
+        except ValueError:
+            continue
+        nach_ende = treffer[i + 1].start() if i + 1 < len(treffer) else len(text)
+        vor_start = treffer[i - 1].end() if i else 0
+        danach = text[m.end():min(nach_ende, m.end() + 30)]
+        # Im Davor-Fenster nur bis zum letzten Satzzeichen zurueckgehen: eine
+        # Marke hinter der Vorgaengerzahl ("520 km WLTP, Anhaengelast 750 km")
+        # gehoert nicht zu dieser Angabe.
+        davor = text[max(vor_start, m.start() - 30):m.start()]
+        # Nur Komma und Semikolon trennen Angaben. Doppelpunkt und Klammern
+        # gehoeren zum Label selbst: "Reichweite (WLTP) 546 km".
+        davor = re.split(r"[,;]", davor)[-1]
+        for umfeld in (danach, davor):
+            for name, muster in _RANGE_STANDARDS:
+                if muster.search(umfeld):
+                    return name
+    return "unbekannt"
+
 
 def infer_listing_range(listing: "Listing") -> None:
     """Füllt die elektrische Reichweite nach:
@@ -395,12 +473,14 @@ def infer_listing_range(listing: "Listing") -> None:
         if explicit_rng is not None:
             if explicit_rng > spec.wltp_range_km * 1.05:
                 listing.ev_range_km = spec.wltp_range_km
+                listing.ev_range_standard = "wltp"
                 _record_evidence(listing, "ev_range_km", "ev_database", match.confidence, "Inseratswert deutlich über WLTP")
             else:
                 listing.ev_range_km = explicit_rng
                 _record_evidence(listing, "ev_range_km", "title" if title_rng is not None else "detail_text", 0.93, "Reichweitenangabe im Inserat")
         else:
             listing.ev_range_km = spec.wltp_range_km
+            listing.ev_range_standard = "wltp"
             _record_evidence(listing, "ev_range_km", "ev_database", match.confidence, f"WLTP {spec.variant}")
     else:
         if explicit_rng is not None:
@@ -408,6 +488,15 @@ def infer_listing_range(listing: "Listing") -> None:
             _record_evidence(listing, "ev_range_km", "title" if title_rng is not None else "detail_text", 0.91, "Reichweitenangabe im Inserat")
         elif listing.ev_range_km is not None:
             _record_evidence(listing, "ev_range_km", "portal_structured", 0.82, "Portalwert")
+
+
+    # Stammt der Wert aus dem Inseratstext, wird der Messstandard dort gesucht.
+    # Ohne Marke bleibt "unbekannt" – eine geschätzte Reichweite darf nicht wie
+    # eine offizielle Angabe wirken.
+    if listing.ev_range_km is not None and listing.ev_range_standard == "unbekannt":
+        listing.ev_range_standard = classify_range_standard(
+            f"{title} {detail_text}", listing.ev_range_km
+        )
 
 
 _WARRANTY_PATTERNS = [
@@ -435,6 +524,34 @@ def extract_warranty(text: str | None) -> Optional[str]:
     return None
 
 
+_EZ_RE = re.compile(
+    r"(?:\bEZ\b|erstzulassung|zulassung)\s*[:.]?\s*(?:(\d{1,2})\s*[./]\s*)?(\d{4})",
+    re.I,
+)
+_MODELLJAHR_RE = re.compile(r"(?:modelljahr|\bmj\b|baujahr)\s*[:.]?\s*(\d{4})", re.I)
+
+
+def extract_first_registration(text: str | None):
+    """Liefert (Jahr, Monat, Art) fuer die Zulassungsangabe eines Inserats.
+
+    Art ist "ez", wenn der Text die Erstzulassung ausdruecklich benennt,
+    sonst "modelljahr". Ein Modelljahr ist KEINE Erstzulassung: Fahrzeuge
+    mit Modelljahr 2022 werden regelmaessig erst 2023 zugelassen.
+    """
+    if not text:
+        return None, None, "unbekannt"
+    m = _EZ_RE.search(text)
+    if m:
+        monat = int(m.group(1)) if m.group(1) else None
+        if monat is not None and not 1 <= monat <= 12:
+            monat = None
+        return int(m.group(2)), monat, "ez"
+    m = _MODELLJAHR_RE.search(text)
+    if m:
+        return int(m.group(1)), None, "modelljahr"
+    return None, None, "unbekannt"
+
+
 def infer_listing_details(listing: "Listing", query_zip: Optional[str] = None) -> None:
     """Extrahiert Akku/WLTP-Reichweite, Garantie, Standort-PLZ, Stadt und Distanz."""
     infer_listing_battery(listing)
@@ -443,6 +560,20 @@ def infer_listing_details(listing: "Listing", query_zip: Optional[str] = None) -
     text = f"{listing.title or ''} {getattr(listing, 'body', '') or ''}"
     if listing.warranty is None:
         listing.warranty = extract_warranty(text)
+
+    # Zulassung: Monat und Art festhalten, damit ein Modelljahr nicht
+    # stillschweigend als Erstzulassung gilt.
+    jahr, monat, art = extract_first_registration(text)
+    if art != "unbekannt":
+        if listing.first_registration_month is None and monat is not None:
+            listing.first_registration_month = monat
+        if listing.year_kind == "unbekannt":
+            listing.year_kind = art
+        if listing.year is None and jahr is not None:
+            listing.year = jahr
+    elif listing.year is not None and listing.year_kind == "unbekannt":
+        # Portalwert ohne erkennbaren Beleg im Text.
+        listing.year_kind = "portal"
 
     if listing.location:
         try:
@@ -467,6 +598,11 @@ class Listing:
     url: str
     price: Optional[int] = None          # in Euro
     year: Optional[int] = None           # Erstzulassung (Jahr)
+    # Woher die Jahreszahl stammt: 'ez' (Erstzulassung), 'modelljahr',
+    # 'titel' (blosse Jahreszahl) oder 'unbekannt'. Ein Modelljahr darf
+    # die Erstzulassung nicht ersetzen – es liegt regelmaessig davor.
+    year_kind: str = "unbekannt"
+    first_registration_month: Optional[int] = None
     mileage: Optional[int] = None        # in km
     fuel: Optional[str] = None
     location: Optional[str] = None
@@ -479,6 +615,10 @@ class Listing:
     body: Optional[str] = None           # Beschreibungstext des Inserats
     body_type: Optional[str] = None      # Karosserieform (normalisiert)
     ev_range_km: Optional[int] = None     # elektrische Reichweite (km)
+    # Nach welchem Standard die Reichweite gemessen wurde. Ein NEFZ-Wert
+    # liegt deutlich ueber dem WLTP-Wert desselben Autos; ohne Standard
+    # vergleicht ein Filter Ungleiches.
+    ev_range_standard: str = "unbekannt"
     battery_kwh: Optional[float] = None   # tatsächlich im Inserat gelesener Wert
     # Welche Größe battery_kwh bezeichnet: "netto", "brutto" oder "unbekannt".
     # Ohne diese Angabe lässt sich der gelesene Wert nicht sicher mit einer
@@ -487,6 +627,10 @@ class Listing:
     battery_net_kwh: Optional[float] = None
     battery_gross_kwh: Optional[float] = None
     battery_soh: Optional[float] = None   # Batteriezustand / State of Health (%)
+    # Wie gut der SoH belegt ist: 'bestaetigt' (Zertifikat/Messung),
+    # 'belegt' (ausdrueckliche SoH-Angabe), 'kandidat' (Prozentwert mit
+    # Qualitaetsurteil ohne Batteriekontext) oder 'unbekannt'.
+    battery_soh_level: str = "unbekannt"
     warranty: Optional[str] = None       # Garantie (z. B. "8 Jahre / 160.000 km", "12 Monate")
     location_zip: Optional[str] = None   # Postleitzahl des Standorts
     location_city: Optional[str] = None  # Stadt des Standorts

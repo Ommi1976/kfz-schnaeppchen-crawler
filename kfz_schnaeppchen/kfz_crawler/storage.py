@@ -87,6 +87,10 @@ class SeenStore:
             "ALTER TABLE deals ADD COLUMN body_type TEXT",
             "ALTER TABLE deals ADD COLUMN battery_net_kwh REAL",
             "ALTER TABLE deals ADD COLUMN battery_observed_kind TEXT",
+            "ALTER TABLE deals ADD COLUMN ev_range_standard TEXT",
+            "ALTER TABLE deals ADD COLUMN battery_soh_level TEXT",
+            "ALTER TABLE deals ADD COLUMN year_kind TEXT",
+            "ALTER TABLE deals ADD COLUMN first_registration_month INTEGER",
             "ALTER TABLE deals ADD COLUMN battery_gross_kwh REAL",
             "ALTER TABLE deals ADD COLUMN evidence_json TEXT",
             "ALTER TABLE deals ADD COLUMN quality_score REAL",
@@ -337,10 +341,10 @@ class SeenStore:
                 "INSERT INTO deals "
                 "(fingerprint, search_name, portal, title, url, price, market_price, "
                 " discount, year, mileage, fuel, power_ps, transmission, body_type, "
-                " battery_kwh, battery_observed_kind, battery_net_kwh, battery_gross_kwh, battery_soh, ev_range_km, is_deal, is_suspicious, "
+                " year_kind, first_registration_month, battery_kwh, battery_observed_kind, battery_net_kwh, battery_gross_kwh, battery_soh, battery_soh_level, ev_range_km, ev_range_standard, is_deal, is_suspicious, "
                 " reasons, body, image_urls, warranty, location, location_zip, location_city, distance_km, country, "
                 " evidence_json, quality_score, unknown_fields, is_stale, stale_since, detector_version, first_seen, last_seen) "
-                "VALUES (" + ", ".join(["?"] * 39) + ")"
+                "VALUES (" + ", ".join(["?"] * 43) + ")"
                 " ON CONFLICT(fingerprint) DO UPDATE SET "
                 "search_name=excluded.search_name, portal=excluded.portal, title=excluded.title, "
                 "url=excluded.url, price=excluded.price, market_price=excluded.market_price, "
@@ -349,7 +353,9 @@ class SeenStore:
                 "transmission=COALESCE(excluded.transmission, deals.transmission), "
                 "body_type=COALESCE(excluded.body_type, deals.body_type), "
                 "battery_kwh=excluded.battery_kwh, battery_observed_kind=excluded.battery_observed_kind, "
-                "battery_net_kwh=excluded.battery_net_kwh, "
+                "battery_net_kwh=excluded.battery_net_kwh, ev_range_standard=excluded.ev_range_standard, "
+                "battery_soh_level=excluded.battery_soh_level, year_kind=excluded.year_kind, "
+                "first_registration_month=excluded.first_registration_month, "
                 "battery_gross_kwh=excluded.battery_gross_kwh, battery_soh=COALESCE(excluded.battery_soh, deals.battery_soh), "
                 "ev_range_km=excluded.ev_range_km, is_deal=excluded.is_deal, is_suspicious=excluded.is_suspicious, "
                 "reasons=excluded.reasons, body=COALESCE(excluded.body, deals.body), "
@@ -379,12 +385,16 @@ class SeenStore:
                     listing.power_ps,
                     listing.transmission,
                     listing.body_type,
+                    getattr(listing, "year_kind", "unbekannt"),
+                    getattr(listing, "first_registration_month", None),
                     listing.battery_kwh,
                     getattr(listing, "battery_observed_kind", "unbekannt"),
                     listing.battery_net_kwh,
                     listing.battery_gross_kwh,
                     listing.battery_soh,
+                    getattr(listing, "battery_soh_level", "unbekannt"),
                     listing.ev_range_km,
+                    getattr(listing, "ev_range_standard", "unbekannt"),
                     1 if listing.is_deal else 0,
                     1 if listing.is_suspicious else 0,
                     "; ".join(listing.suspicious_reasons or []),

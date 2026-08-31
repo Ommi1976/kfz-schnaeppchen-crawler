@@ -6,6 +6,7 @@ from kfz_crawler.models import (
     extract_battery_soh,
     extract_ev_range_km,
     infer_listing_battery,
+    infer_listing_details,
     infer_listing_range,
     is_non_pkw,
     evaluate_query,
@@ -302,3 +303,58 @@ def test_battery_filter_never_compares_netto_against_brutto_threshold():
     unbekannt = Listing(portal="p", title="Zoe", url="u", battery_kwh=52.0)
     assert battery_for_filter(unbekannt) == 52.0
     assert "Akkukapazität unter Mindestwert" in evaluate_query(unbekannt, query).reasons
+
+
+def test_classify_range_standard_binds_marker_to_its_number():
+    """Der Messstandard gehört zu der Zahl, neben der er steht."""
+    from kfz_crawler.models import classify_range_standard as std
+
+    assert std("Reichweite 520 km WLTP", 520) == "wltp"
+    assert std("450 km nach NEFZ", 450) == "nefz"
+    assert std("EPA 380 km", 380) == "epa"
+    assert std("real 310 km im Alltag", 310) == "real"
+    # Klammer und Doppelpunkt gehören zum Label, nicht zur Trennung.
+    assert std("Reichweite (WLTP) 546 km", 546) == "wltp"
+    assert std("WLTP kombiniert: 546 km", 546) == "wltp"
+    # Ein Komma trennt: die Marke der Vorgängerzahl darf nicht gelten.
+    assert std("520 km WLTP, Anhängelast 750 km", 750) == "unbekannt"
+    assert std("520 km WLTP, Anhängelast 750 km", 520) == "wltp"
+    # Ohne Marke wird nicht geraten.
+    assert std("Reichweite 400 km", 400) == "unbekannt"
+
+
+def test_model_year_is_not_treated_as_first_registration():
+    """Ein Modelljahr ist keine Erstzulassung – Fahrzeuge werden später zugelassen."""
+    from kfz_crawler.models import extract_first_registration as ez
+
+    assert ez("EZ 04/2021 Diesel") == (2021, 4, "ez")
+    assert ez("Erstzulassung 2022") == (2022, None, "ez")
+    assert ez("Modelljahr 2022 Neuwagen") == (2022, None, "modelljahr")
+    # Blosse Jahreszahl im Titel ist kein Beleg.
+    assert ez("VW Golf 2019 Navi") == (None, None, "unbekannt")
+    # Unplausibler Monat wird verworfen, das Jahr bleibt.
+    assert ez("EZ 13/2021") == (2021, None, "ez")
+
+    listing = Listing(portal="p", title="Renault Zoe Modelljahr 2020", url="u")
+    infer_listing_details(listing)
+    assert listing.year_kind == "modelljahr"
+
+
+def test_soh_evidence_levels():
+    """Ein Prozentwert ohne Batteriekontext gilt nicht als belegter SoH."""
+    from kfz_crawler.models import classify_soh_level as lvl
+
+    assert lvl("AVILOO Batteriezertifikat SoH 94,6 %", 94.6) == "bestaetigt"
+    assert lvl("DEKRA Batterietest 95%", 95.0) == "bestaetigt"
+    assert lvl("Batteriezustand 97%", 97.0) == "belegt"
+    assert lvl("Restkapazität 90%", 90.0) == "belegt"
+    assert lvl("94,6 % sehr gut", 94.6) == "kandidat"
+    # Ladestand-Screenshot: kein bestätigter SoH.
+    assert lvl("Sofortladen bis 100% - 51 km 16%", 90.0) == "kandidat"
+    assert lvl("irgendwas", None) == "unbekannt"
+
+    listing = Listing(portal="p", url="u",
+                      title="VW ID.4 AVILOO Batteriezertifikat SoH 94,6 %")
+    infer_listing_details(listing)
+    assert listing.battery_soh == 94.6
+    assert listing.battery_soh_level == "bestaetigt"
