@@ -40,8 +40,15 @@ class AutoUncle(BasePortal):
     PREFERS_BROWSER = True   # ohne Browser 403
     # Ergebnisseiten je Suche – GEMEINSAM über alle adaptiven Varianten.
     # Ohne gemeinsames Budget holt jede Fallback-Variante erneut die volle
-    # Seitenzahl; gemessen wurden 500 Rohtreffer für 97 passende Fahrzeuge.
-    PAGE_BUDGET = 12
+    # Seitenzahl. Das ist der eigentliche Schutz hier.
+    #
+    # Die Seitenzahl selbst darf hoeher liegen als bei mobile.de: AutoUncle war
+    # nie gesperrt und lieferte bei 20 Seiten stabil. Vor allem aber bietet es
+    # keinen Akku- und keinen Marken-Filter, sodass grob vorgefiltert werden
+    # muss – gemessen scheitern 237 von 299 Rohtreffern erst lokal an der
+    # Akkukapazitaet. Ein enges Budget kappt hier die Ausbeute, ohne die
+    # Verschwendung zu verringern (12 Seiten: 299 roh / 54 passend).
+    PAGE_BUDGET = 20
     FULL_CRAWL_MAX_PAGES = 20  # Reißleine, auch wenn page_budget gesetzt wird
 
     @property
