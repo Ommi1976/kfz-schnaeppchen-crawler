@@ -159,9 +159,11 @@ def test_autouncle_search_uses_broader_filter_when_original_is_empty():
     )
     portal = AutoUncle()
     calls = []
+    budgets = []
 
-    def crawl(variant, fetcher):
+    def crawl(variant, fetcher, max_pages=None):
         calls.append(variant)
+        budgets.append(max_pages)
         if len(calls) == 1:
             return []
         return [Listing(
@@ -180,6 +182,10 @@ def test_autouncle_search_uses_broader_filter_when_original_is_empty():
     assert calls[1].year_from == 2021
     assert calls[1].ev_range_from == 400
     assert calls[1].power_from == 125
+    # Das Seitenbudget gilt gemeinsam: die Fallback-Variante bekommt nur
+    # den Rest, nicht erneut das volle Kontingent.
+    assert budgets[0] == AutoUncle.PAGE_BUDGET
+    assert budgets[1] < budgets[0]
 
 
 def test_autouncle_url_contains_search_filters():

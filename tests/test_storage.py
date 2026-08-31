@@ -143,12 +143,55 @@ def test_portal_health_and_failed_run_marks_stale(store):
 
 
 def test_mobile_portal_cooldown_after_block_and_partial(store):
+    """Schutzpause eskaliert 2 h -> 6 h -> 24 h und wird bei Erfolg zurückgesetzt."""
+    # Erster Block: kurze Pause, ein Ausreißer soll den Lauf nicht lange lahmlegen.
     store.record_portal_run("EV-Suche", "mobile.de", "blocked", error="HTTP 403")
-    assert store.portal_cooldown_remaining("EV-Suche", "mobile.de") > 2.9 * 3600
+    remaining = store.portal_cooldown_remaining("EV-Suche", "mobile.de")
+    assert 1.9 * 3600 < remaining <= 2 * 3600
 
+    # Zweiter Block in Folge: das Portal lehnt ernsthaft ab.
+    store.record_portal_run("EV-Suche", "mobile.de", "blocked", error="HTTP 403")
+    remaining = store.portal_cooldown_remaining("EV-Suche", "mobile.de")
+    assert 5.9 * 3600 < remaining <= 6 * 3600
+
+    # Dritter und jeder weitere: Höchstwert, nicht darüber hinaus.
+    store.record_portal_run("EV-Suche", "mobile.de", "blocked", error="HTTP 403")
+    assert 23.9 * 3600 < store.portal_cooldown_remaining("EV-Suche", "mobile.de") <= 24 * 3600
+    store.record_portal_run("EV-Suche", "mobile.de", "blocked", error="HTTP 403")
+    assert store.portal_cooldown_remaining("EV-Suche", "mobile.de") <= 24 * 3600
+
+    # Teilergebnis hat eine eigene, kürzere Pause.
     store.record_portal_run("EV-Suche", "mobile.de", "partial", raw_count=20)
     remaining = store.portal_cooldown_remaining("EV-Suche", "mobile.de")
     assert 89 * 60 < remaining <= 90 * 60
 
+    # Ein erfolgreicher Lauf hebt die Pause auf und setzt die Eskalation zurück.
     store.record_portal_run("EV-Suche", "mobile.de", "ok", raw_count=159)
     assert store.portal_cooldown_remaining("EV-Suche", "mobile.de") == 0
+    store.record_portal_run("EV-Suche", "mobile.de", "blocked", error="HTTP 403")
+    remaining = store.portal_cooldown_remaining("EV-Suche", "mobile.de")
+    assert 1.9 * 3600 < remaining <= 2 * 3600
+
+
+def test_purge_obsolete_settings_removes_dead_credentials(tmp_path):
+    """Altlasten aus abgelösten Funktionen verschwinden beim Start."""
+    from kfz_crawler.storage import SeenStore
+
+    db = tmp_path / "legacy.sqlite"
+    first = SeenStore(str(db))
+    first.set_setting("mobile_cookies", "_abck=GEHEIM~-1~xyz")
+    first.set_setting("mobile_status", '{"state": "ok"}')
+    first.set_setting("ingest_token", "abc123")
+    first.set_setting("unknown_policy", "lenient")   # aktiv – muss bleiben
+    first.close()
+
+    # Ein neuer Store räumt beim Öffnen auf.
+    second = SeenStore(str(db))
+    assert second.get_setting("mobile_cookies", "") == ""
+    assert second.get_setting("mobile_status", "") == ""
+    assert second.get_setting("ingest_token", "") == ""
+    assert second.get_setting("unknown_policy", "") == "lenient"
+
+    # Wiederholter Aufruf ist folgenlos.
+    assert second.purge_obsolete_settings() == []
+    second.close()

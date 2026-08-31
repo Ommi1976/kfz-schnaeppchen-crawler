@@ -6,3 +6,9 @@ __pycache__/
 *.pyc
 .venv/
 venv/
+
+# Browser-Profile: enthalten Session-Cookies, gehoeren nicht ins Repo
+firefox_profile/
+autouncle_profile/
+.tmp-*-profile/
+mobile_cookies.json

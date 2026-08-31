@@ -9,6 +9,7 @@ JSON und fallen auf HTML-Karten zurück.
 from __future__ import annotations
 
 import json
+import logging
 import os
 import re
 from dataclasses import replace
@@ -28,6 +29,8 @@ from ..models import (
 )
 from .base import BasePortal, PortalError, PortalPartialError
 
+logger = logging.getLogger(__name__)
+
 FUEL_MAP = {"benzin": "petrol", "diesel": "diesel", "elektro": "electric", "hybrid": "hybrid"}
 
 
@@ -35,7 +38,11 @@ class AutoUncle(BasePortal):
     name = "AutoUncle"
     BASE = "https://www.autouncle.de"
     PREFERS_BROWSER = True   # ohne Browser 403
-    FULL_CRAWL_MAX_PAGES = 20  # Schutzgrenze; regulär endet der Crawl bei leerer Seite
+    # Ergebnisseiten je Suche – GEMEINSAM über alle adaptiven Varianten.
+    # Ohne gemeinsames Budget holt jede Fallback-Variante erneut die volle
+    # Seitenzahl; gemessen wurden 500 Rohtreffer für 97 passende Fahrzeuge.
+    PAGE_BUDGET = 12
+    FULL_CRAWL_MAX_PAGES = 20  # Reißleine, auch wenn page_budget gesetzt wird
 
     @property
     def _use_browser(self) -> bool:
@@ -151,8 +158,19 @@ class AutoUncle(BasePortal):
     def _search_variants(self, query: SearchQuery, fetcher) -> List[Listing]:
         results: List[Listing] = []
         seen_ids = set()
+        # Das Seitenbudget gilt für die Suche als Ganzes: Fallback-Varianten
+        # bekommen nur, was die vorherigen übrig gelassen haben.
+        budget = int(getattr(self, "page_budget", 0) or self.PAGE_BUDGET)
+        rest = max(1, min(budget, self.FULL_CRAWL_MAX_PAGES))
         for variant in self._query_variants(query):
-            items = self._crawl_pages(variant, fetcher)
+            if rest <= 0:
+                logger.info("AutoUncle: Seitenbudget aufgebraucht, weitere Varianten entfallen")
+                break
+            self._last_pages_fetched = 0
+            items = self._crawl_pages(variant, fetcher, max_pages=rest)
+            # Mindestens eine Seite je Variante abziehen, damit das Budget
+            # auch dann endet, wenn ein Aufruf den Verbrauch nicht meldet.
+            rest -= max(1, int(getattr(self, "_last_pages_fetched", 1) or 1))
             for item in items:
                 key = item.raw_id or item.url
                 if key in seen_ids:
@@ -165,14 +183,20 @@ class AutoUncle(BasePortal):
                 break
         return results
 
-    def _crawl_pages(self, query: SearchQuery, fetcher) -> List[Listing]:
+    _last_pages_fetched = 0
+
+    def _crawl_pages(self, query: SearchQuery, fetcher, max_pages: Optional[int] = None) -> List[Listing]:
         results: List[Listing] = []
         seen_ids = set()
-        # Die allgemeine Konfiguration ist eine Mindestgröße. Gerade die
-        # öffentliche E-Auto-Landingpage ist preislich nicht vorsortiert genug,
-        # um nach fünf Seiten zuverlässig alle passenden Fahrzeuge zu erfassen.
-        max_limit = max(self.max_pages or 0, self.FULL_CRAWL_MAX_PAGES)
+        # max_pages ist hier das verbleibende Budget der Gesamtsuche, nicht die
+        # allgemeine Stichprobengröße aus der Konfiguration.
+        if max_pages is None:
+            budget = int(getattr(self, "page_budget", 0) or self.PAGE_BUDGET)
+            max_pages = min(budget, self.FULL_CRAWL_MAX_PAGES)
+        max_limit = max(1, min(int(max_pages), self.FULL_CRAWL_MAX_PAGES))
+        self._last_pages_fetched = 0
         for page in range(1, max_limit + 1):
+            self._last_pages_fetched = page
             try:
                 html = fetcher(
                     self._build_url(query, page),

@@ -112,3 +112,55 @@ def test_mobile_de_preserves_results_when_later_page_is_blocked():
     assert raised.value.failed_page == 2
     assert len(raised.value.listings) == 1
     assert raised.value.listings[0].raw_id == "11223344"
+
+
+def _page_html(page: int) -> str:
+    """Eine Ergebnisseite mit zwei Karten, deren IDs je Seite eindeutig sind."""
+    cards = []
+    for i in (1, 2):
+        lid = page * 100 + i
+        cards.append(f"""
+    <article data-testid="result-listing">
+        <a href="/fahrzeuge/details.html?id={lid}">
+            <h2 data-testid="listing-title-card-view">VW ID.3 Pro S Seite {page}</h2>
+        </a>
+        <span data-testid="price-label">25.000 EUR</span>
+        <div data-testid="listing-details">EZ 04/2022 - 50.000 km - 110 kW (150 PS) - Elektro</div>
+        <div data-testid="seller-info">Autohaus, 66111 Saarbruecken</div>
+    </article>""")
+    return "<html><body>" + "".join(cards) + "</body></html>"
+
+
+def _endless_pages(pages):
+    """Fetcher, der jede angeforderte Seite bedient und die Aufrufe mitschreibt."""
+    def fetch_page(url):
+        page = int(url.split("pageNumber=")[1].split("&", 1)[0])
+        pages.append(page)
+        return _page_html(page)
+    return fetch_page
+
+
+def test_mobile_de_respects_page_budget():
+    """Der Crawl endet beim Seitenbudget statt bis zur Reissleine zu laufen."""
+    pages = []
+    with patch("kfz_crawler.portals.mobile_de.MobileDe._fetch",
+               side_effect=_endless_pages(pages)):
+        portal = MobileDe(max_pages=5)
+        listings = portal.search(SearchQuery(name="EV", fuel="elektro"))
+
+    # Ohne wirksames Budget liefe der Crawl bis FULL_CRAWL_MAX_PAGES durch.
+    assert len(pages) == MobileDe.PAGE_BUDGET
+    assert pages == list(range(1, MobileDe.PAGE_BUDGET + 1))
+    assert len(listings) == 2 * MobileDe.PAGE_BUDGET
+
+
+def test_mobile_de_page_budget_override_is_capped():
+    """Der Katalog-Sweep darf mehr anfordern, aber nie ueber die Reissleine."""
+    pages = []
+    with patch("kfz_crawler.portals.mobile_de.MobileDe._fetch",
+               side_effect=_endless_pages(pages)):
+        portal = MobileDe(max_pages=5)
+        portal.page_budget = 999          # weit ueber der Reissleine
+        portal.search(SearchQuery(name="EV", fuel="elektro"))
+
+    assert len(pages) == MobileDe.FULL_CRAWL_MAX_PAGES

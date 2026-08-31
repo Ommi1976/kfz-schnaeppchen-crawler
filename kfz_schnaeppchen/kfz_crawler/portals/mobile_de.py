@@ -30,7 +30,11 @@ class MobileDe(BasePortal):
     name = "mobile.de"
     BASE = "https://suchen.mobile.de"
     PREFERS_BROWSER = True  # Autarker Playwright Firefox Abruf
-    FULL_CRAWL_MAX_PAGES = 100  # harter Schutz, beendet regulär vorher bei leerer Seite
+    # Ergebnisseiten je Sitzung – harte Grenze gegen die Bot-Erkennung.
+    # Gemessen: 39 Seiten am Stück führten zur Sperre; eine reale Suche
+    # (159 Treffer) braucht neun. Die Anfragepause war nie das Problem.
+    PAGE_BUDGET = 12
+    FULL_CRAWL_MAX_PAGES = 40  # Reißleine, auch wenn page_budget gesetzt wird
 
     # ---- URL ----------------------------------------------------------
     def _build_url(self, query: SearchQuery, page: int) -> str:
@@ -123,11 +127,13 @@ class MobileDe(BasePortal):
     def _crawl_pages(self, query: SearchQuery, fetcher) -> List[Listing]:
         results: List[Listing] = []
         seen_ids = set()
-        # Die Einstellung max_pages war ursprünglich eine Stichprobengröße.
-        # Für mobile.de muss aber bis zur ersten leeren Seite gelesen werden,
-        # sonst fehlen bei mehr als fünf Seiten (z. B. 159 statt 104 Treffer)
-        # reguläre Inserate. FULL_CRAWL_MAX_PAGES ist nur eine Schutzgrenze.
-        max_limit = max(self.max_pages or 0, self.FULL_CRAWL_MAX_PAGES)
+        # max_pages ist bei den anderen Portalen die Stichprobengröße und wird
+        # hier bewusst NICHT verwendet: mit max_pages=5 fehlten reguläre
+        # Inserate (159 Treffer liegen auf neun Seiten). Stattdessen ein
+        # eigenes Seitenbudget, das der Katalog-Sweep über page_budget gezielt
+        # anheben darf – begrenzt durch FULL_CRAWL_MAX_PAGES.
+        budget = int(getattr(self, "page_budget", 0) or self.PAGE_BUDGET)
+        max_limit = max(1, min(budget, self.FULL_CRAWL_MAX_PAGES))
         for page in range(1, max_limit + 1):
             try:
                 html = fetcher(self._build_url(query, page))

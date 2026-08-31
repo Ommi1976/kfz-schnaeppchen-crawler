@@ -108,6 +108,9 @@ class SeenStore:
         except Exception:
             pass
 
+        for _key in self.purge_obsolete_settings():
+            logger.info("Altlast aus settings entfernt: %s", _key)
+
         self.conn.execute("CREATE INDEX IF NOT EXISTS idx_deals_ym ON deals(year, mileage)")
         self.conn.execute("CREATE INDEX IF NOT EXISTS idx_deals_filter ON deals(search_name, is_deal, price, year, mileage)")
         self.conn.execute("CREATE INDEX IF NOT EXISTS idx_deals_portal ON deals(portal, search_name)")
@@ -161,11 +164,13 @@ class SeenStore:
                 error         TEXT,
                 last_run      REAL,
                 last_success  REAL,
+                block_count   INTEGER DEFAULT 0,
                 PRIMARY KEY (search_name, portal)
             )
             """
         )
         for ddl in [
+            "ALTER TABLE portal_health ADD COLUMN block_count INTEGER DEFAULT 0",
             "ALTER TABLE discovered_ev_models ADD COLUMN sample_fingerprints TEXT",
             "ALTER TABLE discovered_ev_models ADD COLUMN portals TEXT",
             "ALTER TABLE discovered_ev_models ADD COLUMN min_battery_kwh REAL",
@@ -650,45 +655,93 @@ class SeenStore:
             self.conn.execute(
                 """
                 INSERT INTO portal_health
-                (search_name, portal, status, raw_count, kept_count, excluded_json, error, last_run, last_success)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                (search_name, portal, status, raw_count, kept_count, excluded_json, error,
+                 last_run, last_success, block_count)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(search_name, portal) DO UPDATE SET
                     status=excluded.status, raw_count=excluded.raw_count,
                     kept_count=excluded.kept_count, excluded_json=excluded.excluded_json,
                     error=excluded.error, last_run=excluded.last_run,
-                    last_success=CASE WHEN excluded.status = 'ok' THEN excluded.last_run ELSE portal_health.last_success END
+                    last_success=CASE WHEN excluded.status = 'ok' THEN excluded.last_run ELSE portal_health.last_success END,
+                    block_count=CASE
+                        WHEN excluded.status = 'ok' THEN 0
+                        WHEN excluded.status IN ('blocked', 'partial')
+                            THEN COALESCE(portal_health.block_count, 0) + 1
+                        ELSE COALESCE(portal_health.block_count, 0)
+                    END
                 """,
                 (
                     search_name, portal, status, raw_count, kept_count,
                     json.dumps(exclusions or {}, ensure_ascii=False), error[:500], now,
                     now if status == "ok" else None,
+                    # Erster Eintrag: ein Block zählt sofort als Stufe 1.
+                    1 if status in ("blocked", "partial") else 0,
                 ),
             )
             self.conn.commit()
+
+    # Schlüssel abgelöster Funktionen. Kein Codepfad liest sie noch; der
+    # Cookie-Import läuft heute über cookie_storage (Datei in /data).
+    # mobile_cookies enthielt ein echtes Akamai-Sessioncookie – ungenutzte
+    # Zugangsdaten gehören nicht dauerhaft in die Datenbank.
+    OBSOLETE_SETTINGS = ("mobile_cookies", "mobile_status", "ingest_token")
+
+    def purge_obsolete_settings(self) -> List[str]:
+        """Entfernt Altlasten aus settings und meldet, was entfernt wurde."""
+        removed: List[str] = []
+        with self._lock:
+            try:
+                for key in self.OBSOLETE_SETTINGS:
+                    cur = self.conn.execute("DELETE FROM settings WHERE key = ?", (key,))
+                    if cur.rowcount:
+                        removed.append(key)
+                if removed:
+                    self.conn.commit()
+            except sqlite3.OperationalError:
+                return []
+        return removed
+
+    # Gestaffelte Schutzpausen: der erste Block ist oft ein Ausreißer, ein
+    # wiederholter zeigt an, dass die Quelle den Zugriff ernsthaft ablehnt.
+    BLOCK_COOLDOWNS = (2 * 3600, 6 * 3600, 24 * 3600)
+    PARTIAL_COOLDOWN = 90 * 60
 
     def portal_cooldown_remaining(
         self,
         search_name: str,
         portal: str,
-        blocked_seconds: float = 3 * 3600,
-        partial_seconds: float = 90 * 60,
+        blocked_seconds: Optional[float] = None,
+        partial_seconds: Optional[float] = None,
     ) -> float:
         """Restzeit bis zu einem sicheren erneuten Portalabruf.
 
         Ein Block wird nicht in jedem geplanten Suchlauf erneut provoziert.
+        Die Pause eskaliert mit der Zahl aufeinanderfolgender Blocks
+        (2 h, 6 h, dann 24 h); ein erfolgreicher Lauf setzt sie zurück.
         Erfolgreiche Läufe und unbekannte Zustände haben keine Sperrzeit.
         """
         with self._lock:
             row = self.conn.execute(
-                "SELECT status, last_run FROM portal_health WHERE search_name = ? AND portal = ?",
+                "SELECT status, last_run, block_count FROM portal_health "
+                "WHERE search_name = ? AND portal = ?",
                 (search_name, portal),
             ).fetchone()
         if not row or not row["last_run"]:
             return 0.0
-        cooldown = {
-            "blocked": blocked_seconds,
-            "partial": partial_seconds,
-        }.get(row["status"], 0.0)
+
+        status = row["status"]
+        if status == "blocked":
+            if blocked_seconds is not None:
+                cooldown = blocked_seconds
+            else:
+                # block_count zählt ab 1 für den ersten Block.
+                stufe = max(1, int(row["block_count"] or 1))
+                idx = min(stufe, len(self.BLOCK_COOLDOWNS)) - 1
+                cooldown = self.BLOCK_COOLDOWNS[idx]
+        elif status == "partial":
+            cooldown = partial_seconds if partial_seconds is not None else self.PARTIAL_COOLDOWN
+        else:
+            cooldown = 0.0
         return max(0.0, float(row["last_run"]) + cooldown - time.time())
 
     def list_portal_health(self, search_name: Optional[str] = None) -> List[dict]:
