@@ -60,19 +60,21 @@ if not Path("/data").exists():
     PROFILE_DIR = Path(__file__).parent.parent / "firefox_profile"
 
 
-STEALTH_JS = """
-Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
-delete Object.getPrototypeOf(navigator).webdriver;
-Object.defineProperty(navigator, 'plugins', { get: () => [1, 2, 3, 4, 5] });
-Object.defineProperty(navigator, 'languages', { get: () => ['de-DE', 'de', 'en-US', 'en'] });
-"""
-
-CHROMIUM_STEALTH_JS = STEALTH_JS + """
-window.chrome = { runtime: {}, loadTimes: function() {}, csi: function() {}, app: {} };
-"""
+# Bewusst KEINE Fingerprint-Manipulation mehr (K4 §21).
+#
+# Zuvor wurden navigator.webdriver, navigator.plugins und window.chrome
+# ueberschrieben. Das tarnt nicht, sondern faellt auf: echte Browser liefern
+# Plugin-Objekte mit Namen und MIME-Typen, kein Array aus fuenf Ganzzahlen –
+# das ist die bekannteste naive Stealth-Signatur. Bei Firefox kam zusaetzlich
+# Chrome-spezifisches window.chrome dazu, was den Fingerabdruck in sich
+# widerspruechlich macht und damit schlechter als ein ehrlicher Headless-Lauf.
+#
+# Die Konstanten bleiben als leere Skripte erhalten, damit vorhandene
+# Aufrufstellen unveraendert funktionieren.
+STEALTH_JS = ""
+CHROMIUM_STEALTH_JS = ""
 
 CHROMIUM_ARGS = [
-    "--disable-blink-features=AutomationControlled",
     "--no-sandbox",
     "--disable-setuid-sandbox",
     "--disable-dev-shm-usage",
@@ -177,7 +179,12 @@ def fetch_rendered(
     wait_selector_timeout_ms: int = 15000,
     max_retries: int = 2,
 ) -> str:
-    """Lädt eine URL in Playwright Chromium/Firefox mit Stealth-Injektion und dynamischer Tor-Rotation."""
+    """Lädt eine URL in Playwright Chromium/Firefox und liefert das HTML.
+
+    Ohne Fingerprint-Manipulation (K4 §21). Tor wird nur genutzt, wenn es
+    ausdrücklich über KFZ_USE_TOR aktiviert ist – Exit-Nodes sind bei
+    großen Portalen reputationsbelastet und verschlechtern die Lage eher.
+    """
     try:
         from playwright.sync_api import sync_playwright
     except ImportError as e:
@@ -215,7 +222,9 @@ def fetch_rendered(
                 )
                 page = ctx.new_page()
                 try:
-                    page.add_init_script(CHROMIUM_STEALTH_JS if engine == "chromium" else STEALTH_JS)
+                    skript = CHROMIUM_STEALTH_JS if engine == "chromium" else STEALTH_JS
+                    if skript:
+                        page.add_init_script(skript)
                 except Exception:
                     pass
 
@@ -308,7 +317,8 @@ def rendered_session(
                 context_kwargs["user_agent"] = _matching_user_agent(browser)
                 context = browser.new_context(**context_kwargs)
                 page_script = CHROMIUM_STEALTH_JS if engine == "chromium" else STEALTH_JS
-                context.add_init_script(page_script)
+                if page_script:
+                    context.add_init_script(page_script)
             page = context.pages[0] if context.pages else context.new_page()
             last_request_at = 0.0
 

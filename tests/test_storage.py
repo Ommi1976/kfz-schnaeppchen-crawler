@@ -240,3 +240,53 @@ def test_reevaluation_recovers_fields_without_network(tmp_path):
     # Ein zweiter Lauf findet nichts mehr zu tun.
     assert reevaluate_stored_listings(store) == {"geprueft": 0}
     store.close()
+
+
+def test_schema_migration_is_versioned_backed_up_and_idempotent(tmp_path):
+    """Migrationen laufen genau einmal, mit Sicherung und festgehaltener Version."""
+    from kfz_crawler.storage import SeenStore
+    from kfz_crawler.migrations import SCHEMA_VERSION
+
+    db = tmp_path / "mig.sqlite"
+    store = SeenStore(str(db))
+    assert store.schema_version == SCHEMA_VERSION
+
+    tabellen = {r[0] for r in store.conn.execute(
+        "SELECT name FROM sqlite_master WHERE type='table'")}
+    assert {"vehicles", "offers", "vehicle_links"} <= tabellen
+    store.close()
+
+    # Zweites Öffnen darf nichts erneut migrieren.
+    wieder = SeenStore(str(db))
+    assert wieder.schema_version == SCHEMA_VERSION
+    wieder.close()
+
+    # Die erste Migration einer bestehenden Datei legt eine Sicherung an.
+    # (Bei der Neuanlage existiert noch keine Datei zum Sichern.)
+    assert list(tmp_path.glob("mig.sqlite.backup-*"))
+
+
+def test_failed_migration_keeps_previous_version(tmp_path, monkeypatch):
+    """Eine fehlgeschlagene Migration rollt zurück und behält den alten Stand."""
+    import sqlite3
+    from kfz_crawler import migrations
+
+    db = tmp_path / "kaputt.sqlite"
+    conn = sqlite3.connect(str(db))
+    conn.execute("CREATE TABLE probe (x INTEGER)")
+    conn.commit()
+
+    def kaputte_migration(c):
+        c.execute("CREATE TABLE halb (x INTEGER)")
+        raise RuntimeError("Abbruch mitten drin")
+
+    monkeypatch.setattr(migrations, "MIGRATIONS",
+                        [(1, "absichtlich fehlerhaft", kaputte_migration)])
+
+    version = migrations.migriere(conn, str(db))
+    assert version == 0                       # Version nicht hochgesetzt
+    tabellen = {r[0] for r in conn.execute(
+        "SELECT name FROM sqlite_master WHERE type='table'")}
+    assert "halb" not in tabellen             # Teilzustand zurückgerollt
+    assert "probe" in tabellen                # Bestand unberührt
+    conn.close()

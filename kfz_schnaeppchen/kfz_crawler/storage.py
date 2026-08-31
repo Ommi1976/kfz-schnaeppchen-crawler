@@ -116,6 +116,15 @@ class SeenStore:
         for _key in self.purge_obsolete_settings():
             logger.info("Altlast aus settings entfernt: %s", _key)
 
+        # Versionierte Migrationen mit Sicherung (K4 §18). Laeuft nach der
+        # Anlage der Basistabellen, damit vorhandene Daten mitwandern.
+        try:
+            from .migrations import migriere
+            self.schema_version = migriere(self.conn, db_path)
+        except Exception:
+            logger.exception("Schema-Migration fehlgeschlagen")
+            self.schema_version = 0
+
         self.conn.execute("CREATE INDEX IF NOT EXISTS idx_deals_ym ON deals(year, mileage)")
         self.conn.execute("CREATE INDEX IF NOT EXISTS idx_deals_filter ON deals(search_name, is_deal, price, year, mileage)")
         self.conn.execute("CREATE INDEX IF NOT EXISTS idx_deals_portal ON deals(portal, search_name)")
