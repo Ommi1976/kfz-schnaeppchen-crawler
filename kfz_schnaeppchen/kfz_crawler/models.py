@@ -449,6 +449,27 @@ def classify_range_standard(text: str | None, value: Optional[int]) -> str:
     return "unbekannt"
 
 
+# Plausibilitaetsrahmen fuer Reichweite je kWh (Bruttokapazitaet).
+#
+# Gemessen an 144 Inseraten mit bekanntem Akku: 5,13 bis 7,67 km/kWh, Median
+# 6,55. Die Grenzen hier sind bewusst weiter gesetzt, damit nur eindeutige
+# Fehler auffallen und keine ungewoehnlichen, aber echten Fahrzeuge.
+KM_JE_KWH_MIN = 3.8
+KM_JE_KWH_MAX = 8.2
+
+
+def range_plausibel(range_km: Optional[int], akku_kwh: Optional[float]) -> Optional[bool]:
+    """Passt eine Reichweite zur Akkugroesse? None, wenn nicht pruefbar.
+
+    Haeufigster Fehlerfall: Portale nennen einen Modellwert, der zur
+    groesseren Akkuvariante gehoert. Ein Cupra Born mit 58 kWh und angeblich
+    555 km waeren 9 km/kWh – das gibt es nicht.
+    """
+    if not range_km or not akku_kwh:
+        return None
+    return KM_JE_KWH_MIN <= (range_km / akku_kwh) <= KM_JE_KWH_MAX
+
+
 def infer_listing_range(listing: "Listing") -> None:
     """Füllt die elektrische Reichweite nach:
     1. Priorität: Interne Referenzdatenbank (ev_database) mit offiziellem WLTP-Kombiniert-Wert.
@@ -489,6 +510,29 @@ def infer_listing_range(listing: "Listing") -> None:
             _record_evidence(listing, "ev_range_km", "title" if title_rng is not None else "detail_text", 0.91, "Reichweitenangabe im Inserat")
         elif listing.ev_range_km is not None:
             _record_evidence(listing, "ev_range_km", "portal_structured", 0.82, "Portalwert")
+
+    # Gegenprobe an der Akkugröße. Portale nennen häufig einen Modellwert, der
+    # zur größeren Akkuvariante gehört – bei mehrdeutigen Titeln ("Born 231 PS")
+    # sind das über 100 km Unterschied. Passt die Reichweite nicht zum Akku,
+    # wird der Referenzwert des Modells vorgezogen, sofern der stimmig ist.
+    akku = listing.battery_gross_kwh or listing.battery_kwh
+    if range_plausibel(listing.ev_range_km, akku) is False:
+        referenz = match.spec.wltp_range_km if match else None
+        if range_plausibel(referenz, akku):
+            _record_evidence(
+                listing, "ev_range_km", "ev_database", 0.80,
+                f"Inseratswert {listing.ev_range_km} km unplausibel für {akku:g} kWh",
+            )
+            listing.ev_range_km = referenz
+            listing.ev_range_standard = "wltp"
+        else:
+            # Kein belastbarer Ersatz: lieber als unsicher kennzeichnen, als
+            # eine Zahl zu zeigen, die zum Fahrzeug nicht passen kann.
+            listing.ev_range_standard = "unplausibel"
+            _record_evidence(
+                listing, "ev_range_km", "plausibilitaet", 0.30,
+                f"{listing.ev_range_km} km passen nicht zu {akku:g} kWh",
+            )
 
 
     # Stammt der Wert aus dem Inseratstext, wird der Messstandard dort gesucht.

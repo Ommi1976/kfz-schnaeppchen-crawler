@@ -358,3 +358,36 @@ def test_soh_evidence_levels():
     infer_listing_details(listing)
     assert listing.battery_soh == 94.6
     assert listing.battery_soh_level == "bestaetigt"
+
+
+def test_range_is_checked_against_battery_size():
+    """Ein Modellwert der groesseren Akkuvariante darf nicht stehenbleiben."""
+    from kfz_crawler.models import range_plausibel
+
+    # Ein Cupra Born mit 58 kWh schafft keine 555 km – das waeren 9 km/kWh.
+    assert range_plausibel(555, 62.0) is False
+    # Mit der 77-kWh-Variante (82 brutto) passt derselbe Wert.
+    assert range_plausibel(555, 82.0) is True
+    assert range_plausibel(424, 62.0) is True
+    # Grosse, schwere Fahrzeuge bleiben zulaessig.
+    assert range_plausibel(513, 100.0) is True
+    # Ohne einen der beiden Werte ist nichts pruefbar.
+    assert range_plausibel(None, 62.0) is None
+    assert range_plausibel(500, None) is None
+
+
+def test_implausible_range_falls_back_to_reference_value():
+    """Passt die Reichweite nicht zum Akku, gewinnt der Referenzwert."""
+    listing = Listing(portal="AutoUncle", url="u",
+                      title="CUPRA Born 231 PS Reichweite : 555 km 58 kWh Akku")
+    infer_listing_details(listing)
+    # 555 km bei 58 kWh sind unmöglich – korrigiert auf den Modellwert.
+    assert listing.ev_range_km is not None
+    assert listing.ev_range_km < 500
+    assert listing.ev_range_standard == "wltp"
+
+    # Stimmiger Fall bleibt unangetastet.
+    ok = Listing(portal="AutoUncle", url="u",
+                 title="CUPRA Born 231 PS 77 kWh Reichweite : 555 km")
+    infer_listing_details(ok)
+    assert ok.ev_range_km == 555
