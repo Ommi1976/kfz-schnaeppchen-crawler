@@ -206,7 +206,7 @@ class Kleinanzeigen(BasePortal):
                 title=(title or "Kleinanzeigen-Inserat")[:120],
                 url=url,
                 price=price,
-                fuel=query.fuel if query.fuel else None,
+                fuel=self._extract_fuel(listing_text),
                 mileage=self._extract_km(listing_text),
                 year=self._extract_year(listing_text),
                 ev_range_km=extract_ev_range_km(listing_text),
@@ -339,10 +339,73 @@ class Kleinanzeigen(BasePortal):
             return int(re.sub(r"[^\d]", "", m.group(1)))
         return None
 
+    # Motorkennungen des deutschen Marktes. Wichtig ist die Stellung des "i":
+    # "740i" ist ein Benziner, "i4" ein Elektroauto von BMW.
+    _VERBRENNER_RE = re.compile(
+        r"\b(?:diesel|benzin(?:er)?|ottomotor|hubraum|zylinder"
+        r"|tdi|tsi|tfsi|gti|gtd|fsi|hdi|dci|cdi|crdi|jtd|multijet|bluetec|ecoboost|cdti|tdci|bluehdi|d-?4-?d|dtec|blueefficiency"
+        r"|\d{3}\s?[id]\b|\d\.\d\s?(?:l|liter|tdi|tsi))\b",
+        re.I,
+    )
+    _ELEKTRO_RE = re.compile(
+        r"\b(?:elektro|vollelektrisch|e-?auto|\bbev\b|kwh|elektromotor"
+        r"|stromer|akkukapazit[äa]t|ladeleistung)\b",
+        re.I,
+    )
+    _HYBRID_RE = re.compile(r"\b(?:hybrid|phev|plug-?in)\b", re.I)
+    # Modellkennungen, die den Antrieb nicht ausschreiben. Der Lookbehind
+    # verhindert Treffer mitten in einer Motorkennung: bei "320i" steht vor
+    # dem "i" eine Ziffer, bei "BMW i4" ein Leerzeichen.
+    _EV_MODELL_RE = re.compile(
+        r"(?<![\w-])(?:"
+        r"id\.?\s?[34578]"
+        r"|i[3457]\b|ix[13]?\b"
+        r"|eq[abcesv]?\b(?!\s*boost)"
+        r"|e-?tron|edrive"
+        r"|ioniq\s?[56]\b|ev6\b|niro\s?ev\b|kona\s?elektro"
+        r"|zoe\b|leaf\b|born\b|enyaq|e-?golf|e-?up\b|e-?c4\b"
+        r"|model\s?[3ysx]\b"
+        r")",
+        re.I,
+    )
+
+    @classmethod
+    def _extract_fuel(cls, text: str) -> Optional[str]:
+        """Kraftstoffart aus dem Inseratstext lesen.
+
+        Vorher wurde hier die *gesuchte* Art eingetragen – jedes Inserat galt
+        damit als passend, und der Kraftstofffilter war wirkungslos. So kam ein
+        BMW 740i (Benziner) in eine Elektro-Suche.
+
+        Bei Widerspruch gewinnt der Verbrenner-Hinweis: "Hybrid" und "Elektro"
+        stehen oft nur als Suchbegriff im Text, eine Motorkennung wie 740i oder
+        TDI ist dagegen eindeutig.
+        """
+        if not text:
+            return None
+        if cls._HYBRID_RE.search(text):
+            return "hybrid"
+        if cls._VERBRENNER_RE.search(text):
+            return "diesel" if re.search(r"\b(?:diesel|tdi|hdi|dci|cdi|crdi|cdti|tdci|bluehdi|d-?4-?d|dtec|\d{3}\s?d)\b",
+                                         text, re.I) else "benzin"
+        if cls._ELEKTRO_RE.search(text) or cls._EV_MODELL_RE.search(text):
+            return "elektro"
+        return None
+
     @staticmethod
     def _extract_year(text: str) -> Optional[int]:
-        m = re.search(r"\b(19[89]\d|20[0-2]\d)\b", text)
-        return int(m.group(1)) if m else None
+        """Baujahr nur aus einer ausdrücklichen Zulassungsangabe.
+
+        Die erste Jahreszahl im Text zu nehmen ging schief: Der Kartentext
+        enthält auch das Einstelldatum, weshalb reihenweise Inserate als
+        Baujahr das laufende Jahr trugen – selbst Zubehörangebote. Ein
+        falsches Baujahr ist schlechter als keines: es verfälscht den Filter
+        und lässt Teileangebote als Fahrzeuge durchgehen.
+        """
+        from ..models import extract_first_registration
+
+        jahr, _monat, art = extract_first_registration(text)
+        return jahr if art in ("ez", "modelljahr") else None
 
     @staticmethod
     def _text(node, selector: str) -> Optional[str]:

@@ -17,6 +17,9 @@ from collections import Counter
 from typing import Optional
 
 from .models import DETECTOR_VERSION, Listing, infer_listing_details
+from .portals.kleinanzeigen import Kleinanzeigen as _Kleinanzeigen
+
+_kraftstoff_aus_text = _Kleinanzeigen._extract_fuel
 
 logger = logging.getLogger(__name__)
 
@@ -102,6 +105,19 @@ def reevaluate_stored_listings(store, limit: int = 200,
 
         felder = row.keys()
         setzt = {}
+
+        # Kleinanzeigen trug bis 1.2.0 die *gesuchte* Kraftstoffart ein statt
+        # der tatsaechlichen. Dadurch galt jedes Inserat als passend, und ein
+        # BMW 740i landete in einer Elektro-Suche. Nur dieses Portal wird
+        # korrigiert: die uebrigen melden den Antrieb selbst.
+        if (row["portal"] or "").lower().startswith("kleinanzeigen"):
+            erkannt = _kraftstoff_aus_text(
+                " ".join(x for x in (row["title"], listing.body) if x)
+            )
+            if erkannt and erkannt != (row["fuel"] or "").strip().lower():
+                setzt["fuel"] = erkannt
+                stats[f"korrigiert:fuel->{erkannt}"] += 1
+
         for name in _ABGELEITET:
             if name not in felder:
                 continue

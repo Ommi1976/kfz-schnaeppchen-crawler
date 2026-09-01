@@ -9,7 +9,7 @@ from typing import Any, Optional
 
 
 PS_PER_KW = 1.35962   # Umrechnung kW -> PS
-DETECTOR_VERSION = "1.2.0"
+DETECTOR_VERSION = "1.3.0"
 
 
 _BATTERY_KWH_RE = re.compile(
@@ -991,26 +991,38 @@ def is_non_pkw(listing: "Listing") -> bool:
 # Zubehör- und Teileangebote. Bewusst NUR auf dem Titel geprüft: Begriffe wie
 # "Winterreifen" oder "Anhängerkupplung" stehen in fast jedem echten
 # Fahrzeuginserat in der Ausstattungsliste und würden dort falsch greifen.
+# Ohne \b am Wortanfang, damit Zusammensetzungen mitgehen ("Alufelgen",
+# "Komplettradsatz"). Umlautfreie Schreibweisen (ae/oe/ue) sind mitgefasst,
+# weil Inserate sie häufig verwenden.
 _ZUBEHOER_PATTERNS = [
     _re.compile(p, _re.I) for p in [
+        # Ausdrücklich als Zubehör bezeichnet
+        r"zubeh[öo]e?r", r"\borginal|\boriginal\b.*\b(teil|zierleiste|abdeckung)",
         # Laden
-        r"\bwallbox", r"\bladestation", r"\bladekabel", r"\bladeziegel",
-        r"\btyp[- ]?2[- ]?(?:kabel|stecker|ladekabel)", r"\bmode[- ]?[23]\b",
+        r"wallbox", r"ladestation", r"ladekabel", r"ladeziegel", r"ladeadapter",
+        r"\btyp[- ]?2\b", r"\bmode[- ]?[23]\b", r"schuko.?adapter",
         # Räder und Reifen
-        r"\b(?:winter|sommer|allwetter|ganzjahres)(?:kompletträder|reifen|räder)\b",
-        r"\bkomplettr[äa]der", r"\bradsatz", r"\bfelgens(?:atz|chrauben)",
-        r"\breifensatz", r"\bstahlfelgen", r"\balufelgen",
+        r"komplettr[äa]der", r"radsatz", r"felge[nr]?\b", r"reifen\b",
+        r"radkappe", r"radschraube", r"radzierblende", r"\bzoll\b.*\b(felge|rad)",
         # Ersatzteile
-        r"\bersatzteil", r"\bgebrauchtteil", r"\bschlachtfest",
-        r"\b(?:steuer|motor)ger[äa]t\b", r"\bstoßstange", r"\bkotfl[üu]gel",
-        r"\bscheinwerfer\b", r"\br[üu]ckleuchte", r"\bau[ßs]enspiegel\b",
-        r"\bstartbatterie", r"\b12[- ]?v[- ]?batterie",
+        r"ersatzteil", r"gebrauchtteil", r"schlachtfest",
+        r"steuerger[äa]e?t\b", r"motorger[äa]e?t\b",
+        r"sto[ßs]stange", r"kotfl[üu]e?gel", r"scheinwerfer\b", r"r[üu]e?ckleuchte",
+        r"au[ßs]enspiegel\b", r"startbatterie", r"\b12[- ]?v[- ]?batterie",
+        r"\bt[üu]e?rgriff", r"heckklappe\b", r"motorhaube\b",
         # Innenraum und Anbauteile
-        r"\bsitzbez[üu]ge", r"\bfu[ßs]matten", r"\bkofferraumwanne",
-        r"\bdachbox\b", r"\bdachtr[äa]ger", r"\bfahrradtr[äa]ger",
-        r"\bschutzh[üu]lle", r"\bwerkstatthandbuch",
+        r"sitzbez[üu]e?ge?", r"fu[ßs]matten", r"kofferraumwanne",
+        r"gep[äa]e?ckraum(?:abdeckung|wanne|matte)", r"laderaumwanne",
+        r"zierleiste", r"\blenkrad\b", r"mittelkonsole", r"sonnenblende",
+        r"dachbox\b", r"dachtr[äa]e?ger", r"fahrradtr[äa]e?ger",
+        r"anh[äa]e?ngerkupplung", r"\bahk\b(?!.*\b(?:km|kw|ps)\b)",
+        r"schutzh[üu]e?lle", r"werkstatthandbuch", r"\bemblem\b", r"schriftzug",
     ]
 ]
+
+# Unterhalb dieses Preises ist ein Angebot mit Zubehörbegriff im Titel kein
+# fahrbares Auto. Ein Wrack wäre über die Defekt-Muster ohnehin schon erfasst.
+ZUBEHOER_PREISGRENZE = 2000
 
 # "… für VW ID.3" kennzeichnet ein Teil FÜR ein Auto, nicht das Auto selbst.
 _ZUBEHOER_FUER = _re.compile(r"\bf[üu]r\s+(?:den\s+|die\s+|das\s+)?[A-Z]", _re.I)
@@ -1024,17 +1036,24 @@ def is_zubehoer(listing: "Listing") -> bool:
     so werden Teileangebote erkannt, deren Bezeichnung hier nicht gelistet ist.
     """
     titel = listing.title or ""
-
-    # Entscheidend ist nicht das Wort, sondern ob ein Fahrzeug dahintersteht:
-    # "VW ID.3 mit Winterreifen und Anhängerkupplung" ist ein Auto, das Zubehör
-    # in der Ausstattung nennt. Ein echtes Fahrzeuginserat trägt Baujahr UND
-    # Kilometerstand; ein Zubehörangebot hat beides nicht.
-    if listing.year or listing.mileage:
+    passt = (any(p.search(titel) for p in _ZUBEHOER_PATTERNS)
+             or bool(_ZUBEHOER_FUER.search(titel)))
+    if not passt:
         return False
 
-    if any(p.search(titel) for p in _ZUBEHOER_PATTERNS):
-        return True
-    return bool(_ZUBEHOER_FUER.search(titel))
+    # Entscheidend ist nicht das Wort, sondern ob ein Fahrzeug dahintersteht:
+    # "VW ID.3 mit Winterreifen und AHK" ist ein Auto, das Zubehör in der
+    # Ausstattung nennt.
+    #
+    # Der Preis trennt das zuverlässig: ein fahrbares Auto kostet Tausende,
+    # ein Sitzbezug 190 €. Auf Baujahr/Kilometerstand ist kein Verlass – bei
+    # Kleinanzeigen tragen auch Zubehörangebote Werte, die aus dem Text
+    # aufgelesen wurden (etwa das Einstelljahr).
+    if listing.price is not None:
+        return listing.price < ZUBEHOER_PREISGRENZE
+
+    # Ohne Preis hilft nur, ob überhaupt Fahrzeugdaten vorliegen.
+    return not (listing.year and listing.mileage)
 
 
 def battery_for_filter(l: "Listing") -> Optional[float]:

@@ -47,3 +47,51 @@ def test_ort_wird_vom_einstelldatum_getrennt():
     assert Kleinanzeigen._ort_saeubern("Nürtingen Heute") == "Nürtingen"
     assert Kleinanzeigen._ort_saeubern("Losheim am See") == "Losheim am See"
     assert Kleinanzeigen._ort_saeubern("Eisenach 12.03.2026") == "Eisenach"
+
+
+# --- Kraftstofferkennung -------------------------------------------------
+# Bis 1.2.0 trug der Parser die *gesuchte* Kraftstoffart ein. Damit galt jedes
+# Inserat als passend, und ein BMW 740i erschien in einer Elektro-Suche.
+
+VERBRENNER = [
+    ("BMW 740 i E66 In Auftrag von meinem Kollegen", "benzin"),
+    ("BMW 320i Sport Line", "benzin"),
+    ("Audi A4 Avant 2.0 TFSI", "benzin"),
+    ("VW Golf 2.0 TDI DSG", "diesel"),
+    ("BMW 320d Touring", "diesel"),
+    ("Opel Astra 1.6 CDTI Kombi", "diesel"),
+    ("Ford Focus 1.5 TDCi", "diesel"),
+]
+
+ELEKTRO = [
+    "BMW i4 eDrive 40",
+    "Smart ForTwo coupe EQ Klima",
+    "VW ID.3 Pro Performance",
+    "Audi Q4 e-tron 40 quattro",
+    "Tesla Model Y Performance",
+    "Cupra Born 58 kWh",
+    "Hyundai Ioniq 5 Uniq",
+    "Renault Zoe Intens vollelektrisch",
+]
+
+
+def test_verbrenner_werden_erkannt():
+    for text, erwartet in VERBRENNER:
+        assert Kleinanzeigen._extract_fuel(text) == erwartet, text
+
+
+def test_elektro_wird_erkannt():
+    for text in ELEKTRO:
+        assert Kleinanzeigen._extract_fuel(text) == "elektro", text
+
+
+def test_motorkennung_wird_nicht_mit_ev_modell_verwechselt():
+    """"320i" darf nicht als BMW i3/i4 durchgehen, "EQ Boost" ist ein Benziner."""
+    assert Kleinanzeigen._extract_fuel("BMW 320i") == "benzin"
+    assert Kleinanzeigen._extract_fuel("Mercedes C 200 EQ Boost Benzin") == "benzin"
+
+
+def test_unbekannter_antrieb_bleibt_offen():
+    """Ohne Hinweis wird nichts behauptet – sonst filtert man Gutes weg."""
+    assert Kleinanzeigen._extract_fuel("Winterreifen Alufelgen 18 Zoll") is None
+    assert Kleinanzeigen._extract_fuel("") is None

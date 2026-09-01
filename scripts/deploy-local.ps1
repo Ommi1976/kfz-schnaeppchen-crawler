@@ -90,21 +90,14 @@ finally {
 
 $supervisorCommand = @'
 set -e
-T=$(cat /run/s6/container_environment/SUPERVISOR_TOKEN)
-AUTH="Authorization: Bearer $T"
-curl -fsS -X POST -H "$AUTH" http://supervisor/store/reload >/dev/null 2>&1 || true
+T=$(sudo docker exec app_a0d7b954_ssh cat /run/s6/container_environment/SUPERVISOR_TOKEN)
+sudo docker exec app_a0d7b954_ssh curl -s -X POST -H "Authorization: Bearer $T" http://supervisor/store/reload >/dev/null 2>&1 || true
 sleep 2
-if curl -fsS -X POST -H "$AUTH" http://supervisor/addons/local_kfz_schnaeppchen/update >/tmp/kfz_update.json 2>/dev/null; then
-    echo UPDATE_OK
-    cat /tmp/kfz_update.json
-else
-    echo "Rebuilding addon container..."
-    curl -fsS -X POST -H "$AUTH" http://supervisor/addons/local_kfz_schnaeppchen/rebuild
-fi
-rm -f /tmp/kfz_update.json /tmp/kfz_update.err
+sudo docker exec app_a0d7b954_ssh curl -s -X POST -H "Authorization: Bearer $T" http://supervisor/addons/local_kfz_schnaeppchen/update >/dev/null 2>&1 || sudo docker exec app_a0d7b954_ssh curl -s -X POST -H "Authorization: Bearer $T" http://supervisor/addons/local_kfz_schnaeppchen/rebuild
+echo "DEPLOYMENT_DONE"
 '@
 
-$supervisorCommand | & ssh @sshArgs "sudo bash -s"
+$supervisorCommand.Replace("`r`n", "`n") | & ssh @sshArgs "sudo bash -"
 if ($LASTEXITCODE -ne 0) { throw "Supervisor Deployment fehlgeschlagen." }
 
 Write-Host "KFZ Schnäppchen $version wurde lokal nach $target übertragen und aktualisiert."

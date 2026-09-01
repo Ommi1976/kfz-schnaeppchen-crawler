@@ -331,3 +331,45 @@ def test_stale_listings_are_hidden_by_default(tmp_path):
     assert len(store.list_deals(include_stale=True)) == 3     # auf Wunsch alle
     assert store.count_stale() == 2                           # und zählbar
     store.close()
+
+
+def test_reevaluation_corrects_kleinanzeigen_fuel(tmp_path):
+    """Der falsch uebernommene Kraftstoff wird im Altbestand richtiggestellt.
+
+    Kleinanzeigen trug bis 1.2.0 die *gesuchte* Art ein. Ein BMW 740i stand
+    damit als "elektro" in der Datenbank und ueberstand jeden Elektro-Filter.
+    """
+    from kfz_crawler.storage import SeenStore
+    from kfz_crawler.models import Listing
+    from kfz_crawler.reevaluate import reevaluate_stored_listings
+
+    store = SeenStore(str(tmp_path / "fuel.sqlite"))
+    store.record_listing("EV", Listing(
+        portal="Kleinanzeigen", url="https://example.test/740i",
+        title="BMW 740 i E66", price=5450, year=2003, mileage=139000,
+        fuel="elektro", body="BMW 740 i E66 Automatik Leder",
+    ))
+    store.record_listing("EV", Listing(
+        portal="Kleinanzeigen", url="https://example.test/id3",
+        title="VW ID.3 Pro Performance", price=21000, year=2021, mileage=40000,
+        fuel="elektro", body="VW ID.3 Pro Performance 58 kWh",
+    ))
+    # Anderes Portal meldet den Antrieb selbst und bleibt unangetastet.
+    store.record_listing("EV", Listing(
+        portal="mobile.de", url="https://example.test/mb",
+        title="Mercedes EQC 400", price=30000, year=2021, mileage=50000,
+        fuel="elektro", body="Mercedes EQC 400 4MATIC",
+    ))
+    store.conn.execute("UPDATE deals SET detector_version='1.2.0'")
+    store.conn.commit()
+
+    reevaluate_stored_listings(store)
+
+    werte = {
+        r["url"]: r["fuel"]
+        for r in store.conn.execute("SELECT url, fuel FROM deals").fetchall()
+    }
+    assert werte["https://example.test/740i"] == "benzin"
+    assert werte["https://example.test/id3"] == "elektro"
+    assert werte["https://example.test/mb"] == "elektro"
+    store.close()

@@ -51,13 +51,18 @@ _SUSPECT_PATTERNS: List[Tuple[str, str]] = [
     (r"\bwasserschaden", "Wasserschaden"),
     # Leasing: der genannte Betrag ist die Monatsrate, nicht der Kaufpreis.
     # Ohne diese Erkennung erscheint eine 78-€-Rate als 90-%-Schnäppchen.
-    (r"\bleasing[üu]bernahme", "Leasingübernahme (Preis = Monatsrate)"),
-    # Das allgemeine Muster tritt hinter das genauere zurueck, sonst stuenden
-    # bei einer Uebernahme zwei fast gleiche Gruende nebeneinander.
-    (r"\bleasing(?![üu]bernahme)", "Leasing (Preis = Monatsrate)"),
-    (r"\b[üu]bernahme\s+(?:des\s+)?(?:leasing|vertrag)", "Vertragsübernahme"),
+    # "Leasingübnahme" (ohne "er") kommt in Inseraten häufig vor – Tippfehler
+    # dürfen die Erkennung nicht aushebeln.
+    (r"leasing\s*[üu]e?b(?:er)?nahme", "Leasingübernahme (Preis = Monatsrate)"),
+    (r"\b[üu]e?bernahme\s+(?:des\s+)?(?:leasing|vertrag)", "Leasingübernahme (Preis = Monatsrate)"),
+    (r"\brestleasing", "Restleasing (Preis = Monatsrate)"),
+    (r"\blangzeitmiete", "Langzeitmiete (Preis = Monatsrate)"),
+    (r"\bauto\s*abo\b", "Auto-Abo (Preis = Monatsrate)"),
+    # Das allgemeine Muster tritt hinter die genaueren zurueck.
+    (r"\bleasing(?!\s*[üu]e?b)", "Leasing (Preis = Monatsrate)"),
     (r"\bmtl\.?\b", "Monatsrate/Leasing"),
     (r"\bmonatlich(?:e[rn]?)?\s+rate", "Monatsrate/Leasing"),
+    (r"\b\d+\s*€\s*(?:brutto\s+)?monatl", "Monatsrate/Leasing"),
     (r"\brestlaufzeit", "Leasing-Restlaufzeit"),
     # Lockangebote / Neuwagen-Anzahlungen (kein echtes Gebrauchtwagen-Schnäppchen)
     (r"sofort\s+verf[üu]gbar", "Lockangebot (sofort verfügbar)"),
