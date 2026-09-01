@@ -480,7 +480,26 @@ async def save_mobile_cookies_endpoint(request: Request, payload: dict = Body(..
     if "_abck" not in saved:
         raise HTTPException(status_code=400, detail="Kein _abck-Cookie enthalten")
     logger.info("mobile.de-Cookies aktualisiert: %d Werte", len(saved))
-    return {"status": "ok", "saved_count": len(saved)}
+
+    # Mit einer frischen Sitzung ist die Ausgangslage eine andere. Die
+    # Schutzpause aus vorherigen Blocks würde den nächsten Versuch sonst um
+    # Stunden verzögern, obwohl sich die Bedingungen gerade geändert haben.
+    freigegeben = 0
+    try:
+        store = app.state.store
+        with store._lock:
+            cur = store.conn.execute(
+                "UPDATE portal_health SET block_count = 0, last_run = 0 "
+                "WHERE portal LIKE '%mobile%' AND status != 'ok'"
+            )
+            store.conn.commit()
+            freigegeben = cur.rowcount
+        if freigegeben:
+            logger.info("mobile.de-Schutzpause aufgehoben – neue Sitzung liegt vor")
+    except Exception:
+        logger.exception("Schutzpause konnte nicht aufgehoben werden")
+
+    return {"status": "ok", "saved_count": len(saved), "cooldown_geloest": freigegeben}
 
 
 @app.get("/api/discovered-ev")

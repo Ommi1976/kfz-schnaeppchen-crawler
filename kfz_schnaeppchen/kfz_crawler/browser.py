@@ -319,6 +319,14 @@ def rendered_session(
                 page_script = CHROMIUM_STEALTH_JS if engine == "chromium" else STEALTH_JS
                 if page_script:
                     context.add_init_script(page_script)
+
+            # Vom Nutzer uebertragene mobile.de-Sitzung einspielen. Der
+            # Container-Browser erreicht selbst keinen validierten Zustand
+            # (kein GPU, navigator.webdriver=true); eine echte Sitzung aus dem
+            # Browser des Nutzers ist der einzige Weg an mobile.de-Daten.
+            anzahl = _inject_saved_mobile_cookies(context)
+            if anzahl:
+                logger.info("mobile.de: %d gespeicherte Sitzungscookies eingespielt", anzahl)
             page = context.pages[0] if context.pages else context.new_page()
             last_request_at = 0.0
 

@@ -118,3 +118,23 @@ def test_mobile_cookie_endpoint_requires_token_and_abck(client):
                        headers={"X-KFZ-Token": token})
     assert r_ok.status_code == 200
     assert r_ok.json()["saved_count"] >= 2
+
+
+def test_fresh_cookies_release_the_mobile_cooldown(client):
+    """Eine neue Sitzung hebt die Schutzpause auf – sonst wartet der Lauf Stunden."""
+    store = client.app.state.store
+    token = store.ingest_token()
+
+    # Blockzustand mit laufender Schutzpause herstellen.
+    store.record_portal_run("EV", "mobile.de", "blocked", error="HTTP 403")
+    store.record_portal_run("EV", "mobile.de", "blocked", error="HTTP 403")
+    assert store.portal_cooldown_remaining("EV", "mobile.de") > 0
+
+    antwort = client.post("/api/mobile-cookies",
+                          json={"cookies": "sitzung=1; _abck=frischundgueltig"},
+                          headers={"X-KFZ-Token": token})
+    assert antwort.status_code == 200
+    assert antwort.json()["cooldown_geloest"] >= 1
+
+    # Der nächste Lauf darf mobile.de sofort wieder versuchen.
+    assert store.portal_cooldown_remaining("EV", "mobile.de") == 0
