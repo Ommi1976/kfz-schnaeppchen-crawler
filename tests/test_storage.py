@@ -98,11 +98,12 @@ def test_sync_active_deals(store):
     assert stale == 1
     assert store.total_count() == 3  # Historie bleibt nachvollziehbar erhalten
 
-    remaining_titles = {d["title"] for d in store.list_deals()}
+    # include_stale: hier wird gerade geprüft, wie veraltete markiert werden.
+    remaining_titles = {d["title"] for d in store.list_deals(include_stale=True)}
     assert "Car 1" in remaining_titles
     assert "Car 3" in remaining_titles
     assert "Car 2" in remaining_titles
-    car2 = next(d for d in store.list_deals() if d["title"] == "Car 2")
+    car2 = next(d for d in store.list_deals(include_stale=True) if d["title"] == "Car 2")
     assert car2["is_stale"] == 1
 
 
@@ -139,7 +140,7 @@ def test_portal_health_and_failed_run_marks_stale(store):
     health = store.list_portal_health("EV-Suche")[0]
     assert health["status"] == "blocked"
     assert health["error"] == "HTTP 429"
-    assert store.list_deals()[0]["is_stale"] == 1
+    assert store.list_deals(include_stale=True)[0]["is_stale"] == 1
 
 
 def test_mobile_portal_cooldown_after_block_and_partial(store):
@@ -311,3 +312,22 @@ def test_migration_survives_open_transaction_from_earlier_step(tmp_path):
         "SELECT name FROM sqlite_master WHERE type='table'")}
     assert {"vehicles", "offers", "vehicle_links"} <= tabellen
     conn.close()
+
+
+def test_stale_listings_are_hidden_by_default(tmp_path):
+    """Auf dem Portal verschwundene Inserate gehören nicht in die Trefferliste."""
+    from kfz_crawler.storage import SeenStore
+    from kfz_crawler.models import Listing
+
+    store = SeenStore(str(tmp_path / "stale.sqlite"))
+    for i in range(3):
+        store.record_listing("S", Listing(
+            portal="mobile.de", url=f"https://example.test/{i}",
+            title=f"Auto {i}", price=20000 + i, year=2022, mileage=50000 + i))
+    store.conn.execute("UPDATE deals SET is_stale = 1 WHERE title IN ('Auto 0','Auto 1')")
+    store.conn.commit()
+
+    assert len(store.list_deals()) == 1                      # nur das aktive
+    assert len(store.list_deals(include_stale=True)) == 3     # auf Wunsch alle
+    assert store.count_stale() == 2                           # und zählbar
+    store.close()

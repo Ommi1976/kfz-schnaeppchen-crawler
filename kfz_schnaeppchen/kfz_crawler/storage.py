@@ -500,8 +500,34 @@ class SeenStore:
                 return True
         return False
 
+    def count_stale(self, search_name: str | None = None,
+                    portal: str | None = None) -> int:
+        """Zählt Inserate, die auf dem Portal nicht mehr auffindbar sind."""
+        where = ["COALESCE(is_stale, 0) = 1"]
+        params: list = []
+        if search_name:
+            where.append("search_name = ?")
+            params.append(search_name)
+        if portal:
+            where.append("portal = ?")
+            params.append(portal)
+        with self._lock:
+            row = self.conn.execute(
+                "SELECT COUNT(*) FROM deals WHERE " + " AND ".join(where), params
+            ).fetchone()
+        return int(row[0]) if row else 0
+
     def list_deals(self, limit: int = 300, search_name: str | None = None,
-                   deals_only: bool = False, portal: str | None = None) -> List[dict]:
+                   deals_only: bool = False, portal: str | None = None,
+                   include_stale: bool = False) -> List[dict]:
+        """Liefert Inserate für die Anzeige.
+
+        Veraltete Einträge (auf dem Portal nicht mehr auffindbar) bleiben in der
+        Datenbank – sie werden für den Marktvergleich und die Preishistorie
+        gebraucht –, erscheinen aber standardmäßig nicht in der Liste. Sonst
+        besteht die Trefferansicht zur Hälfte aus Fahrzeugen, die es nicht mehr
+        gibt.
+        """
         with self._lock:
             where = []
             params: list = []
@@ -513,6 +539,8 @@ class SeenStore:
             if portal:
                 where.append("portal = ?")
                 params.append(portal)
+            if not include_stale:
+                where.append("COALESCE(is_stale, 0) = 0")
             wsql = (" WHERE " + " AND ".join(where)) if where else ""
             # Deals zuerst, dann nach Rabatt, dann neueste.
             params.append(limit)

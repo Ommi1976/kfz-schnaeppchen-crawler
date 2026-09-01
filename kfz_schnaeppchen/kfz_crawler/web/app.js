@@ -435,6 +435,9 @@ async function loadDeals() {
   const params = [];
   if (sel.value) params.push(`search=${sel.value}`);
   if (dealsOnly) params.push("deals_only=true");
+  // Auf dem Portal verschwundene Inserate sind standardmäßig ausgeblendet.
+  const showStale = document.getElementById("showStale")?.checked;
+  if (showStale) params.push("include_stale=true");
   if (currentPortalFilter) params.push(`portal=${encodeURIComponent(currentPortalFilter)}`);
   const data = await getJSON(`${API}/deals${params.length ? "?" + params.join("&") : ""}`);
   
@@ -451,7 +454,7 @@ async function loadDeals() {
   applyQuickFilters();
 
   document.getElementById("footer-info").textContent =
-    `${data.count} Treffer im Speicher${data.stale_count ? ` · ${data.stale_count} veraltet` : ""}${dealsOnly ? " (nur Schnäppchen)" : ""}${currentPortalFilter ? ` · Filter: ${currentPortalFilter}` : ""} · Auto-Aktualisierung alle 20 s`;
+    `${data.count} Treffer im Speicher${data.stale_hidden ? ` · ${data.stale_hidden} veraltete ausgeblendet` : ""}${data.stale_count ? ` · ${data.stale_count} veraltet` : ""}${dealsOnly ? " (nur Schnäppchen)" : ""}${currentPortalFilter ? ` · Filter: ${currentPortalFilter}` : ""} · Auto-Aktualisierung alle 20 s`;
 }
 
 function renderPortalFilters(counts, dealCount) {
@@ -662,6 +665,7 @@ document.getElementById("run").addEventListener("click", async () => {
 document.getElementById("refresh").addEventListener("click", refresh);
 document.getElementById("searchFilter").addEventListener("change", loadDeals);
 document.getElementById("dealsOnly").addEventListener("change", loadDeals);
+document.getElementById("showStale")?.addEventListener("change", loadDeals);
 document.getElementById("clear").addEventListener("click", async () => {
   if (!confirm("Trefferliste wirklich leeren? (Duplikat-Filter bleibt erhalten)")) return;
   await fetch(`${API}/deals`, { method: "DELETE" });

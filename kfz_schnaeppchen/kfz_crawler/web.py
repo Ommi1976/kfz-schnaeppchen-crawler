@@ -375,9 +375,11 @@ async def run_one(search_id: str):
 
 
 @app.get("/api/deals")
-async def deals(search: str | None = None, limit: int = 400, deals_only: bool = False, portal: str | None = None):
+async def deals(search: str | None = None, limit: int = 400, deals_only: bool = False,
+                portal: str | None = None, include_stale: bool = False):
     rows = app.state.store.list_deals(
-        limit=min(limit, 2000), search_name=search, deals_only=deals_only, portal=portal
+        limit=min(limit, 2000), search_name=search, deals_only=deals_only, portal=portal,
+        include_stale=include_stale
     )
     specs = {s["name"]: SearchQuery.from_dict(s) for s in app.state.store.list_searches()}
     active_search_names = set(specs.keys())
@@ -431,12 +433,20 @@ async def deals(search: str | None = None, limit: int = 400, deals_only: bool = 
         p = r.get("portal") or "Unbekannt"
         portal_counts[p] = portal_counts.get(p, 0) + 1
 
+    # Wie viele Inserate wurden ausgeblendet, weil sie auf dem Portal nicht
+    # mehr auffindbar sind. Die Oberfläche kann das anbieten, statt tote
+    # Einträge stillschweigend wegzulassen.
+    ausgeblendet = 0
+    if not include_stale:
+        ausgeblendet = app.state.store.count_stale(search_name=search, portal=portal)
+
     return {
         "count": len(rows),
         "deals": rows,
         "portal_counts": portal_counts,
         "total_deals": sum(1 for r in rows if r.get("is_deal")),
         "stale_count": sum(1 for r in rows if r.get("is_stale")),
+        "stale_hidden": ausgeblendet,
         "portal_health": app.state.store.list_portal_health(search),
     }
 
