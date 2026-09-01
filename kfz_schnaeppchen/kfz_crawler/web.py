@@ -200,6 +200,29 @@ async def _scheduler(app: FastAPI) -> None:
         await asyncio.sleep(interval * 60)
 
 
+async def _reevaluate_beim_start(app: FastAPI) -> None:
+    """Zieht den Altbestand einmalig auf die aktuelle Erkennung nach."""
+    try:
+        from kfz_crawler.reevaluate import reevaluate_stored_listings
+        home_zip = getattr(app.state.cfg.settings, "home_zip", "") or None
+        gesamt: dict = {}
+        # In Schueben, damit ein grosser Bestand den Start nicht blockiert.
+        for _ in range(20):
+            stats = await asyncio.to_thread(
+                reevaluate_stored_listings, app.state.store, 200, home_zip
+            )
+            if not stats.get("geprueft"):
+                break
+            for k, v in stats.items():
+                gesamt[k] = gesamt.get(k, 0) + v
+        if gesamt:
+            logger.info("Neuauswertung beim Start: %s", gesamt)
+    except asyncio.CancelledError:
+        raise
+    except Exception:
+        logger.exception("Neuauswertung beim Start fehlgeschlagen")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     cfg = _load_cfg()
@@ -222,10 +245,19 @@ async def lifespan(app: FastAPI):
                     app.state.store.ingest_token())
     except Exception:
         logger.exception("Cookie-Token konnte nicht bereitgestellt werden")
+    # Nach einem Versionssprung ist der Altbestand veraltet: Felder, die die
+    # neue Erkennung fuellen wuerde, bleiben leer, und falsch uebernommene
+    # Werte (etwa der Kraftstoff bei Kleinanzeigen) filtern weiter falsch.
+    # Bisher lief die Neuauswertung erst nach dem naechsten Crawl - zu spaet.
+    # Sie kostet keine Portalanfrage, nur gespeicherten Text.
+    app.state.startup_reevaluation = asyncio.create_task(
+        _reevaluate_beim_start(app)
+    )
     app.state.scheduler = asyncio.create_task(_scheduler(app))
     try:
         yield
     finally:
+        app.state.startup_reevaluation.cancel()
         app.state.scheduler.cancel()
         try:
             await app.state.scheduler

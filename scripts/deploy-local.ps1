@@ -97,7 +97,12 @@ sudo docker exec app_a0d7b954_ssh curl -s -X POST -H "Authorization: Bearer $T" 
 echo "DEPLOYMENT_DONE"
 '@
 
-$supervisorCommand.Replace("`r`n", "`n") | & ssh @sshArgs "sudo bash -"
+# Nicht ueber stdin: Windows PowerShell haengt beim Pipen an ein natives
+# Programm eine BOM an, die vor "set -e" landete und bash abbrechen liess.
+# Als Base64-Argument geht der Text unveraendert durch.
+$befehlBytes = [System.Text.Encoding]::UTF8.GetBytes($supervisorCommand.Replace("`r`n", "`n"))
+$befehlB64 = [Convert]::ToBase64String($befehlBytes)
+& ssh @sshArgs "echo $befehlB64 | base64 -d | sudo bash"
 if ($LASTEXITCODE -ne 0) { throw "Supervisor Deployment fehlgeschlagen." }
 
 Write-Host "KFZ Schnäppchen $version wurde lokal nach $target übertragen und aktualisiert."
