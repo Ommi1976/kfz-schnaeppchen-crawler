@@ -20,9 +20,14 @@ Browser bei mobile.de angemeldet bist.
 
 1. **Token holen:** Im Add-on-Protokoll steht beim Start die Zeile
    `Cookie-Token für die Browser-Erweiterung: …`
-2. **Erweiterung laden:** `chrome://extensions` → Entwicklermodus einschalten →
-   „Entpackte Erweiterung laden" → diesen Ordner wählen.
-   (Edge: `edge://extensions`, gleicher Ablauf.)
+2. **Erweiterung laden** (Microsoft Edge):
+   * `edge://extensions` öffnen
+   * links unten **„Entwicklermodus"** einschalten
+   * **„Entpackt laden"** → diesen Ordner wählen
+   * Damit sie sichtbar bleibt: Symbolleiste → Erweiterungen → Pin setzen
+
+   In Chrome ist der Ablauf identisch, nur unter `chrome://extensions`
+   und mit der Schaltfläche „Entpackte Erweiterung laden".
 3. **Einstellungen öffnen** (Rechtsklick auf das Symbol → Optionen):
    * Adresse: `http://<HA-IP>:8099`
    * Token: aus Schritt 1
