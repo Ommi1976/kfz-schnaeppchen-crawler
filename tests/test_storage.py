@@ -181,7 +181,7 @@ def test_purge_obsolete_settings_removes_dead_credentials(tmp_path):
     first = SeenStore(str(db))
     first.set_setting("mobile_cookies", "_abck=GEHEIM~-1~xyz")
     first.set_setting("mobile_status", '{"state": "ok"}')
-    first.set_setting("ingest_token", "abc123")
+    first.set_setting("ingest_token", "abc123")      # wieder in Gebrauch – bleibt
     first.set_setting("unknown_policy", "lenient")   # aktiv – muss bleiben
     first.close()
 
@@ -189,7 +189,8 @@ def test_purge_obsolete_settings_removes_dead_credentials(tmp_path):
     second = SeenStore(str(db))
     assert second.get_setting("mobile_cookies", "") == ""
     assert second.get_setting("mobile_status", "") == ""
-    assert second.get_setting("ingest_token", "") == ""
+    # ingest_token schützt den Cookie-Endpunkt und darf nicht entfernt werden.
+    assert second.get_setting("ingest_token", "") == "abc123"
     assert second.get_setting("unknown_policy", "") == "lenient"
 
     # Wiederholter Aufruf ist folgenlos.

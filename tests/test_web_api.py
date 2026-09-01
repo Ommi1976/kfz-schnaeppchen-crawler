@@ -9,6 +9,9 @@ def client(tmp_path, monkeypatch):
     test_db = tmp_path / "test_seen.db"
     monkeypatch.setenv("KFZ_DB_PATH", str(test_db))
     with TestClient(app) as c:
+        # Die Oberfläche läuft über den Home-Assistant-Ingress; dieser Header
+        # kennzeichnet den Weg. Direktzugriffe ohne ihn brauchen ein Token.
+        c.headers.update({"X-Ingress-Path": "/api/hassio_ingress/test"})
         yield c
 
 
@@ -78,3 +81,40 @@ def test_api_searches_lifecycle(client):
     # 5. Prüfen ob gelöscht
     r_up_after = client.put(f"/api/searches/{sid}", json=payload)
     assert r_up_after.status_code == 404
+
+
+def test_direct_access_without_token_is_rejected(client):
+    """Über den LAN-Port darf niemand ohne Token schreiben."""
+    # Eigener Client ohne Ingress-Header: so sieht ein Zugriff direkt aus dem
+    # Heimnetz aus. Die App läuft bereits über die Fixture.
+    direkt = TestClient(app)
+
+    r = direkt.post("/api/searches", json={"name": "Fremdzugriff"})
+    assert r.status_code == 401
+
+    # Lesen bleibt erlaubt – dort steht nichts Schützenswertes.
+    assert direkt.get("/api/ready").status_code == 200
+
+    # Mit gültigem Token geht es.
+    token = client.app.state.store.ingest_token()
+    r_ok = direkt.post("/api/searches", json={"name": "Mit Token"},
+                       headers={"X-KFZ-Token": token})
+    assert r_ok.status_code == 201
+
+
+def test_mobile_cookie_endpoint_requires_token_and_abck(client):
+    """Der Cookie-Endpunkt prüft Token und Vollständigkeit der Sitzung."""
+    token = client.app.state.store.ingest_token()
+
+    r_ohne = client.post("/api/mobile-cookies", json={"cookies": "a=1; _abck=x"},
+                         headers={"X-KFZ-Token": "falsch"})
+    assert r_ohne.status_code == 401
+
+    r_unvollstaendig = client.post("/api/mobile-cookies", json={"cookies": "a=1; b=2"},
+                                   headers={"X-KFZ-Token": token})
+    assert r_unvollstaendig.status_code == 400
+
+    r_ok = client.post("/api/mobile-cookies", json={"cookies": "a=1; _abck=echtaussehend"},
+                       headers={"X-KFZ-Token": token})
+    assert r_ok.status_code == 200
+    assert r_ok.json()["saved_count"] >= 2

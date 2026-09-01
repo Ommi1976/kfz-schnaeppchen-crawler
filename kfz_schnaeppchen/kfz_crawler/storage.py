@@ -706,7 +706,22 @@ class SeenStore:
     # Cookie-Import läuft heute über cookie_storage (Datei in /data).
     # mobile_cookies enthielt ein echtes Akamai-Sessioncookie – ungenutzte
     # Zugangsdaten gehören nicht dauerhaft in die Datenbank.
-    OBSOLETE_SETTINGS = ("mobile_cookies", "mobile_status", "ingest_token")
+    # ingest_token ist wieder in Gebrauch: es schuetzt den Cookie-Endpunkt.
+    OBSOLETE_SETTINGS = ("mobile_cookies", "mobile_status")
+
+    def ingest_token(self) -> str:
+        """Token fuer den Cookie-Endpunkt; wird beim ersten Aufruf erzeugt.
+
+        Der Endpunkt nimmt Sitzungsdaten entgegen. Ohne Pruefung koennte jedes
+        Geraet im Heimnetz beliebige Cookies hinterlegen.
+        """
+        vorhanden = self.get_setting("ingest_token", "")
+        if vorhanden:
+            return vorhanden
+        import secrets
+        token = secrets.token_hex(16)
+        self.set_setting("ingest_token", token)
+        return token
 
     def purge_obsolete_settings(self) -> List[str]:
         """Entfernt Altlasten aus settings und meldet, was entfernt wurde."""

@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="de">
+<head><meta charset="utf-8"><title>KFZ Schnäppchen – Einstellungen</title>
+<style>
+ body{font-family:system-ui,sans-serif;max-width:34rem;margin:2rem auto;padding:0 1rem;line-height:1.55}
+ h1{font-size:1.25rem} label{display:block;margin:1rem 0 .3rem;font-weight:600}
+ input[type=text],input[type=number]{width:100%;padding:.5rem;font-size:1rem;box-sizing:border-box}
+ .zeile{display:flex;align-items:center;gap:.5rem;margin-top:1rem}
+ button{margin-top:1.5rem;padding:.6rem 1.2rem;font-size:1rem;cursor:pointer}
+ .hinweis{color:#555;font-size:.9rem;margin-top:.3rem}
+ #status{margin-top:1rem;font-weight:600}
+</style></head>
+<body>
+<h1>Verbindung zum Add-on</h1>
+<label for="endpoint">Adresse des Add-ons</label>
+<input type="text" id="endpoint" placeholder="http://192.168.178.77:8099">
+<div class="hinweis">Die LAN-Adresse deines Home Assistant mit dem Add-on-Port.</div>
+
+<label for="token">Token</label>
+<input type="text" id="token" placeholder="aus dem Add-on-Protokoll">
+<div class="hinweis">Steht beim Start im Add-on-Protokoll unter „Cookie-Token".</div>
+
+<div class="zeile">
+  <input type="checkbox" id="auto">
+  <label for="auto" style="margin:0">Sitzung automatisch im Hintergrund auffrischen</label>
+</div>
+<label for="autoMinuten">Abstand (Minuten, mindestens 15)</label>
+<input type="number" id="autoMinuten" min="15" value="30">
+
+<button id="speichern">Speichern</button>
+<div id="status"></div>
+<script src="options.js"></script>
+</body></html>

@@ -10,13 +10,14 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import secrets
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 
-from fastapi import Body, FastAPI, HTTPException
+from fastapi import Body, FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -155,6 +156,17 @@ async def _do_run(app: FastAPI, only_id: str | None = None) -> None:
                     logger.info("Offline-Neuauswertung: %s", stats)
             except Exception:
                 logger.exception("Offline-Neuauswertung fehlgeschlagen")
+
+            # Angebote zu Fahrzeugen zusammenfuehren. Ebenfalls reine
+            # Datenbankarbeit; dasselbe Auto auf zwei Portalen wird damit
+            # einmal gefuehrt, ohne dass die Zweit-URL verlorengeht.
+            try:
+                from kfz_crawler.vehicles import synchronisiere_fahrzeuge
+                fz = await asyncio.to_thread(synchronisiere_fahrzeuge, app.state.store)
+                if fz.get("neue_fahrzeuge") or fz.get("zugeordnet"):
+                    logger.info("Fahrzeugabgleich: %s", fz)
+            except Exception:
+                logger.exception("Fahrzeugabgleich fehlgeschlagen")
             # Asynchrone Hintergrund-Bildanalyse für SoH anstoßen (blockiert die UI/Suche nicht)
             try:
                 from kfz_crawler.battery_analyzer import run_background_image_enrichment
@@ -204,6 +216,12 @@ async def lifespan(app: FastAPI):
     _schedule_next(app)
     app.state.last_report = {}
     app.state.enrichment_task = None
+    # Einmal beim Start ausgeben: die Browser-Erweiterung braucht es.
+    try:
+        logger.info("Cookie-Token für die Browser-Erweiterung: %s",
+                    app.state.store.ingest_token())
+    except Exception:
+        logger.exception("Cookie-Token konnte nicht bereitgestellt werden")
     app.state.scheduler = asyncio.create_task(_scheduler(app))
     try:
         yield
@@ -229,6 +247,30 @@ app = FastAPI(title="KFZ Schnäppchen Crawler", version=__version__, lifespan=li
 
 if WEB_DIR.exists():
     app.mount("/static", NoCacheStaticFiles(directory=WEB_DIR), name="static")
+
+
+# Schreibende Zugriffe von ausserhalb des Ingress brauchen das Token.
+#
+# Ueber den LAN-Port ist die gesamte API erreichbar – auch /api/searches und
+# DELETE /api/deals. Der Home-Assistant-Ingress setzt X-Ingress-Path; fehlt der
+# Header, kommt die Anfrage direkt aus dem Netz und muss sich ausweisen.
+_GESCHUETZTE_METHODEN = {"POST", "PUT", "PATCH", "DELETE"}
+
+
+@app.middleware("http")
+async def token_bei_direktzugriff(request: Request, call_next):
+    if request.method in _GESCHUETZTE_METHODEN and not request.headers.get("X-Ingress-Path"):
+        try:
+            erwartet = app.state.store.ingest_token()
+        except Exception:
+            erwartet = ""
+        geliefert = request.headers.get("X-KFZ-Token", "")
+        if not erwartet or not secrets.compare_digest(geliefert, erwartet):
+            return JSONResponse(
+                {"detail": "Direktzugriff erfordert ein gültiges X-KFZ-Token"},
+                status_code=401,
+            )
+    return await call_next(request)
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -420,10 +462,24 @@ async def mobile_cookies_status():
 
 
 @app.post("/api/mobile-cookies")
-async def save_mobile_cookies_endpoint(payload: dict = Body(...)):
+async def save_mobile_cookies_endpoint(request: Request, payload: dict = Body(...)):
+    """Nimmt mobile.de-Sitzungscookies entgegen – nur mit gueltigem Token.
+
+    Der Endpunkt ist ueber den LAN-Port erreichbar, damit die Browser-
+    Erweiterung ihn ansprechen kann. Ohne Pruefung koennte jedes Geraet im
+    Heimnetz fremde Sitzungsdaten hinterlegen.
+    """
     from .cookie_storage import save_mobile_cookies
+    erwartet = app.state.store.ingest_token()
+    geliefert = request.headers.get("X-KFZ-Token", "")
+    if not secrets.compare_digest(geliefert, erwartet):
+        raise HTTPException(status_code=401, detail="Ungültiges oder fehlendes Token")
+
     raw = payload.get("cookies") or payload.get("cookie") or payload
     saved = save_mobile_cookies(raw)
+    if "_abck" not in saved:
+        raise HTTPException(status_code=400, detail="Kein _abck-Cookie enthalten")
+    logger.info("mobile.de-Cookies aktualisiert: %d Werte", len(saved))
     return {"status": "ok", "saved_count": len(saved)}
 
 

@@ -1,0 +1,12 @@
+{
+  "manifest_version": 3,
+  "name": "KFZ Schnäppchen – mobile.de Sitzung",
+  "version": "2.0.0",
+  "description": "Überträgt die mobile.de-Sitzungscookies aus diesem Browser an das KFZ-Schnäppchen-Add-on – auf Wunsch automatisch im Hintergrund.",
+  "permissions": ["cookies", "storage", "alarms"],
+  "host_permissions": ["https://*.mobile.de/"],
+  "optional_host_permissions": ["http://*/*", "https://*/*"],
+  "background": { "service_worker": "background.js" },
+  "action": { "default_popup": "popup.html", "default_title": "mobile.de-Sitzung senden" },
+  "options_page": "options.html"
+}
