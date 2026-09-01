@@ -135,21 +135,70 @@ class Kleinanzeigen(BasePortal):
 
         return results
 
+    # Preis am Euro-Zeichen erkennen; "5.389 km" darf nicht als Preis gelten.
+    # Kein \b hinter dem Euro-Zeichen: € ist selbst kein Wortzeichen, eine
+    # Wortgrenze kann dort nie entstehen ("999 € VB" waere nie erkannt worden).
+    _PREIS_RE = re.compile(r"([\d][\d.]{1,9})\s*(?:€|EUR\b)", re.I)
+    # Standort: PLZ mit nachfolgendem Ortsnamen.
+    _ORT_RE = re.compile(r"\b(\d{5})\s+([A-ZÄÖÜ][A-Za-zÄÖÜäöüß.\- ]{2,38})")
+
+    def _artikel(self, soup) -> List:
+        """Anzeigenblöcke finden – klassenunabhängig.
+
+        Kleinanzeigen ist auf Utility-Klassen (Tailwind) umgestellt; die alten
+        Selektoren ``article.aditem`` und ``.aditem-main--*`` existieren nicht
+        mehr. Solche Klassennamen ändern sich beim nächsten Umbau wieder,
+        deshalb wird über die Struktur gegangen: ein Anzeigenblock ist ein
+        ``article`` mit einem Link auf ``/s-anzeige/``.
+        """
+        alt_stil = soup.select("article.aditem")
+        if alt_stil:
+            return alt_stil
+        return [a for a in soup.select("article") if a.select_one('a[href*="/s-anzeige/"]')]
+
     def _parse(self, html: str, query: SearchQuery) -> List[Listing]:
         soup = BeautifulSoup(html, "lxml")
         listings: List[Listing] = []
-        for art in soup.select("article.aditem"):
-            a = art.select_one("a[href]")
-            if not a:
+        for art in self._artikel(soup):
+            a = art.select_one('a[href*="/s-anzeige/"]') or art.select_one("a[href]")
+            if not a or not a.get("href"):
                 continue
             href = a["href"]
             url = href if href.startswith("http") else self.BASE + href
-            title = self._text(art, ".text-module-begin, h2 a, .aditem-main--middle--title")
+
+            ueberschrift = art.find(["h2", "h3"])
+            title = (self._text(art, ".text-module-begin, h2 a, .aditem-main--middle--title")
+                     or (ueberschrift.get_text(" ", strip=True) if ueberschrift else None)
+                     or a.get_text(" ", strip=True))
+
+            volltext = art.get_text(" ", strip=True)
             price = self._to_int(self._text(art, ".aditem-main--middle--price-shipping--price"))
+            if price is None:
+                treffer = self._PREIS_RE.search(volltext)
+                price = self._to_int(treffer.group(1)) if treffer else None
+            # Ohne Preis ist es meist keine Fahrzeuganzeige.
+            if price is None:
+                continue
+            # Kleinanzeigen mischt Gesuche unter die Angebote – Händler, die
+            # Autos ankaufen wollen. Der Preis dort ist keine Kaufgelegenheit.
+            if "gesuch" in volltext.lower():
+                continue
+
             location = self._text(art, ".aditem-main--top--left")
+            if not location:
+                # Der Block lautet "<n> TOP <PLZ> <Ort> <Titel> …". Der Ort
+                # endet dort, wo der (separat bekannte) Titel beginnt – sonst
+                # zieht das Muster die ersten Titelwoerter mit hinein.
+                kopf = volltext
+                if title and title[:18] in volltext:
+                    kopf = volltext[:volltext.index(title[:18])]
+                ort = self._ORT_RE.search(kopf) or self._ORT_RE.search(volltext)
+                location = f"{ort.group(1)} {self._ort_saeubern(ort.group(2))}" if ort else None
+
             desc = self._text(art, ".aditem-main--middle--description") or ""
-            listing_text = desc + " " + (title or "")
-            imgs = [img.get("src") or img.get("data-src") or img.get("data-imgsrc") for img in art.select(".imagebox img")]
+            listing_text = (desc + " " + volltext).strip()
+            imgs = [img.get("src") or img.get("data-src") or img.get("data-imgsrc")
+                    for img in art.select("img")]
             image_urls = [u for u in imgs if u and u.startswith("http") and not u.endswith(".svg")]
 
             listing = Listing(
@@ -164,7 +213,7 @@ class Kleinanzeigen(BasePortal):
                 location=location,
                 body=listing_text,
                 image_urls=image_urls,
-                raw_id=art.get("data-adid"),
+                raw_id=art.get("data-adid") or self._anzeigen_id(url),
             )
             from ..models import infer_listing_battery, infer_listing_details, infer_listing_range
             infer_listing_battery(listing, check_images=False)
@@ -173,6 +222,22 @@ class Kleinanzeigen(BasePortal):
             if self._matches(listing, query):
                 listings.append(listing)
         return listings
+
+    # Hinter dem Ort steht das Einstelldatum ("Heute", "Gestern", "12.03.2026").
+    _DATUM_SUFFIX = re.compile(
+        r"\s+(heute|gestern|montag|dienstag|mittwoch|donnerstag|freitag|samstag|sonntag|\d{1,2}\.\d{1,2}\.).*$",
+        re.I,
+    )
+
+    @classmethod
+    def _ort_saeubern(cls, ort: str) -> str:
+        return cls._DATUM_SUFFIX.sub("", (ort or "").strip()).strip()
+
+    @staticmethod
+    def _anzeigen_id(url: str) -> Optional[str]:
+        """Anzeigen-ID aus der URL (…/3499617433-216-364)."""
+        m = re.search(r"/(\d{8,})-\d+-\d+", url or "")
+        return m.group(1) if m else None
 
     def _matches(self, l: Listing, q: SearchQuery) -> bool:
         # Preis-Filter clientseitig nachziehen (Freitext-Suche ist unscharf).

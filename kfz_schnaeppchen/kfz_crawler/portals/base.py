@@ -57,6 +57,11 @@ class _Rendered:
         self.status_code = 200
 
 
+def _charset_im_header(resp) -> bool:
+    """Hat der Server den Zeichensatz selbst angegeben?"""
+    return "charset=" in (resp.headers.get("Content-Type") or "").lower()
+
+
 class BasePortal:
     #: menschenlesbarer Name, wird in Ausgaben angezeigt
     name: str = "base"
@@ -131,6 +136,13 @@ class BasePortal:
                 "Portal hat automatisierte Anfrage erkannt."
             )
         resp.raise_for_status()
+
+        # Zeichensatz sicherstellen. Fehlt im Header ein charset, faellt
+        # requests bei text/* auf ISO-8859-1 zurueck – deutsche Portale liefern
+        # aber UTF-8. Sonst wird aus "999 €" ein "999 â‚¬", Umlaute in Titeln
+        # und Orten werden unbrauchbar, und Preise sind nicht mehr erkennbar.
+        if not _charset_im_header(resp):
+            resp.encoding = resp.apparent_encoding or "utf-8"
         return resp
 
     # ---- von Subklassen zu implementieren ---------------------------

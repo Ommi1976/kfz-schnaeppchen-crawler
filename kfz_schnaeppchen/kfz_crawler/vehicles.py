@@ -23,15 +23,43 @@ from typing import Iterable, List, Optional, Tuple
 logger = logging.getLogger(__name__)
 
 # Ab dieser Punktzahl gelten zwei Angebote als dasselbe Fahrzeug.
+#
+# Die Gewichte muessen die Schwelle OHNE gemeinsame Bilder erreichen koennen:
+# AutoUncle speichert keine Bilder, und gerade dort sitzen die Dubletten zu
+# mobile.de. Erreichbar sind ohne Bilder 0,90 – die Schwelle verlangt davon
+# den Kilometerstand plus mindestens drei weitere uebereinstimmende Merkmale.
 SCHWELLE_SICHER = 0.80
 # Darunter, aber ueber dieser Grenze: moeglich, aber nicht automatisch mergen.
 SCHWELLE_MOEGLICH = 0.60
 
 # Toleranzen. Der Kilometerstand darf zwischen zwei Portalen leicht abweichen,
 # weil die Angebote zu unterschiedlichen Zeitpunkten erfasst wurden.
+# Absolut, nicht relativ: 2 % waeren bei 82.000 km ganze 1.640 km Spielraum –
+# darin liegen beliebig viele verschiedene Fahrzeuge. Dasselbe Auto traegt auf
+# zwei Portalen praktisch denselben Stand; 500 km decken Aktualisierungen ab.
 KM_TOLERANZ_ABS = 500
-KM_TOLERANZ_REL = 0.02
 PREIS_TOLERANZ_REL = 0.08
+
+
+# Hersteller, die in den Titeln vorkommen. Ein Widerspruch hier schliesst eine
+# Zusammenfuehrung sofort aus – ein ID.4 ist kein Q4 e-tron, auch wenn Baujahr,
+# Kilometerstand und Leistung zufaellig passen.
+_HERSTELLER = (
+    "volkswagen", "vw", "audi", "bmw", "mercedes", "skoda", "seat", "cupra",
+    "renault", "peugeot", "citroen", "opel", "ford", "tesla", "polestar",
+    "volvo", "hyundai", "kia", "nissan", "toyota", "mazda", "honda", "fiat",
+    "smart", "mini", "porsche", "jaguar", "mg", "byd", "nio", "dacia",
+    "mitsubishi", "subaru", "suzuki", "jeep", "cadillac", "lexus", "genesis",
+    "fisker", "aiways", "elaris", "ora", "maxus", "leapmotor", "xpeng",
+)
+_VW_SYNONYM = {"vw": "volkswagen"}
+
+
+def _hersteller(titel: Optional[str]) -> set:
+    """Erkennt genannte Hersteller im Titel (normalisiert)."""
+    woerter = set(_norm(titel).split())
+    gefunden = {_VW_SYNONYM.get(h, h) for h in _HERSTELLER if h in woerter}
+    return gefunden
 
 
 def _norm(text: Optional[str]) -> str:
@@ -40,9 +68,18 @@ def _norm(text: Optional[str]) -> str:
 
 def _modellwoerter(titel: Optional[str]) -> set:
     """Aussagekraeftige Wortmarken aus dem Titel (ohne Fuellwoerter)."""
+    # Ausstattungsbegriffe sind KEINE Modellkennung: "led" und "navi" hatten
+    # sonst einen VW ID.4 mit einem Audi Q4 e-tron zusammengefuehrt.
     stop = {
         "neu", "gebraucht", "guter", "sehr", "preis", "und", "mit", "der", "die",
         "das", "elektro", "automatik", "km", "kwh", "ps", "kw", "euro", "inkl",
+        "fairer", "superpreis", "seltenes", "fahrzeug", "angebot",
+        # Ausstattung
+        "led", "navi", "navigation", "acc", "shz", "sitzheizung", "kamera",
+        "rfk", "pdc", "klima", "klimaautomatik", "pano", "panorama", "ahk",
+        "carplay", "apple", "android", "bluetooth", "waermepumpe", "wärmepumpe",
+        "matrix", "hud", "kessy", "assistenzpaket", "komfortpaket", "winterpaket",
+        "alu", "lm", "sportsitze", "leder", "dab", "tempomat", "keyless",
     }
     woerter = {w for w in _norm(titel).split() if len(w) >= 3 and w not in stop}
     return {w for w in woerter if not w.isdigit()}
@@ -80,10 +117,14 @@ def identitaets_score(a, b) -> Tuple[float, List[str]]:
     if a["power_ps"] and b["power_ps"] and abs(a["power_ps"] - b["power_ps"]) > 10:
         return 0.0, ["Leistung weicht deutlich ab"]
 
+    marken_a, marken_b = _hersteller(a["title"]), _hersteller(b["title"])
+    if marken_a and marken_b and not (marken_a & marken_b):
+        return 0.0, ["Hersteller verschieden: %s / %s" % (
+            ", ".join(sorted(marken_a)), ", ".join(sorted(marken_b)))]
+
     km_a, km_b = a["mileage"], b["mileage"]
     if km_a and km_b:
-        grenze = max(KM_TOLERANZ_ABS, km_a * KM_TOLERANZ_REL)
-        if abs(km_a - km_b) > grenze:
+        if abs(km_a - km_b) > KM_TOLERANZ_ABS:
             return 0.0, ["Kilometerstand weicht zu stark ab"]
 
     # --- positive Belege ----------------------------------------------
@@ -99,7 +140,9 @@ def identitaets_score(a, b) -> Tuple[float, List[str]]:
         punkte += 0.12
         belege.append(f"Baujahr {a['year']}")
     if km_a and km_b:
-        punkte += 0.18
+        # Schaerfstes Merkmal: zwei verschiedene Autos haben praktisch nie
+        # denselben Kilometerstand auf 2 % genau.
+        punkte += 0.25
         belege.append(f"Kilometerstand {km_a} ~ {km_b}")
     if a["power_ps"] and b["power_ps"]:
         punkte += 0.10
@@ -107,13 +150,13 @@ def identitaets_score(a, b) -> Tuple[float, List[str]]:
 
     gemeinsam = _modellwoerter(a["title"]) & _modellwoerter(b["title"])
     if len(gemeinsam) >= 2:
-        punkte += 0.15
+        punkte += 0.18
         belege.append("Modellwörter: " + ", ".join(sorted(gemeinsam)[:4]))
     elif gemeinsam:
         punkte += 0.05
 
     if a["location_zip"] and b["location_zip"] and a["location_zip"] == b["location_zip"]:
-        punkte += 0.10
+        punkte += 0.12
         belege.append(f"gleiche PLZ {a['location_zip']}")
 
     if a["price"] and b["price"]:
