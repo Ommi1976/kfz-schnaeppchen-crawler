@@ -38,6 +38,27 @@ _SUSPECT_PATTERNS: List[Tuple[str, str]] = [
     (r"\bspringt\s+nicht\s+an", "springt nicht an"),
     (r"\bohne\s+t[üu]v\b", "ohne TÜV"),
     (r"\bnicht\s+fahrbereit", "nicht fahrbereit"),
+    # Kein vollständiges Fahrzeug: der Preis bezieht sich auf Teile, nicht aufs Auto.
+    (r"\brohkarosse", "Rohkarosse (kein fahrbares Fahrzeug)"),
+    # "Karosserie" allein greift zu weit: "neue Karosserie" beschreibt eine
+    # Instandsetzung, nicht ein Fahrzeug, das nur aus einer Karosse besteht.
+    (r"\bnur\s+(?:die\s+)?karosse(?:rie)?\b", "nur Karosserie"),
+    (r"\bkarosse(?:rie)?\s+ohne\b", "Karosserie ohne Anbauteile"),
+    (r"\bohne\s+(?:motor|antrieb|getriebe)\b", "ohne Antrieb"),
+    (r"\bohne\s+(?:akku|batterie)\b", "ohne Akku"),
+    (r"\bakku\s+(?:defekt|fehlt)", "Akku defekt/fehlt"),
+    (r"\bbrandschaden", "Brandschaden"),
+    (r"\bwasserschaden", "Wasserschaden"),
+    # Leasing: der genannte Betrag ist die Monatsrate, nicht der Kaufpreis.
+    # Ohne diese Erkennung erscheint eine 78-€-Rate als 90-%-Schnäppchen.
+    (r"\bleasing[üu]bernahme", "Leasingübernahme (Preis = Monatsrate)"),
+    # Das allgemeine Muster tritt hinter das genauere zurueck, sonst stuenden
+    # bei einer Uebernahme zwei fast gleiche Gruende nebeneinander.
+    (r"\bleasing(?![üu]bernahme)", "Leasing (Preis = Monatsrate)"),
+    (r"\b[üu]bernahme\s+(?:des\s+)?(?:leasing|vertrag)", "Vertragsübernahme"),
+    (r"\bmtl\.?\b", "Monatsrate/Leasing"),
+    (r"\bmonatlich(?:e[rn]?)?\s+rate", "Monatsrate/Leasing"),
+    (r"\brestlaufzeit", "Leasing-Restlaufzeit"),
     # Lockangebote / Neuwagen-Anzahlungen (kein echtes Gebrauchtwagen-Schnäppchen)
     (r"sofort\s+verf[üu]gbar", "Lockangebot (sofort verfügbar)"),
     (r"sofort\s+lieferbar", "Lockangebot (sofort lieferbar)"),
@@ -189,10 +210,26 @@ class DealResult:
     used_regression: bool
 
 
+# Preise, die kein Angebot sind, sondern ein Platzhalter beim Einstellen.
+_PLATZHALTER_PREISE = {1111, 1234, 11111, 12345, 22222, 33333, 99999, 111111, 123456}
+
+
+def _ist_platzhalterpreis(preis: Optional[int]) -> bool:
+    """Erkennt Tippmuster wie 12.345 € oder 11.111 €.
+
+    Solche Betraege stehen vor allem bei Neuwagen, wenn der Haendler den Preis
+    noch nicht gepflegt hat. Als Schnaeppchen gerechnet ergeben sie absurde
+    Rabatte.
+    """
+    return bool(preis) and preis in _PLATZHALTER_PREISE
+
+
 def _classify(l: Listing, discount: float, deal_threshold: float,
               suspicious_discount: float) -> None:
     """Setzt is_deal / is_suspicious / suspicious_reasons auf dem Inserat."""
     reasons = fraud_reasons(l)
+    if _ist_platzhalterpreis(l.price):
+        reasons = reasons + [f"Platzhalterpreis ({l.price} €)"]
     # Lockangebot: Neuwagen (0 km) deutlich unter Markt = Anzahlung/Köder.
     if (l.mileage == 0) and discount >= deal_threshold and "0 km" not in " ".join(reasons):
         reasons = reasons + ["Lockangebot (Neuwagen, 0 km)"]

@@ -988,6 +988,55 @@ def is_non_pkw(listing: "Listing") -> bool:
     return any(p.search(hay) for p in _NON_PKW_PATTERNS)
 
 
+# Zubehör- und Teileangebote. Bewusst NUR auf dem Titel geprüft: Begriffe wie
+# "Winterreifen" oder "Anhängerkupplung" stehen in fast jedem echten
+# Fahrzeuginserat in der Ausstattungsliste und würden dort falsch greifen.
+_ZUBEHOER_PATTERNS = [
+    _re.compile(p, _re.I) for p in [
+        # Laden
+        r"\bwallbox", r"\bladestation", r"\bladekabel", r"\bladeziegel",
+        r"\btyp[- ]?2[- ]?(?:kabel|stecker|ladekabel)", r"\bmode[- ]?[23]\b",
+        # Räder und Reifen
+        r"\b(?:winter|sommer|allwetter|ganzjahres)(?:kompletträder|reifen|räder)\b",
+        r"\bkomplettr[äa]der", r"\bradsatz", r"\bfelgens(?:atz|chrauben)",
+        r"\breifensatz", r"\bstahlfelgen", r"\balufelgen",
+        # Ersatzteile
+        r"\bersatzteil", r"\bgebrauchtteil", r"\bschlachtfest",
+        r"\b(?:steuer|motor)ger[äa]t\b", r"\bstoßstange", r"\bkotfl[üu]gel",
+        r"\bscheinwerfer\b", r"\br[üu]ckleuchte", r"\bau[ßs]enspiegel\b",
+        r"\bstartbatterie", r"\b12[- ]?v[- ]?batterie",
+        # Innenraum und Anbauteile
+        r"\bsitzbez[üu]ge", r"\bfu[ßs]matten", r"\bkofferraumwanne",
+        r"\bdachbox\b", r"\bdachtr[äa]ger", r"\bfahrradtr[äa]ger",
+        r"\bschutzh[üu]lle", r"\bwerkstatthandbuch",
+    ]
+]
+
+# "… für VW ID.3" kennzeichnet ein Teil FÜR ein Auto, nicht das Auto selbst.
+_ZUBEHOER_FUER = _re.compile(r"\bf[üu]r\s+(?:den\s+|die\s+|das\s+)?[A-Z]", _re.I)
+
+
+def is_zubehoer(listing: "Listing") -> bool:
+    """Erkennt Zubehör- und Teileangebote statt Fahrzeugen.
+
+    Nur der Titel zählt. Zusätzlich gilt ein Angebot als Zubehör, wenn es
+    weder Baujahr noch Kilometerstand hat und "für <Modell>" im Titel steht –
+    so werden Teileangebote erkannt, deren Bezeichnung hier nicht gelistet ist.
+    """
+    titel = listing.title or ""
+
+    # Entscheidend ist nicht das Wort, sondern ob ein Fahrzeug dahintersteht:
+    # "VW ID.3 mit Winterreifen und Anhängerkupplung" ist ein Auto, das Zubehör
+    # in der Ausstattung nennt. Ein echtes Fahrzeuginserat trägt Baujahr UND
+    # Kilometerstand; ein Zubehörangebot hat beides nicht.
+    if listing.year or listing.mileage:
+        return False
+
+    if any(p.search(titel) for p in _ZUBEHOER_PATTERNS):
+        return True
+    return bool(_ZUBEHOER_FUER.search(titel))
+
+
 def battery_for_filter(l: "Listing") -> Optional[float]:
     """Vergleichswert für die Akkuschwelle. Bezugsgröße ist brutto.
 
@@ -1025,6 +1074,8 @@ def evaluate_query(l: Listing, q: SearchQuery) -> FilterDecision:
 
     if is_non_pkw(l):
         reasons.append("kein PKW")
+    if is_zubehoer(l):
+        reasons.append("Zubehör oder Ersatzteil, kein Fahrzeug")
     if not q.include_damaged and is_defective_or_restricted(l):
         reasons.append("defekt, beschädigt oder Verkaufsbeschränkung")
     if q.make and title and not any(tok in title for tok in _make_tokens(q.make)):
