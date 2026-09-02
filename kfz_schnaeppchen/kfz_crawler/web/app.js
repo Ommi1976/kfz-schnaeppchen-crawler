@@ -134,7 +134,7 @@ async function loadStatus() {
     { k: "Nächster Lauf", v: nextIn == null ? "–" : `in ${nextIn} min`, cls: "card" },
     { k: "Schwelle", v: Math.round((s.deal_threshold || 0) * 100) + " %", cls: "card" },
     { k: "mobile.de-Cookie", v: cookieStatusText(s.mobile_cookies), cls: "card",
-      title: cookieStatusHinweis(s.mobile_cookies) },
+      title: cookieStatusHinweis(s.mobile_cookies, s) },
   ];
   document.getElementById("stats").innerHTML = cards
     .map((c) => `<div class="${c.cls || 'card'}" id="${c.id || ''}"` +
@@ -694,27 +694,45 @@ function poll() {
 
 
 // --- mobile.de-Cookie ----------------------------------------------------
-// Ohne frisches Sitzungscookie aus dem Browser liefert mobile.de nichts. Die
-// Sitzung veraltet ohne laufenden Browser, deshalb zaehlt das Alter.
+// Ohne frisches Sitzungscookie aus dem Browser liefert mobile.de nichts.
+//
+// Angezeigt wird bewusst das *Alter*, nicht eine Restlaufzeit: Cookies kommen
+// dann, wenn mobile.de im Browser geöffnet war, nicht nach einem festen Takt.
+// Eine Restlaufzeit würde einen Rhythmus vorgeben, den es nicht gibt.
 function cookieStatusText(c) {
   if (!c || !c.has_cookies) return `<span class="dot bad"></span>keins`;
-  if (!c.is_fresh) return `<span class="dot bad"></span>abgelaufen`;
-  const rest = Math.round((c.expires_in_seconds || 0) / 3600);
-  const klasse = rest <= 2 ? "warn" : "on";
-  return `<span class="dot ${klasse}"></span>noch ${rest} h`;
+  const alter = alterKurz(c.age_seconds);
+  if (!c.is_fresh) return `<span class="dot bad"></span>alt (${alter})`;
+  const knapp = (c.expires_in_seconds || 0) <= 2 * 3600;
+  return `<span class="dot ${knapp ? "warn" : "on"}"></span>vor ${alter}`;
 }
 
-function cookieStatusHinweis(c) {
+function alterKurz(sekunden) {
+  const min = Math.round((sekunden || 0) / 60);
+  if (min < 90) return `${min} min`;
+  const std = Math.round(min / 60);
+  return std < 48 ? `${std} h` : `${Math.round(std / 24)} Tagen`;
+}
+
+function cookieStatusHinweis(c, status) {
   if (!c || !c.has_cookies) {
-    return "Noch kein Cookie empfangen. Die Browser-Erweiterung überträgt es "
-         + "automatisch, sobald mobile.de im Browser geöffnet war.";
+    return "Noch kein Cookie empfangen. Die Browser-Erweiterung überträgt es, "
+         + "sobald mobile.de im Browser geöffnet war.";
   }
-  const alter = Math.round((c.age_seconds || 0) / 60);
-  const gealtert = alter >= 120 ? `${Math.round(alter / 60)} h` : `${alter} min`;
   const grenze = Math.round((c.max_age_seconds || 0) / 3600);
-  const zeile = `${c.count} Cookies, empfangen vor ${gealtert} `
-              + `(gültig ${grenze} h)${c.has_abck ? ", mit _abck" : ", ohne _abck"}.`;
-  return c.is_fresh ? zeile
-    : zeile + " mobile.de liefert damit keine Treffer – mobile.de im Browser "
-            + "öffnen, dann überträgt die Erweiterung ein frisches.";
+  let text = `${c.count} Cookies, empfangen vor ${alterKurz(c.age_seconds)}`
+           + `${c.has_abck ? ", mit _abck" : ", ohne _abck"}. `
+           + `Nach ${grenze} h gelten sie als veraltet – das ist eine eigene `
+           + `Vorsichtsregel, keine Vorgabe von mobile.de.`;
+  const mobil = (status?.portal_health || []).find((p) => p.portal === "mobile.de");
+  if (mobil) {
+    text += mobil.last_success
+      ? ` Zuletzt geliefert hat mobile.de vor ${alterKurz(Date.now() / 1000 - mobil.last_success)}.`
+      : " mobile.de hat damit noch nichts geliefert.";
+  }
+  if (!c.is_fresh) {
+    text += " Für neue Treffer mobile.de im Browser öffnen, dann überträgt die "
+          + "Erweiterung ein frisches.";
+  }
+  return text;
 }
