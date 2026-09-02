@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import datetime as _dt
 import hashlib
 import re
 from dataclasses import dataclass, field
@@ -1125,6 +1126,42 @@ def ist_mietangebot(listing: "Listing") -> bool:
     return any(p.search(titel) for p in _MIETE_TITEL)
 
 
+# Untergrenze fuer einen glaubwuerdigen Kaufpreis, als Anteil am Median der
+# jeweiligen Suche. Bewusst relativ: eine Suche nach Dacia Spring hat einen
+# ganz anderen Median als eine nach Model Y, ein fester Betrag waere dort
+# falsch.
+#
+# Der Wert 0,35 ist am Bestand ausgemessen (225 Inserate, Median 24.669 EUR).
+# Zwischen 5.850 EUR und 8.800 EUR liegt dort kein einziges Inserat - die
+# Grenze faellt also mitten in eine Luecke und beruehrt keinen Grenzfall.
+# Hoeher waere gefaehrlich: bei 45 % faellt bereits ein echter Smart EQ fuer
+# 10.880 EUR heraus.
+PREIS_PLAUSIBEL_ANTEIL = 0.35
+
+# Ab diesem Alter ist ein niedriger Preis normal und die Regel greift nicht.
+PREIS_PLAUSIBEL_MAX_ALTER = 8
+
+
+def preis_unplausibel(listing: "Listing", referenz_median: Optional[float],
+                      heute_jahr: Optional[int] = None) -> bool:
+    """Prueft, ob der Preis fuer ein fahrbereites Auto zu niedrig ist.
+
+    Ein unfallfreies E-Auto von 2022 kostet keine 5.850 EUR. Solche Betraege
+    sind Monatsraten, Anzahlungen, Teile oder Koeder. Der Marktpreisvergleich
+    faengt das nicht ab: er liegt nur fuer 28 % der Inserate vor, bei
+    Kleinanzeigen sogar nur fuer 16 % - und genau dort stehen diese Angebote.
+
+    Bezugsgroesse ist der Median der Suche, nicht ein fester Betrag.
+    """
+    if not referenz_median or not listing.price or listing.price <= 0:
+        return False
+    if listing.year:
+        jahr = heute_jahr or _dt.date.today().year
+        if jahr - listing.year > PREIS_PLAUSIBEL_MAX_ALTER:
+            return False
+    return listing.price < PREIS_PLAUSIBEL_ANTEIL * referenz_median
+
+
 def battery_for_filter(l: "Listing") -> Optional[float]:
     """Vergleichswert für die Akkuschwelle. Bezugsgröße ist brutto.
 
@@ -1148,7 +1185,8 @@ class FilterDecision:
     unknown_fields: tuple[str, ...] = ()
 
 
-def evaluate_query(l: Listing, q: SearchQuery) -> FilterDecision:
+def evaluate_query(l: Listing, q: SearchQuery,
+                   referenz_median: Optional[float] = None) -> FilterDecision:
     """Bewertet einen Treffer inklusive nachvollziehbarer Ausschlussgründe.
 
     Im Standardmodus bleiben unbekannte Werte erhalten. Der strikte Modus kann
@@ -1166,6 +1204,8 @@ def evaluate_query(l: Listing, q: SearchQuery) -> FilterDecision:
         reasons.append("Zubehör oder Ersatzteil, kein Fahrzeug")
     if ist_mietangebot(l):
         reasons.append("Leasing oder Miete, kein Kaufangebot")
+    if preis_unplausibel(l, referenz_median):
+        reasons.append("Preis unplausibel niedrig für das Alter")
     if not q.include_damaged and is_defective_or_restricted(l):
         reasons.append("defekt, beschädigt oder Verkaufsbeschränkung")
     if q.make and title and not any(tok in title for tok in _make_tokens(q.make)):

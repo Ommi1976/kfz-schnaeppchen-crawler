@@ -11,6 +11,7 @@ import asyncio
 import json
 import logging
 import secrets
+import statistics
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from contextlib import asynccontextmanager
@@ -25,7 +26,8 @@ from . import __version__
 from .config import Config
 from .ha_run import build_config, load_options
 from .main import run_search
-from .models import SearchQuery, Listing, matches_query, extract_battery_kwh, extract_ev_range_km
+from .models import (SearchQuery, Listing, matches_query, evaluate_query,
+                     extract_battery_kwh, extract_ev_range_km)
 from .notify import notify_all
 from .portals import REGISTRY
 from .portals.as24_taxonomy import EQUIPMENT, EQUIPMENT_GROUPS
@@ -415,6 +417,23 @@ async def deals(search: str | None = None, limit: int = 400, deals_only: bool = 
     )
     specs = {s["name"]: SearchQuery.from_dict(s) for s in app.state.store.list_searches()}
     active_search_names = set(specs.keys())
+
+    # Bezugsgroesse fuer die Preis-Plausibilitaet: je Suche der Median der
+    # eigenen Treffer. Ein fester Betrag waere falsch - eine Suche nach
+    # Kleinwagen hat einen ganz anderen Median als eine nach Oberklasse.
+    # Der Median ist gegenueber den wenigen Ausreissern unempfindlich, die er
+    # gerade aussortieren soll.
+    preise_je_suche: dict[str, list[int]] = {}
+    for row in rows:
+        preis = row.get("price")
+        if preis and preis > 0:
+            preise_je_suche.setdefault(row.get("search_name") or "", []).append(preis)
+    median_je_suche = {
+        name: statistics.median(werte)
+        for name, werte in preise_je_suche.items()
+        if len(werte) >= 8      # unter acht Inseraten ist der Median kein Massstab
+    }
+
     filtered = []
     for row in rows:
         s_name = row.get("search_name")
@@ -445,7 +464,9 @@ async def deals(search: str | None = None, limit: int = 400, deals_only: bool = 
             country=row.get("country"),
             is_stale=bool(row.get("is_stale")),
         )
-        if not matches_query(l, query):
+        if not evaluate_query(
+            l, query, referenz_median=median_je_suche.get(s_name)
+        ).passed:
             continue
         for json_field, target, fallback in (
             ("evidence_json", "field_evidence", {}),

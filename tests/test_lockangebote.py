@@ -155,3 +155,48 @@ def test_neue_karosserie_meint_die_neue_modellgeneration():
         "Renault Zoe Intens, Preis ohne Akku (Batteriemiete)",
     ]:
         assert not is_defective_or_restricted(_inserat(titel)), titel
+
+
+# --- Preis-Plausibilität -------------------------------------------------
+# Ein unfallfreies E-Auto von 2022 kostet keine 5.850 €. Der Marktpreis-
+# vergleich fängt das nicht ab: er liegt nur für 28 % der Inserate vor, bei
+# Kleinanzeigen für 16 % – und genau dort stehen diese Angebote.
+
+def test_zu_billig_fuer_das_alter():
+    from kfz_crawler.models import preis_unplausibel
+    median = 24669          # am Bestand gemessen
+    def inserat(preis, jahr):
+        return Listing(portal="Kleinanzeigen", url="https://example.test/1",
+                       title="E-Auto", price=preis, year=jahr)
+    # Am Bestand belegte Fehltreffer
+    assert preis_unplausibel(inserat(5850, 2022), median, heute_jahr=2026)
+    assert preis_unplausibel(inserat(4900, 2023), median, heute_jahr=2026)
+    assert preis_unplausibel(inserat(1650, 2026), median, heute_jahr=2026)
+
+
+def test_echte_schnaeppchen_ueberleben_die_grenze():
+    """Die Grenze faellt in eine Lücke: zwischen 5.850 € und 8.800 € liegt
+    im Bestand kein Inserat. Bei 45 % fiele schon ein echter Smart heraus."""
+    from kfz_crawler.models import preis_unplausibel
+    median = 24669
+    def inserat(preis, jahr):
+        return Listing(portal="Kleinanzeigen", url="https://example.test/1",
+                       title="E-Auto", price=preis, year=jahr)
+    for preis, jahr in [(8990, 2022), (10880, 2023), (14550, 2022), (15490, 2022)]:
+        assert not preis_unplausibel(inserat(preis, jahr), median, heute_jahr=2026), preis
+
+
+def test_altes_auto_darf_billig_sein():
+    """Bei einem zwoelf Jahre alten Leaf ist ein niedriger Preis normal."""
+    from kfz_crawler.models import preis_unplausibel
+    alt = Listing(portal="Kleinanzeigen", url="https://example.test/1",
+                  title="Nissan Leaf 24 kWh", price=4500, year=2013)
+    assert not preis_unplausibel(alt, 24669, heute_jahr=2026)
+
+
+def test_ohne_bezugsgroesse_keine_grenze():
+    """Ohne genug Vergleichsinserate wird nichts behauptet."""
+    from kfz_crawler.models import preis_unplausibel
+    billig = Listing(portal="Kleinanzeigen", url="https://example.test/1",
+                     title="E-Auto", price=900, year=2024)
+    assert not preis_unplausibel(billig, None, heute_jahr=2026)
