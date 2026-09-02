@@ -211,7 +211,13 @@ _EV_DATABASE: List[EVSpec] = [
         re.compile(r"\bkona\b.*?\b(?:64|65\.4|150\s*kw|204\s*ps|218\s*ps)\b", re.I),
         re.compile(r"\bkona\b", re.I),
     ]),
-    EVSpec("Kia", "EV6", "58 / 77.4 kWh", 77.4, 74.0, 528, 168, 229, [
+    # Zuvor deckte ein einziger Eintrag beide Akkugroessen ab und lieferte
+    # deshalb auch fuer den 58-kWh-Wagen 77,4 kWh. Die Leistung trennt sie.
+    EVSpec("Kia", "EV6", "58 kWh (RWD)", 58.0, 54.0, 394, 125, 170, [
+        re.compile(r"\bev6\b.*?\b58\s*kwh\b", re.I),
+    ]),
+    EVSpec("Kia", "EV6", "77.4 kWh", 77.4, 74.0, 528, 168, 229, [
+        re.compile(r"\bev6\b.*?\b77[,.]?4?\s*kwh\b", re.I),
         re.compile(r"\bev6\b", re.I),
     ]),
     EVSpec("Kia", "e-Niro / Niro EV", "64.8 kWh", 64.8, 64.8, 460, 150, 204, [
@@ -461,7 +467,13 @@ _EV_DATABASE: List[EVSpec] = [
         re.compile(r"\bpolestar\s*2\b.*?\b(?:long\s*range|dual\s*motor|82|78)\b", re.I),
         re.compile(r"\bpolestar\s*2\b", re.I),
     ]),
-    EVSpec("Polestar", "2", "Standard Range (69 kWh)", 69.0, 67.0, 478, 170, 231, [
+    # 231 PS gehoeren zum Long Range Single Motor mit 78 kWh. Solange dieser
+    # Eintrag fehlte und die Standard Range faelschlich 231 PS trug, bekam
+    # jeder 231-PS-Polestar 69 kWh zugeschrieben - gemessen vier Faelle.
+    EVSpec("Polestar", "2", "Long Range Single Motor (78 kWh)", 82.0, 78.0, 551, 170, 231, [
+        re.compile(r"\bpolestar\s*2\b.*?\b(?:long\s*range\s*single|78\s*kwh)\b", re.I),
+    ]),
+    EVSpec("Polestar", "2", "Standard Range (69 kWh)", 69.0, 67.0, 478, 165, 224, [
         re.compile(r"\bpolestar\s*2\b.*?\b(?:standard\s*range|69\s*kwh)\b", re.I),
     ]),
     EVSpec("Polestar", "3 / 4", "100 / 111 kWh", 111.0, 107.0, 610, 360, 490, [
@@ -483,6 +495,39 @@ _EV_DATABASE: List[EVSpec] = [
         re.compile(r"\bspring\b|\bdacia\s+spring\b", re.I),
     ]),
 ]
+
+
+# --- Modellmuster ableiten ------------------------------------------------
+# Die Varianten-Muster verlangen fast alle die Kapazitaet im Text
+# (born.*?(?:77|79|82|84)\s*kwh). Damit konnte die Datenbank eine
+# Akkugroesse nur *bestaetigen*, nie erschliessen: "Cupra Born 231 PS" ergab
+# keinen Treffer, obwohl zu jeder Variante die Leistung hinterlegt ist. In der
+# Folge blieb die Akkuspalte leer und ein Filter "mindestens 65 kWh" wirkungslos.
+#
+# Aus jedem Muster wird deshalb der Teil vor ".*?" als reines Modellmuster
+# uebernommen. Welche Variante gemeint ist, entscheidet dann die Leistung.
+# Ohne Leistung *und* ohne Kapazitaet greift weiterhin die Sperre weiter unten:
+# dann bleibt die Kapazitaet unbekannt, statt geraten zu werden.
+def _modellmuster(spec: EVSpec) -> Optional[re.Pattern]:
+    for pat in spec.patterns or []:
+        kopf = pat.pattern.split(".*?")[0]
+        if not kopf or kopf == pat.pattern or len(kopf) < 5:
+            continue
+        # Steht das ".*?" innerhalb einer Gruppe, ist der Kopf unvollstaendig
+        # und laesst sich nicht uebersetzen. Dann kommt das naechste Muster dran.
+        try:
+            return re.compile(kopf, re.I)
+        except re.error:
+            continue
+    return None
+
+
+for _spec in _EV_DATABASE:
+    _muster = list(_spec.patterns or [])
+    _kopf = _modellmuster(_spec)
+    if _kopf and not any(p.pattern == _kopf.pattern for p in _muster):
+        _muster.append(_kopf)
+    _spec.patterns = _muster
 
 
 _CAPACITY_RE = re.compile(

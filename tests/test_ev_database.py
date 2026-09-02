@@ -88,3 +88,51 @@ def test_byd_dolphin_surf_wltp_plausibility():
     # Muss durch Referenzdatenbank auf echten Akkuwert und echten WLTP-Kombiniert-Wert korrigiert werden
     assert l.battery_kwh == 44.9
     assert l.ev_range_km == 310
+
+
+# --- Modell + Leistung statt nur Kapazität -------------------------------
+# Bis hierher verlangte jedes Muster die kWh-Zahl im Text
+# (\bborn\b.*?\b(?:77|79|82|84)\s*kwh\b). Die Datenbank konnte eine Kapazität
+# damit nur bestätigen, nie erschließen: "Cupra Born 231 PS" ergab nichts,
+# obwohl zu allen 124 Varianten die Leistung hinterlegt ist. In der Folge blieb
+# die Akkuspalte leer und ein Filter "mindestens 65 kWh" wirkungslos.
+
+def test_leistung_bestimmt_die_variante():
+    from kfz_crawler.ev_database import lookup_ev_spec_match
+    faelle = [
+        ("Gebraucht (2022) Cupra Born 231 PS | Superpreis", 231, 77.0),
+        ("Cupra Born", 204, 58.0),
+        ("Cupra Born", 150, 45.0),
+        ("Hyundai Ioniq 5 170 PS", 170, 54.0),
+        ("Skoda Enyaq iV 80 Loft", 204, 77.0),
+    ]
+    for titel, ps, netto in faelle:
+        treffer = lookup_ev_spec_match(titel, "", power_ps=ps)
+        assert treffer is not None, titel
+        assert treffer.spec.battery_net_kwh == netto, f"{titel}: {treffer.spec.variant}"
+
+
+def test_ohne_leistung_wird_nichts_geraten():
+    """Mehrdeutig bleibt unbekannt – ein Fantasiewert wäre schlimmer."""
+    from kfz_crawler.ev_database import lookup_ev_spec_match
+    assert lookup_ev_spec_match("Cupra Born", "") is None
+
+
+def test_polestar_231_ps_ist_der_long_range():
+    """Gemessen: vier Inserate bekamen 69 kWh statt 78 zugeschrieben.
+
+    Die Standard Range trug fälschlich 231 PS, und der Long Range Single Motor
+    fehlte ganz. Beim Polestar 2 sind 231 PS der Long Range mit 78 kWh.
+    """
+    from kfz_crawler.ev_database import lookup_ev_spec_match
+    treffer = lookup_ev_spec_match("Gebraucht (2022) Polestar 2 231 PS", "", power_ps=231)
+    assert treffer.spec.battery_net_kwh == 78.0
+
+
+def test_kia_ev6_trennt_die_beiden_akkugroessen():
+    """Ein einziger Eintrag deckte 58 und 77,4 kWh ab – und lieferte immer 77,4."""
+    from kfz_crawler.ev_database import lookup_ev_spec_match
+    klein = lookup_ev_spec_match("Kia EV6 58 kWh 2WD", "", power_ps=170)
+    gross = lookup_ev_spec_match("Kia EV6 GT-Line", "", power_ps=229)
+    assert klein.spec.battery_net_kwh == 54.0
+    assert gross.spec.battery_net_kwh == 74.0

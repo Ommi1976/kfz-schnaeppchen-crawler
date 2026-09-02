@@ -346,7 +346,14 @@ function renderDealsRows(deals) {
       const item = evidence[field];
       if (!item) return fallback;
       const confidence = item.confidence != null ? ` · ${Math.round(item.confidence * 100)} % sicher` : "";
-      return `${fallback} · Quelle: ${item.source || "unbekannt"}${confidence}${item.evidence ? ` · ${item.evidence}` : ""}`;
+      const quellen = {
+        title: "im Titel genannt",
+        detail_text: "im Anzeigentext genannt",
+        portal_structured: "Feld des Portals",
+        ev_database: "aus Modell und Leistung erschlossen, nicht im Inserat genannt",
+      };
+      const quelle = quellen[item.source] || item.source || "unbekannt";
+      return `${fallback} · ${quelle}${confidence}${item.evidence ? ` · ${item.evidence}` : ""}`;
     };
     const sohBadge = d.battery_soh != null 
       ? `<span class="soh-badge ${sohClass(d.battery_soh)}" title="${escapeHtml(sourceTitle("battery_soh", "Batteriezustand (State of Health)"))}">🔋 ${d.battery_soh} % SoH</span>`
@@ -354,11 +361,18 @@ function renderDealsRows(deals) {
     const batteryText = d.battery_net_kwh != null && d.battery_gross_kwh != null && d.battery_net_kwh !== d.battery_gross_kwh
       ? `${d.battery_net_kwh} netto / ${d.battery_gross_kwh} brutto`
       : (d.battery_gross_kwh ?? d.battery_kwh);
+    // Aus der Modelldatenbank erschlossene Werte bekommen ein "~", im Inserat
+    // genannte nicht. Zuvor trug die Reichweite immer eine Tilde - auch wenn
+    // sie woertlich im Text stand -, die Akkugroesse dagegen nie, obwohl sie
+    // oft nur aus Modell und Leistung abgeleitet ist.
+    const ausKatalog = (feld) => (evidence[feld] || {}).source === "ev_database";
+    const battTilde = ausKatalog("battery_kwh") ? "~" : "";
     const battInfo = batteryText != null
-      ? `<span class="batt-badge" title="${escapeHtml(sourceTitle("battery_kwh", "Akku-Kapazität"))}">⚡ ${batteryText} kWh</span>`
+      ? `<span class="batt-badge${battTilde ? " abgeleitet" : ""}" title="${escapeHtml(sourceTitle("battery_kwh", "Akku-Kapazität"))}">⚡ ${battTilde}${batteryText} kWh</span>`
       : "";
+    const rangeTilde = ausKatalog("ev_range_km") ? "~" : "";
     const rangeInfo = d.ev_range_km != null
-      ? `<span class="range-badge" title="Reichweite">🌐 ~${d.ev_range_km} km</span>`
+      ? `<span class="range-badge${rangeTilde ? " abgeleitet" : ""}" title="${escapeHtml(sourceTitle("ev_range_km", "Reichweite"))}">🌐 ${rangeTilde}${d.ev_range_km} km</span>`
       : "";
     const batteryCell = (battInfo || sohBadge || rangeInfo)
       ? `<div class="battery-cell">${battInfo}${sohBadge}${rangeInfo}</div>`
