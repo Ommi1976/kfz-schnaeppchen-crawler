@@ -977,12 +977,19 @@ _DEFECT_AND_RESTRICTION_PATTERNS = [
         r"\bnicht\s+fahrbereit",
         r"\bkarosserieschad",
         r"\bkompressionsverlust\b",
-        # Reine Export/Import/Gewerbe-Klauseln:
-        r"\b(?:nur\s+(?:an|für)\s+)?export\b",
-        r"\b(?:nur\s+(?:an|für)\s+)?import\b",
-        r"\bimport(?:fahrzeug|wagen|auto)?\b",
-        r"\b(?:nur\s+(?:an|für)\s+)?gewerbe(?:kunden|treibende)?\b",
-        r"\b(?:nur\s+(?:an|für)\s+)?h[äa]ndler\b",
+        # Reine Export/Import/Gewerbe-Klauseln. Die einschraenkende Wendung
+        # muss dastehen: mit optionalem "nur an" traf das Muster jede blosse
+        # Erwaehnung. "Wartung beim Hyundai Händler" und "netto/Export
+        # möglich" beschreiben gepflegte Autos, die verkauft werden - beide
+        # flogen zuvor aus der Liste.
+        r"\bnur\s+(?:an|f[üu]r)\s+(?:den\s+)?export\b",
+        r"\bexportfahrzeug\b",
+        r"\bnur\s+(?:an|f[üu]r)\s+(?:den\s+)?import\b",
+        r"\bimportfahrzeug\b",
+        r"\bnur\s+(?:an|f[üu]r)\s+gewerbe",
+        r"\bgewerblicher\s+(?:ver)?kauf\b",
+        r"\bnur\s+(?:an|f[üu]r)\s+h[äa]ndler\b",
+        r"\bh[äa]ndleranfragen?\s+(?:erw[üu]nscht|willkommen)",
         r"\bkein\s+verkauf\s+an\s+privat\b",
         r"\breine(?:r)?\s+gewerbeverkauf\b",
     ]
@@ -1084,6 +1091,14 @@ _MIETE_EINDEUTIG = [
         r"auto\s*-?\s*abo",
         r"zu\s+vermieten",
         r"\bmietwagen\b",
+        # Aus der Detailseite: "Leasingkonditionen", "Leasingsonderzahlung:
+        # 5.000 EUR", oder im Seitentitel "fuer 139 EUR mtl. im Leasing".
+        r"\bleasingsonderzahlung\b",
+        r"\bleasingkonditionen\b",
+        r"\bim\s+leasing\b",
+        r"\bleasingrate\b",
+        # "nur ueber Leasing", "ausschliesslich im Leasing"
+        r"\b(?:nur|ausschlie[ßs]lich)\s+(?:\w+\s+){0,3}leasing",
     ]
 ]
 
@@ -1099,6 +1114,19 @@ _MIETE_TITEL = [
         r"\bzu\s+mieten\b",
     ]
 ]
+
+# Diese Wendungen schlagen jedes Gegenmuster: "nur über Leasing möglich"
+# enthaelt "Leasing möglich", meint aber das Gegenteil.
+_MIETE_ZWINGEND = [
+    _re.compile(p, _re.I) for p in [
+        r"\b(?:nur|ausschlie[ßs]lich)\s+(?:\w+\s+){0,3}leasing",
+        r"\bleasingsonderzahlung\b",
+        r"\bleasingkonditionen\b",
+        r"\bnicht\s+zum\s+kauf\b",
+        r"\bkein(?:e)?\s+(?:bar)?kauf\s+m[öo]glich\b",
+    ]
+]
+
 
 # Gegenmuster: hier wird sehr wohl verkauft.
 _MIETE_AUSNAHME = _re.compile(
@@ -1119,7 +1147,10 @@ def ist_mietangebot(listing: "Listing") -> bool:
     """
     titel = listing.title or ""
     text = f"{titel} {listing.body or ''}"
-    if _MIETE_AUSNAHME.search(text):
+    # "nur ueber Leasing moeglich" enthaelt "Leasing moeglich" - die Ausnahme
+    # darf den Ausschluss hier nicht aufheben.
+    zwingend = any(p.search(text) for p in _MIETE_ZWINGEND)
+    if not zwingend and _MIETE_AUSNAHME.search(text):
         return False
     if any(p.search(text) for p in _MIETE_EINDEUTIG):
         return True

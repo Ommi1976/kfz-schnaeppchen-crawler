@@ -229,6 +229,41 @@ class AutoScout24(BasePortal):
             return "schaltgetriebe"
         return None
 
+    # Die Trefferliste liefert nur technische Eckdaten (rund 130 Zeichen).
+    # Ob ein Wagen ueberhaupt zum Kauf steht, steht in der Detailseite.
+    DETAIL_LIMIT = 60
+
+    def enrich(self, listings: List[Listing], query: SearchQuery,
+               force: bool = False) -> List[Listing]:
+        """Holt Seitentitel und Beschreibung der Detailseite nach.
+
+        Bewusst NICHT der ganze Seitentext: er enthaelt aehnliche Angebote,
+        deren Angaben sonst diesem Fahrzeug zugeschrieben wuerden. Der
+        ``<title>`` gehoert dagegen immer genau zu diesem Inserat und nennt
+        die Angebotsart ausdruecklich - etwa "... fuer 139 EUR mtl. im
+        Leasing".
+        """
+        for listing in listings[:self.DETAIL_LIMIT]:
+            try:
+                resp = self._get(listing.url)
+                soup = BeautifulSoup(resp.text, "lxml")
+            except Exception:
+                continue
+            teile = []
+            if soup.title and soup.title.string:
+                teile.append(soup.title.string.strip())
+            for auswahl in ("[data-testid=description]", "#description",
+                            "[class*=description]"):
+                bereich = soup.select_one(auswahl)
+                if bereich:
+                    teile.append(bereich.get_text(" ", strip=True))
+                    break
+            if teile:
+                listing.body = " ".join(
+                    teil for teil in ([listing.body] + teile) if teil
+                )
+        return listings
+
     def _parse_html(self, soup: BeautifulSoup) -> List[Listing]:
         listings: List[Listing] = []
         for art in soup.select("article[data-guid], article.cldt-summary-full-item"):

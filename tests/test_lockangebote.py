@@ -200,3 +200,19 @@ def test_ohne_bezugsgroesse_keine_grenze():
     billig = Listing(portal="Kleinanzeigen", url="https://example.test/1",
                      title="E-Auto", price=900, year=2024)
     assert not preis_unplausibel(billig, None, heute_jahr=2026)
+
+
+def test_leasing_nur_ueber_leasing_schlaegt_das_gegenmuster():
+    """"Nur über Leasing möglich" enthält "Leasing möglich" – meint aber
+    das Gegenteil. Das Gegenmuster darf hier nicht greifen."""
+    from kfz_crawler.models import ist_mietangebot
+    def inserat(text):
+        return Listing(portal="AutoScout24", url="https://example.test/1",
+                       title="Opel Grandland", body=text)
+    assert ist_mietangebot(inserat("Nur über Leasing möglich, kein Barkauf"))
+    assert ist_mietangebot(inserat(
+        "Opel Grandland neu für € 199 mtl. im Leasing. "
+        "Leasingkonditionen: Leasingsonderzahlung 5.000 €"))
+    # Gegenprobe: hier wird verkauft, Leasing ist nur eine Option.
+    assert not ist_mietangebot(inserat(
+        "Finanzierung und Leasing möglich, Kaufpreis 28.900 €"))

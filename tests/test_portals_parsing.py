@@ -75,8 +75,13 @@ def test_kleinanzeigen_parse_html():
 
 
 def test_kleinanzeigen_parse_detail():
+    # Struktur wie auf der echten Anzeigenseite: die Beschreibung steht in
+    # #viewad-description-text, die Eckdaten in #viewad-details. Nur diese
+    # beiden Bereiche werden gelesen - der uebrige Seitentext gehoert zu
+    # fremden Inseraten.
     detail_html = """
     <div>
+      <div id="viewad-details">
         <ul class="addetailslist">
             <li class="addetailslist--detail">
                 <span class="addetailslist--detail--value">150 PS</span> Leistung
@@ -91,7 +96,8 @@ def test_kleinanzeigen_parse_detail():
                 <span class="addetailslist--detail--value">Beschädigtes Fahrzeug</span> Fahrzeugzustand
             </li>
         </ul>
-        <div class="description">Batteriekapazität ca 58 kWh bei Elektrofahrzeugen</div>
+      </div>
+      <div id="viewad-description-text">Batteriekapazität ca 58 kWh bei Elektrofahrzeugen</div>
     </div>
     """
     p = Kleinanzeigen()
@@ -203,3 +209,38 @@ def test_autouncle_url_contains_search_filters():
     assert "s%5Bmin_hp%5D=150" in url
     assert "s%5Bhas_distance_control%5D=true" in url
     assert "s%5Bhas_seat_heat%5D=true" in url
+
+
+def test_kleinanzeigen_detail_ignoriert_fremde_anzeigen():
+    """Der Gesamttext der Seite enthält "Ähnliche Anzeigen".
+
+    Gemessen: 13.500 Zeichen Seitentext, davon 2.300 die eigene Anzeige.
+    Aus dem Rest wurden "Motorschaden" und "suche Tesla, auch beschädigt" als
+    Zustand DIESES Fahrzeugs gelesen – sieben Fehlalarme in zwölf Stichproben.
+    """
+    from kfz_crawler.models import Listing
+    from kfz_crawler.portals.kleinanzeigen import Kleinanzeigen
+
+    html = """
+    <div>
+      <div id="viewad-details">
+        <ul class="addetailslist">
+          <li class="addetailslist--detail">
+            <span class="addetailslist--detail--value">Unbeschädigtes Fahrzeug</span> Fahrzeugzustand
+          </li>
+        </ul>
+      </div>
+      <div id="viewad-description-text">Scheckheftgepflegt, unfallfrei, 77 kWh.</div>
+      <section class="similar-ads">
+        <article>Suche Peugeot 3008 mit Motorschaden, polnischer Händler,
+        Export möglich</article>
+        <article>Smart fortwo 451 – defekt – Bastlerfahrzeug</article>
+      </section>
+    </div>
+    """
+    l = Listing(portal="Kleinanzeigen", title="VW ID.3 Pro S", url="http://x")
+    Kleinanzeigen()._parse_detail(html, l)
+    text = (l.body or "").lower()
+    assert "scheckheftgepflegt" in text
+    for fremd in ("motorschaden", "bastlerfahrzeug", "peugeot", "defekt"):
+        assert fremd not in text, fremd

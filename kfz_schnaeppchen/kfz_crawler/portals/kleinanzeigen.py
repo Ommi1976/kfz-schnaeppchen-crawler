@@ -277,13 +277,24 @@ class Kleinanzeigen(BasePortal):
 
     def _parse_detail(self, html: str, l: Listing) -> None:
         soup = BeautifulSoup(html, "lxml")
-        full_text = soup.get_text(" ", strip=True)
-        # Die Trefferkarte enthält nur wenige Textzeilen. Die Detailseite ist
-        # die beste verfügbare Quelle für Akku, Reichweite, Zustand und freie
-        # Ausstattungsangaben. Sie wird deshalb am Inserat erhalten, statt die
-        # Informationen nach dem Extrahieren wieder zu verwerfen.
-        if full_text:
-            l.body = " ".join(part for part in (l.body, full_text) if part)
+        # Nur die Anzeige selbst lesen, nicht die ganze Seite. Der Gesamttext
+        # umfasst rund 13.500 Zeichen, die Anzeige davon nur 2.300 - der Rest
+        # sind fremde Inserate ("Ähnliche Anzeigen"). Daraus wurden zuvor
+        # "Motorschaden" oder "suche Tesla, auch beschädigt" als Zustand
+        # DIESES Fahrzeugs gelesen: sieben Fehlalarme in zwölf Stichproben.
+        #
+        # Findet sich keiner der Bereiche, wird lieber nichts uebernommen als
+        # fremder Text.
+        teile = []
+        for auswahl in ("#viewad-description-text", "#viewad-details"):
+            bereich = soup.select_one(auswahl)
+            if bereich:
+                teile.append(bereich.get_text(" ", strip=True))
+        if teile:
+            l.body = " ".join(part for part in ([l.body] + teile) if part)
+        # Bezugstext fuer Akku und Reichweite: die Anzeige selbst, sonst faellt
+        # ein "58 kWh" aus einem fremden Inserat auf dieses Fahrzeug zurueck.
+        full_text = " ".join(teile) if teile else (l.body or "")
         for li in soup.select("li.addetailslist--detail"):
             valel = li.select_one(".addetailslist--detail--value")
             if not valel:
