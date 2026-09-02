@@ -20,7 +20,9 @@ from ..models import Listing, SearchQuery, extract_battery_kwh, extract_ev_range
 from .base import BasePortal, PortalError
 
 # Wie viele Detailseiten pro Suche höchstens nachgeladen werden (Requests sparen).
-DETAIL_LIMIT = 40
+# Die Detailabrufe gelten jetzt den gefilterten Treffern, nicht mehr den
+# ersten Rohtreffern. Das Budget muss deshalb die uebliche Trefferzahl decken.
+DETAIL_LIMIT = 150
 # Parallele Detailabrufe (begrenzt, um Kleinanzeigen nicht zu überlasten).
 ENRICH_WORKERS = 5
 

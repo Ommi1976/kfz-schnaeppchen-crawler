@@ -71,10 +71,6 @@ def _search_one_portal(cfg: Config, key: str, query: SearchQuery, store=None) ->
             result_status = "partial"
             result_error = str(exc)
             console.print(f"  [yellow]{exc}[/yellow]")
-        # Homogenisierung: Felder, die die Trefferliste nicht liefert, per
-        # Detailseite nachladen (verify_details erzwingt zusätzlich via force).
-        if result_status == "ok" and hasattr(portal, "enrich"):
-            found = portal.enrich(found, query, force=cfg.settings.verify_details)
         # Viele Portale liefern die Akku-Kapazität nur im Titel (z. B. "62 kWh").
         # WICHTIG: hier NUR Text-Auswertung (billig). Die teure Bild-OCR läuft
         # asynchron im Hintergrund-Daemon (run_background_image_enrichment) und
@@ -124,6 +120,16 @@ def _search_one_portal(cfg: Config, key: str, query: SearchQuery, store=None) ->
                 matching.append(listing)
             else:
                 exclusions.update(decision.reasons)
+        # Detailseiten erst jetzt holen – für die Inserate, die den Filter
+        # überstanden haben. Vorher ging das Budget an die ersten 40 Rohtreffer,
+        # also überwiegend an Ausschuss, und die angezeigten Inserate hatten nur
+        # die abgeschnittene Vorschau aus der Trefferkarte. Genau dort fehlten
+        # die Hinweise auf Leasing oder Beschädigung.
+        if result_status == "ok" and matching and hasattr(portal, "enrich"):
+            matching = _mit_detailtext_nachpruefen(
+                portal, matching, query, cfg, home_zip, exclusions, store
+            )
+
         console.print(f"  [dim]{portal.name}: {len(matching)}/{len(found)} Treffer (passend/Roh)[/dim]")
         return PortalSearchResult(
             portal.name,
@@ -139,6 +145,62 @@ def _search_one_portal(cfg: Config, key: str, query: SearchQuery, store=None) ->
     except Exception as e:  # pragma: no cover - robuster Lauf trotz Portalfehler
         console.print(f"  [red]{portal.name}: Fehler – {e}[/red]")
         return PortalSearchResult(portal.name, status="error", error=str(e))
+
+
+def _mit_detailtext_nachpruefen(portal, matching, query, cfg, home_zip,
+                                exclusions, store=None):
+    """Laedt Detailseiten nach und prueft die Treffer damit erneut.
+
+    Die Trefferkarte zeigt nur eine abgeschnittene Vorschau. Ein Fahrzeug, das
+    dort unauffaellig aussieht, kann sich auf der Detailseite als
+    Leasingfahrzeug oder als beschaedigt herausstellen.
+    """
+    vorher = len(matching)
+
+    # Bereits nachgeladene Texte wiederverwenden, statt sie erneut abzurufen.
+    bekannt = {}
+    if store is not None and not cfg.settings.verify_details:
+        try:
+            bekannt = store.detailtexte(query.name)
+        except Exception:
+            logger.exception("Vorhandene Detailtexte konnten nicht gelesen werden")
+    offen = []
+    for listing in matching:
+        text = bekannt.get(listing.fingerprint)
+        if text:
+            listing.body = text
+        else:
+            offen.append(listing)
+
+    try:
+        # enrich() aendert die uebergebenen Inserate an Ort und Stelle; der
+        # Rueckgabewert ist dieselbe Liste.
+        portal.enrich(offen, query, force=cfg.settings.verify_details)
+    except Exception:
+        logger.exception("Detailabruf bei %s fehlgeschlagen", portal.name)
+        return matching
+
+    geprueft = []
+    for listing in matching:
+        try:
+            infer_listing_battery(listing, check_images=False)
+            infer_listing_range(listing)
+            if home_zip:
+                infer_listing_details(listing, home_zip)
+        except Exception:
+            pass
+        entscheidung = evaluate_query(listing, query)
+        listing.unknown_fields = list(entscheidung.unknown_fields)
+        if entscheidung.passed:
+            geprueft.append(listing)
+        else:
+            # Als eigener Grund gefuehrt: so ist erkennbar, dass erst der
+            # Volltext den Ausschlag gab.
+            exclusions.update(f"{g} (laut Detailseite)" for g in entscheidung.reasons)
+    if len(geprueft) < vorher:
+        console.print(f"  [dim]{portal.name}: {vorher - len(geprueft)} weitere per "
+                      f"Detailseite aussortiert[/dim]")
+    return geprueft
 
 
 def run_search(cfg: Config, query: SearchQuery, store: SeenStore) -> List[Listing]:

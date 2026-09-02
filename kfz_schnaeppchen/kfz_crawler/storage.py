@@ -367,7 +367,14 @@ class SeenStore:
                 "first_registration_month=excluded.first_registration_month, "
                 "battery_gross_kwh=excluded.battery_gross_kwh, battery_soh=COALESCE(excluded.battery_soh, deals.battery_soh), "
                 "ev_range_km=excluded.ev_range_km, is_deal=excluded.is_deal, is_suspicious=excluded.is_suspicious, "
-                "reasons=excluded.reasons, body=COALESCE(excluded.body, deals.body), "
+                "reasons=excluded.reasons, "
+                # Der laengere Text gewinnt. Die Trefferkarte liefert nur eine
+                # abgeschnittene Vorschau (~270 Zeichen); die Detailseite bringt
+                # ein Vielfaches. Ohne diese Regel warf jeder Lauf das Nachgeladene
+                # wieder weg, und Hinweise auf Leasing oder Schaeden gingen mit.
+                "body=CASE WHEN LENGTH(COALESCE(excluded.body, '')) "
+                "          >= LENGTH(COALESCE(deals.body, '')) "
+                "     THEN excluded.body ELSE deals.body END, "
                 "image_urls=COALESCE(excluded.image_urls, deals.image_urls), "
                 "warranty=COALESCE(excluded.warranty, deals.warranty), "
                 "location=COALESCE(excluded.location, deals.location), "
@@ -550,6 +557,24 @@ class SeenStore:
                 params,
             )
             return [dict(r) for r in cur.fetchall()]
+
+    def detailtexte(self, search_name: str | None = None,
+                    min_laenge: int = 800) -> dict:
+        """Liefert bereits nachgeladene Volltexte je Fingerprint.
+
+        Die Trefferkarte bringt rund 270 Zeichen, eine Detailseite ein
+        Vielfaches. Alles ab ``min_laenge`` gilt deshalb als bereits
+        nachgeladen und muss nicht erneut abgerufen werden - das spart pro
+        Lauf rund hundert Anfragen je Portal.
+        """
+        with self._lock:
+            sql = ("SELECT fingerprint, body FROM deals "
+                   "WHERE LENGTH(COALESCE(body, '')) >= ?")
+            params: list = [int(min_laenge)]
+            if search_name:
+                sql += " AND search_name = ?"
+                params.append(search_name)
+            return {r["fingerprint"]: r["body"] for r in self.conn.execute(sql, params)}
 
     def count_deals_by_portal(self, search_name: str | None = None,
                               deals_only: bool = False) -> dict:
