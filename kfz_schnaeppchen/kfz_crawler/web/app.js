@@ -133,9 +133,13 @@ async function loadStatus() {
     { k: "Letzter Lauf", v: fmtClock(s.last_finished_at || s.last_run_at), cls: "card" },
     { k: "Nächster Lauf", v: nextIn == null ? "–" : `in ${nextIn} min`, cls: "card" },
     { k: "Schwelle", v: Math.round((s.deal_threshold || 0) * 100) + " %", cls: "card" },
+    { k: "mobile.de-Cookie", v: cookieStatusText(s.mobile_cookies), cls: "card",
+      title: cookieStatusHinweis(s.mobile_cookies) },
   ];
   document.getElementById("stats").innerHTML = cards
-    .map((c) => `<div class="${c.cls || 'card'}" id="${c.id || ''}"><div class="k">${c.k}</div><div class="v">${c.v}</div></div>`).join("");
+    .map((c) => `<div class="${c.cls || 'card'}" id="${c.id || ''}"` +
+      (c.title ? ` title="${escapeHtml(c.title)}"` : "") +
+      `><div class="k">${c.k}</div><div class="v">${c.v}</div></div>`).join("");
 
   const cDeals = document.getElementById("card-deals");
   if (cDeals) {
@@ -687,3 +691,30 @@ function poll() {
   await refresh();
   setInterval(refresh, 20000);
 })();
+
+
+// --- mobile.de-Cookie ----------------------------------------------------
+// Ohne frisches Sitzungscookie aus dem Browser liefert mobile.de nichts. Die
+// Sitzung veraltet ohne laufenden Browser, deshalb zaehlt das Alter.
+function cookieStatusText(c) {
+  if (!c || !c.has_cookies) return `<span class="dot bad"></span>keins`;
+  if (!c.is_fresh) return `<span class="dot bad"></span>abgelaufen`;
+  const rest = Math.round((c.expires_in_seconds || 0) / 3600);
+  const klasse = rest <= 2 ? "warn" : "on";
+  return `<span class="dot ${klasse}"></span>noch ${rest} h`;
+}
+
+function cookieStatusHinweis(c) {
+  if (!c || !c.has_cookies) {
+    return "Noch kein Cookie empfangen. Die Browser-Erweiterung überträgt es "
+         + "automatisch, sobald mobile.de im Browser geöffnet war.";
+  }
+  const alter = Math.round((c.age_seconds || 0) / 60);
+  const gealtert = alter >= 120 ? `${Math.round(alter / 60)} h` : `${alter} min`;
+  const grenze = Math.round((c.max_age_seconds || 0) / 3600);
+  const zeile = `${c.count} Cookies, empfangen vor ${gealtert} `
+              + `(gültig ${grenze} h)${c.has_abck ? ", mit _abck" : ", ohne _abck"}.`;
+  return c.is_fresh ? zeile
+    : zeile + " mobile.de liefert damit keine Treffer – mobile.de im Browser "
+            + "öffnen, dann überträgt die Erweiterung ein frisches.";
+}

@@ -65,21 +65,36 @@ def get_mobile_cookies(max_age_seconds: Optional[float] = None) -> Dict[str, str
         return {}
 
 
+# Ohne laufenden Browser veraltet die Sitzung. Aelter als das hier wird sie
+# nicht mehr benutzt - mobile.de weist sie ohnehin ab, und ein abgelaufenes
+# Cookie sieht wie ein Sperrversuch aus.
+COOKIE_MAX_ALTER = 12 * 3600
+
+
 def get_mobile_cookies_status() -> dict:
     """Gibt Statusinformationen zu den gespeicherten Cookies zurück."""
+    leer = {"has_cookies": False, "count": 0, "updated_at": None,
+            "age_seconds": None, "max_age_seconds": COOKIE_MAX_ALTER,
+            "is_fresh": False, "expires_in_seconds": None}
     if not COOKIE_FILE.exists():
-        return {"has_cookies": False, "count": 0, "updated_at": None, "age_seconds": None}
+        return leer
     try:
         data = json.loads(COOKIE_FILE.read_text(encoding="utf-8"))
         cookies = data.get("cookies", {})
         updated = data.get("updated_at")
         age = round(time.time() - updated, 1) if updated else None
+        vorhanden = bool(cookies and ("_abck" in cookies or "bm_sz" in cookies
+                                      or len(cookies) > 2))
+        frisch = bool(vorhanden and age is not None and age <= COOKIE_MAX_ALTER)
         return {
-            "has_cookies": bool(cookies and ("_abck" in cookies or "bm_sz" in cookies or len(cookies) > 2)),
+            "has_cookies": vorhanden,
             "count": len(cookies),
             "updated_at": updated,
             "age_seconds": age,
             "has_abck": "_abck" in cookies,
+            "max_age_seconds": COOKIE_MAX_ALTER,
+            "is_fresh": frisch,
+            "expires_in_seconds": (round(COOKIE_MAX_ALTER - age) if frisch else 0),
         }
     except Exception:
-        return {"has_cookies": False, "count": 0, "updated_at": None, "age_seconds": None}
+        return leer

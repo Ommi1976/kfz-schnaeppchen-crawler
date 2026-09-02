@@ -147,8 +147,8 @@ def _matching_user_agent(browser) -> str:
 def _inject_saved_mobile_cookies(context) -> int:
     """Übernimmt nur explizit im Add-on gespeicherte mobile.de-Cookies."""
     try:
-        from .cookie_storage import get_mobile_cookies
-        saved = get_mobile_cookies(max_age_seconds=12 * 3600)
+        from .cookie_storage import get_mobile_cookies, COOKIE_MAX_ALTER
+        saved = get_mobile_cookies(max_age_seconds=COOKIE_MAX_ALTER)
         cookies = [
             {
                 "name": str(name),

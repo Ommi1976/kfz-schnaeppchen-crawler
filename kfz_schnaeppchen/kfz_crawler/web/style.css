@@ -56,6 +56,8 @@ h1 { font-size: 18px; margin: 0; }
 .dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 6px; }
 .dot.on { background: var(--good); box-shadow: 0 0 6px var(--good); }
 .dot.idle { background: var(--muted); }
+.dot.warn { background: var(--warn); box-shadow: 0 0 6px var(--warn); }
+.dot.bad { background: var(--bad); box-shadow: 0 0 6px var(--bad); }
 
 .controls {
   display: flex; align-items: center; gap: 12px; padding: 0 18px 12px;

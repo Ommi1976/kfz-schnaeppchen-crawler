@@ -348,7 +348,19 @@ async def status():
         "portal_health": app.state.store.list_portal_health(),
         "searches": searches,
         "last_report": app.state.last_report,
+        # Ohne frisches Sitzungscookie liefert mobile.de nichts. Das war
+        # bisher nur im Protokoll sichtbar.
+        "mobile_cookies": _mobile_cookie_status(),
     }
+
+
+def _mobile_cookie_status() -> dict:
+    try:
+        from .cookie_storage import get_mobile_cookies_status
+        return get_mobile_cookies_status()
+    except Exception:
+        logger.exception("Cookie-Status nicht lesbar")
+        return {"has_cookies": False, "is_fresh": False}
 
 
 # ---- Suchen verwalten -------------------------------------------------
