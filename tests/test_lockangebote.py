@@ -128,3 +128,30 @@ def test_mietangebot_faellt_aus_der_trefferliste():
     )
     assert not ergebnis.passed
     assert "Leasing oder Miete, kein Kaufangebot" in ergebnis.reasons
+
+
+def test_unvollstaendige_fahrzeuge_werden_ausgeschlossen():
+    """Markieren reicht nicht – eine Rohkarosse für 1.200 € blieb sichtbar."""
+    from kfz_crawler.models import is_defective_or_restricted
+    for titel in [
+        "Renault Megane E-Tech EV60 (220 PS) - RohKarosse",
+        "VW ID.3 nur Karosserie",
+        "BMW i3 Karosserie ohne Anbauteile",
+        "Tesla Model 3 ohne Motor",
+    ]:
+        assert is_defective_or_restricted(_inserat(titel)), titel
+
+
+def test_neue_karosserie_meint_die_neue_modellgeneration():
+    """Vom Nutzer korrigiert: "neue Karosserie" ist kein Schadensmerkmal.
+
+    Ebenso ist "Preis ohne Akku" bei der Zoe eine Batteriemiete – das Auto
+    wird verkauft.
+    """
+    from kfz_crawler.models import is_defective_or_restricted
+    for titel in [
+        "Skoda Enyaq Coupe, neue Karosserie",
+        "VW ID.4 Pro, Karosserie in Top-Zustand",
+        "Renault Zoe Intens, Preis ohne Akku (Batteriemiete)",
+    ]:
+        assert not is_defective_or_restricted(_inserat(titel)), titel

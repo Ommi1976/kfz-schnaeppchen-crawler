@@ -959,6 +959,16 @@ _DEFECT_AND_RESTRICTION_PATTERNS = [
         r"\bersatzteilspender",
         r"\bzum\s+ausschlachten",
         r"\btotalschad",
+        # Kein vollstaendiges Fahrzeug. Diese Faelle waren bisher nur als
+        # Verdacht markiert - sichtbar blieben sie trotzdem, etwa eine
+        # Rohkarosse fuer 1.200 EUR.
+        #
+        # "Karosserie" allein greift zu weit: "neue Karosserie" heisst im
+        # Inserat meist die neue Modellgeneration.
+        r"\brohkarosse",
+        r"\bnur\s+(?:die\s+)?karosse(?:rie)?\b",
+        r"\bkarosse(?:rie)?\s+ohne\b",
+        r"\bohne\s+(?:motor|antrieb|getriebe)\b",
         r"\bsalvage\b",
         r"\bl[aä]uft\s+nicht",
         r"\bspringt\s+nicht\s+an",
