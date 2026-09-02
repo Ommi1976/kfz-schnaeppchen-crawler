@@ -1056,6 +1056,65 @@ def is_zubehoer(listing: "Listing") -> bool:
     return not (listing.year and listing.mileage)
 
 
+# Leasinguebernahme, Abo und Miete: der genannte Betrag ist die Monatsrate,
+# nicht der Kaufpreis. Bisher wurden solche Angebote nur *markiert* - und auch
+# das nur, wenn sie ins Preismodell kamen. Wer ein Auto kaufen will, hat davon
+# nichts, also fliegen sie jetzt aus der Trefferliste.
+#
+# Eindeutige Muster duerfen auch im Beschreibungstext stehen.
+_MIETE_EINDEUTIG = [
+    _re.compile(p, _re.I) for p in [
+        # "Leasingübnahme" ohne "er" kommt in Inseraten oft vor.
+        r"leasing\s*[üu]e?b(?:er)?nahme",
+        r"[üu]e?bernahme\s+(?:des\s+)?(?:leasing|vertrag)",
+        r"leasingvertrag\s+(?:zu\s+)?[üu]e?bernehmen",
+        r"restleasing",
+        r"langzeitmiete",
+        r"auto\s*-?\s*abo",
+        r"zu\s+vermieten",
+        r"\bmietwagen\b",
+    ]
+]
+
+# Das blosse Wort "Leasing" zaehlt nur im Titel: dort steht, was angeboten
+# wird. Im Beschreibungstext ist es meist nur ein Zahlungsweg fuer ein Auto,
+# das trotzdem verkauft wird.
+#
+# Eine Monatsrate allein ist ausdruecklich kein Ausschlussgrund: "ab 199 EUR
+# mtl." kann eine Finanzierung sein, und die fuehrt zum Kauf.
+_MIETE_TITEL = [
+    _re.compile(p, _re.I) for p in [
+        r"\bleasing\b",
+        r"\bzu\s+mieten\b",
+    ]
+]
+
+# Gegenmuster: hier wird sehr wohl verkauft.
+_MIETE_AUSNAHME = _re.compile(
+    r"leasing\s*-?\s*r[üu]e?ckl[äa]ufer"
+    r"|leasing\s+(?:ist\s+)?m[öo]glich"
+    r"|leasingfrei"
+    r"|kein(?:e)?\s+leasing",
+    _re.I,
+)
+
+
+def ist_mietangebot(listing: "Listing") -> bool:
+    """Erkennt Leasinguebernahme, Auto-Abo und Miete statt Kauf.
+
+    Der Preis ist dort eine Monatsrate. Ohne diese Pruefung erscheint eine
+    78-€-Rate als 91-%-Schnaeppchen, und die Trefferliste fuellt sich mit
+    Angeboten, bei denen das Auto gar nicht den Besitzer wechselt.
+    """
+    titel = listing.title or ""
+    text = f"{titel} {listing.body or ''}"
+    if _MIETE_AUSNAHME.search(text):
+        return False
+    if any(p.search(text) for p in _MIETE_EINDEUTIG):
+        return True
+    return any(p.search(titel) for p in _MIETE_TITEL)
+
+
 def battery_for_filter(l: "Listing") -> Optional[float]:
     """Vergleichswert für die Akkuschwelle. Bezugsgröße ist brutto.
 
@@ -1095,6 +1154,8 @@ def evaluate_query(l: Listing, q: SearchQuery) -> FilterDecision:
         reasons.append("kein PKW")
     if is_zubehoer(l):
         reasons.append("Zubehör oder Ersatzteil, kein Fahrzeug")
+    if ist_mietangebot(l):
+        reasons.append("Leasing oder Miete, kein Kaufangebot")
     if not q.include_damaged and is_defective_or_restricted(l):
         reasons.append("defekt, beschädigt oder Verkaufsbeschränkung")
     if q.make and title and not any(tok in title for tok in _make_tokens(q.make)):

@@ -76,3 +76,55 @@ def test_neue_karosserie_ist_kein_defekt():
     # Nur die eindeutigen Formulierungen greifen.
     assert fraud_reasons(_inserat("VW ID.3 nur Karosserie ohne Motor"))
     assert fraud_reasons(_inserat("Renault Megane - RohKarosse"))
+
+
+# --- Leasing und Miete ---------------------------------------------------
+# Solche Angebote wurden bisher nur markiert, und auch das nur, wenn sie ins
+# Preismodell kamen. Wer kaufen will, hat davon nichts.
+
+MIETANGEBOTE = [
+    "Tesla Model Y Leasingübernahme",
+    "Tesla Model Y Leasingübnahme",                 # Tippfehler ohne "er"
+    "BMW i4 Leasing Übernahme",                     # mit Leerzeichen
+    "Tesla Model Y Long Range AWD Leasing",
+    "BMW i4 Leasing Übernahme 0€ Anzahlung 650€ brutto monatl. M Paket",
+    "Ionic 5 Restleasing bis 11/2027 und noch ca. 30tausend Kilometer",
+    "Tesla Model Y Quicksilver Long Range Langzeitmiete Auto Abo",
+    "Hyundai Ioniq 5 - Leasingübernahme",
+    "BMW i4 eDrive 40 Leasingübernahme",
+    "Tesla Model Y Premium- Leasingübernahme!",
+]
+
+KAUFANGEBOTE = [
+    ("VW ID.3 Pro Performance 58 kWh", ""),
+    ("Tesla Model 3 Leasingrückläufer aus erster Hand", ""),
+    ("Hyundai Ioniq 5 Uniq", "Finanzierung und Leasing möglich, Preis 28.900 €"),
+    ("Cupra Born 58 kWh", "Kein Leasing, direkter Verkauf"),
+    # Eine Monatsrate ist kein Ausschlussgrund: Finanzierung fuehrt zum Kauf.
+    ("VW ID.4 Pro ab 199 € mtl. Finanzierung", ""),
+    ("Tesla Model 3 Highland, 349 EUR monatlich finanzieren", ""),
+]
+
+
+def test_mietangebote_werden_erkannt():
+    from kfz_crawler.models import ist_mietangebot
+    for titel in MIETANGEBOTE:
+        assert ist_mietangebot(_inserat(titel)), titel
+
+
+def test_kaufangebote_bleiben_erhalten():
+    from kfz_crawler.models import ist_mietangebot
+    for titel, text in KAUFANGEBOTE:
+        inserat = Listing(portal="Kleinanzeigen", url="https://example.test/1",
+                          title=titel, body=text)
+        assert not ist_mietangebot(inserat), f"{titel} | {text}"
+
+
+def test_mietangebot_faellt_aus_der_trefferliste():
+    """Nicht nur markieren – der Filter muss es aussortieren."""
+    query = SearchQuery(name="E-Autos", fuel="elektro")
+    ergebnis = evaluate_query(
+        _inserat("Tesla Model Y Leasingübernahme", preis=78), query
+    )
+    assert not ergebnis.passed
+    assert "Leasing oder Miete, kein Kaufangebot" in ergebnis.reasons
