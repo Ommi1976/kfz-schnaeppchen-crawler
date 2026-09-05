@@ -21,6 +21,12 @@ class EVSpec:
     source_name: str = "Hersteller-/WLTP-Referenzdaten"
     source_url: str = ""
     verified: bool = True
+    # Baujahresspanne, in der diese Variante gebaut wurde. Ohne sie ordnete die
+    # Zuordnung ueber Modell und Leistung einem Lexus UX 300e von 2022 die
+    # 72,8 kWh des Modelljahrs 2023 zu - und liess ihn damit eine 65-kWh-Grenze
+    # bestehen, die der Wagen mit seinen 64,8 kWh verfehlt.
+    year_from: Optional[int] = None
+    year_to: Optional[int] = None
 
 
 @dataclass(frozen=True)
@@ -145,16 +151,18 @@ _EV_DATABASE: List[EVSpec] = [
     ]),
 
     # --- BMW ---
+    # Der i3 behielt ueber alle Akkugroessen hinweg 170 PS. Nur das Baujahr
+    # trennt 60 Ah (bis 2016), 94 Ah (2016-2018) und 120 Ah (ab 2018).
     EVSpec("BMW", "i3", "120 Ah", 42.2, 37.9, 305, 125, 170, [
         re.compile(r"\bi3\s*s?\b.*?\b120\s*ah\b", re.I),
         re.compile(r"\bi3\s*s?\b", re.I),  # Häufigste Version ab 2019
-    ]),
+    ], year_from=2018),
     EVSpec("BMW", "i3", "94 Ah", 33.2, 27.2, 255, 125, 170, [
         re.compile(r"\bi3\s*s?\b.*?\b94\s*ah\b", re.I),
-    ]),
+    ], year_from=2016, year_to=2018),
     EVSpec("BMW", "i3", "60 Ah", 22.0, 18.8, 190, 125, 170, [
         re.compile(r"\bi3\s*s?\b.*?\b60\s*ah\b", re.I),
-    ]),
+    ], year_to=2016),
     EVSpec("BMW", "iX3", "80 kWh", 80.0, 74.0, 460, 210, 286, [
         re.compile(r"\bix3\b", re.I),
     ]),
@@ -317,9 +325,14 @@ _EV_DATABASE: List[EVSpec] = [
     EVSpec("Lexus", "RZ 450e", "71.4 kWh", 71.4, 64.0, 440, 230, 313, [
         re.compile(r"\brz\s*450e\b|\brz\b", re.I),
     ]),
-    EVSpec("Lexus", "UX 300e", "72.8 kWh", 72.8, 64.0, 450, 150, 204, [
+    # Bis Modelljahr 2022 mit 64,8 kWh, ab 2023 mit 72,8 kWh - bei
+    # unveraenderter Leistung. Nur das Baujahr trennt die beiden.
+    EVSpec("Lexus", "UX 300e", "64.8 kWh (bis 2022)", 64.8, 54.3, 315, 150, 204, [
+        re.compile(r"\bux\s*300e\b", re.I),
+    ], year_to=2022),
+    EVSpec("Lexus", "UX 300e", "72.8 kWh (ab 2023)", 72.8, 64.0, 450, 150, 204, [
         re.compile(r"\bux\s*300e\b.*?\b72\b", re.I),
-    ]),
+    ], year_from=2023),
 
     # --- PORSCHE & AUDI SPORT ---
     EVSpec("Porsche", "Taycan", "Performance Plus (93.4 / 105 kWh)", 93.4, 83.7, 505, 280, 380, [
@@ -553,6 +566,7 @@ def lookup_ev_spec_match(
     body: str | None = None,
     power_ps: int | None = None,
     power_kw: int | None = None,
+    year: int | None = None,
 ) -> Optional[EVMatch]:
     """Ordnet ein EV einer Variante zu und verwirft mehrdeutige Treffer.
 
@@ -576,16 +590,38 @@ def lookup_ev_spec_match(
     text = " ".join(parts).strip()
     if not text:
         return None
+    # Wie viel des Textes vom Inserat selbst stammt. Die Leistungswoerter oben
+    # sind angehaengt, nicht inseriert - Muster, die auf sie treffen, wirkten
+    # sonst laenger und verdraengten das genauere Variantenmuster.
+    nutztext_ende = len(" ".join(parts[:2]).strip())
     title_text = str(title or "")
     capacities = _capacity_values(text)
-    ranked: list[tuple[float, EVSpec, re.Pattern, list[str]]] = []
+    ranked: list[tuple[float, EVSpec, re.Pattern, list[str], int]] = []
     for spec in _EV_DATABASE:
+        # Varianten, die es im Baujahr des Wagens nicht gab, scheiden aus.
+        # Ohne das bekam ein Lexus UX 300e von 2022 die 72,8 kWh des
+        # Modelljahrs 2023 zugeschrieben.
+        if year:
+            if spec.year_from and year < spec.year_from:
+                continue
+            if spec.year_to and year > spec.year_to:
+                continue
         for pat in spec.patterns or []:
             match = pat.search(text)
             if not match:
                 continue
             reasons: list[str] = []
-            score = min(24.0, len(pat.pattern) / 5.0)
+            # Grundmass ist, wie viel vom Inseratstext ein Muster erklaert -
+            # nicht, wie lang es geschrieben ist. Das Muster fuer "Pro" ist
+            # ausfuehrlicher notiert als das fuer "Pro S" und gewann deshalb
+            # bei "VW ID.3 Pro S"; die Zuordnung galt dann als mehrdeutig und
+            # die Kapazitaet blieb unbekannt.
+            #
+            # Gezaehlt wird nur der Anteil im echten Text: die Leistungswoerter
+            # sind angehaengt und wuerden ein Muster laenger wirken lassen,
+            # das auf sie trifft.
+            treffer_laenge = max(0, min(match.end(), nutztext_ende) - match.start())
+            score = min(24.0, treffer_laenge / 2.0)
             if pat.search(title_text):
                 score += 25.0
                 reasons.append("Modellmuster im Titel")
@@ -618,12 +654,12 @@ def lookup_ev_spec_match(
                     score += 8.0
                 elif delta_ps >= 35:
                     score -= 15.0
-            ranked.append((score, spec, pat, reasons))
+            ranked.append((score, spec, pat, reasons, treffer_laenge))
 
     if not ranked:
         return None
     ranked.sort(key=lambda item: item[0], reverse=True)
-    best_score, best_spec, best_pattern, best_reasons = ranked[0]
+    best_score, best_spec, best_pattern, best_reasons, best_treffer = ranked[0]
     sibling_capacities = {
         spec.battery_gross_kwh
         for spec in _EV_DATABASE
@@ -634,16 +670,25 @@ def lookup_ev_spec_match(
         and not power_ps
         and not power_kw
         and len(sibling_capacities) > 1
-        and len(best_pattern.pattern) < 30
+        # Auch hier zaehlt der erklaerte Text, nicht die Musterlaenge: "ID.3"
+        # allein ist generisch, "ID.3 Pure Performance 110 kW" nicht - obwohl
+        # das zugehoerige Muster kuerzer notiert ist.
+        and best_treffer < 12
     ):
         return None
-    for next_score, next_spec, _, _ in ranked[1:]:
+    for next_score, next_spec, _, _, next_treffer in ranked[1:]:
         if best_score - next_score > 6.0:
             break
         if (
             best_spec.model == next_spec.model
             and abs(best_spec.battery_gross_kwh - next_spec.battery_gross_kwh) > 2.0
         ):
+            # Erklaert der beste Treffer mehr vom Text, ist er nicht
+            # mehrdeutig, sondern genauer: bei "ID.3 Pro S" trifft das Muster
+            # fuer "Pro S" zehn Zeichen, das fuer "Pro" nur acht. Zuvor galt
+            # das als Widerspruch und die Kapazitaet blieb unbekannt.
+            if best_treffer > next_treffer:
+                continue
             return None
 
     confidence = 0.78
@@ -666,9 +711,11 @@ def lookup_ev_spec(
     body: str | None = None,
     power_ps: int | None = None,
     power_kw: int | None = None,
+    year: int | None = None,
 ) -> Optional[EVSpec]:
     """Rückwärtskompatible Kurzform der Varianten-Zuordnung."""
-    match = lookup_ev_spec_match(title, body, power_ps=power_ps, power_kw=power_kw)
+    match = lookup_ev_spec_match(title, body, power_ps=power_ps,
+                                 power_kw=power_kw, year=year)
     if match:
         return match.spec
     return None

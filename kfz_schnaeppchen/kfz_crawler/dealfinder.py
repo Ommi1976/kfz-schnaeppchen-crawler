@@ -31,7 +31,12 @@ _SUSPECT_PATTERNS: List[Tuple[str, str]] = [
     (r"\bteiletr[aä]ger", "Teileträger"),
     (r"\bersatzteilspender", "Ersatzteilspender"),
     (r"\bzum\s+ausschlachten", "zum Ausschlachten"),
-    (r"\bexport(fahrzeug)?\b", "Exportfahrzeug"),
+    # Die einschraenkende Wendung muss dastehen. Mit optionalem Praefix traf
+    # das Muster jede blosse Erwaehnung: "netto/Export moeglich" und
+    # "Wartung beim Hyundai Haendler" beschreiben Autos, die verkauft werden.
+    # Am Bestand gemessen trugen sieben Fahrzeuge zu Unrecht "Nur an Haendler".
+    (r"\bexportfahrzeug\b", "Exportfahrzeug"),
+    (r"\bnur\s+(?:an|f[üu]r)\s+(?:\S+\s+){0,3}export\b", "Exportfahrzeug"),
     (r"\btotalschad", "Totalschaden"),
     (r"\bsalvage\b", "Salvage/US-Titel"),
     (r"\bl[aä]uft\s+nicht", "läuft nicht"),
@@ -71,8 +76,10 @@ _SUSPECT_PATTERNS: List[Tuple[str, str]] = [
     (r"\bmonatsrate\b", "Monatsrate/Leasing"),
     (r"\bpro\s+monat\b", "Monatsrate/Leasing"),
     (r"\b(?:ab|nur)\s+\d+\s*€\s*/\s*m(?:onat)?\b", "Monatsrate/Abo"),
-    (r"\b(?:nur\s+(?:an|für)\s+)?gewerbe(?:kunden|treibende)?\b", "Nur an Gewerbe"),
-    (r"\b(?:nur\s+(?:an|für)\s+)?h[äa]ndler\b", "Nur an Händler"),
+    (r"\bnur\s+(?:an|f[üu]r)\s+(?:\S+\s+){0,3}gewerb", "Nur an Gewerbe"),
+    (r"\bgewerblicher\s+(?:ver)?kauf\b", "Nur an Gewerbe"),
+    (r"\bnur\s+(?:an|f[üu]r)\s+(?:\S+\s+){0,3}h[äa]ndler\b", "Nur an Händler"),
+    (r"\bh[äa]ndleranfragen?\s+(?:erw[üu]nscht|willkommen)", "Nur an Händler"),
     (r"\b[üu]berf[üu]hrungskosten\b", "Überführungskosten (Neuwagen)"),
     (r"\bwerksabholung\b", "Werksabholung (Neuwagen)"),
     (r"\bhaushalt(?:skunde|spreis)\b", "Lockangebot/Haushaltspreis"),

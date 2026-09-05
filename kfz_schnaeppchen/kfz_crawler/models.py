@@ -10,7 +10,7 @@ from typing import Any, Optional
 
 
 PS_PER_KW = 1.35962   # Umrechnung kW -> PS
-DETECTOR_VERSION = "1.3.0"
+DETECTOR_VERSION = "1.4.0"
 
 
 _BATTERY_KWH_RE = re.compile(
@@ -332,7 +332,8 @@ def infer_listing_battery(listing: "Listing", check_images: bool = False) -> Non
     match = None
     try:
         from kfz_crawler.ev_database import lookup_ev_spec_match
-        match = lookup_ev_spec_match(title, detail_text, power_ps=listing.power_ps)
+        match = lookup_ev_spec_match(title, detail_text, power_ps=listing.power_ps,
+                                     year=listing.year)
     except Exception:
         pass
 
@@ -485,7 +486,8 @@ def infer_listing_range(listing: "Listing") -> None:
     match = None
     try:
         from kfz_crawler.ev_database import lookup_ev_spec_match
-        match = lookup_ev_spec_match(title, detail_text, power_ps=listing.power_ps)
+        match = lookup_ev_spec_match(title, detail_text, power_ps=listing.power_ps,
+                                     year=listing.year)
     except Exception:
         pass
 
@@ -982,13 +984,13 @@ _DEFECT_AND_RESTRICTION_PATTERNS = [
         # Erwaehnung. "Wartung beim Hyundai Händler" und "netto/Export
         # möglich" beschreiben gepflegte Autos, die verkauft werden - beide
         # flogen zuvor aus der Liste.
-        r"\bnur\s+(?:an|f[üu]r)\s+(?:den\s+)?export\b",
+        r"\bnur\s+(?:an|f[üu]r)\s+(?:\S+\s+){0,3}export\b",
         r"\bexportfahrzeug\b",
         r"\bnur\s+(?:an|f[üu]r)\s+(?:den\s+)?import\b",
         r"\bimportfahrzeug\b",
-        r"\bnur\s+(?:an|f[üu]r)\s+gewerbe",
+        r"\bnur\s+(?:an|f[üu]r)\s+(?:\S+\s+){0,3}gewerb",
         r"\bgewerblicher\s+(?:ver)?kauf\b",
-        r"\bnur\s+(?:an|f[üu]r)\s+h[äa]ndler\b",
+        r"\bnur\s+(?:an|f[üu]r)\s+(?:\S+\s+){0,3}h[äa]ndler\b",
         r"\bh[äa]ndleranfragen?\s+(?:erw[üu]nscht|willkommen)",
         r"\bkein\s+verkauf\s+an\s+privat\b",
         r"\breine(?:r)?\s+gewerbeverkauf\b",

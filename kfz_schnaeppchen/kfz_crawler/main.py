@@ -90,7 +90,9 @@ def _search_one_portal(cfg: Config, key: str, query: SearchQuery, store=None) ->
             if listing.fuel == "elektro" or listing.battery_kwh is not None:
                 try:
                     from .ev_database import lookup_ev_spec
-                    spec = lookup_ev_spec(listing.title, getattr(listing, "body", ""), power_ps=listing.power_ps)
+                    spec = lookup_ev_spec(listing.title, getattr(listing, "body", ""),
+                                          power_ps=listing.power_ps,
+                                          year=listing.year)
                     if not spec and (listing.battery_kwh or listing.ev_range_km):
                         if store and hasattr(store, "record_discovered_ev_model"):
                             is_new, rec = store.record_discovered_ev_model(

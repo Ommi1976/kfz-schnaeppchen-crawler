@@ -136,3 +136,40 @@ def test_kia_ev6_trennt_die_beiden_akkugroessen():
     gross = lookup_ev_spec_match("Kia EV6 GT-Line", "", power_ps=229)
     assert klein.spec.battery_net_kwh == 54.0
     assert gross.spec.battery_net_kwh == 74.0
+
+
+def test_baujahr_trennt_gleich_starke_varianten():
+    """Der Lexus UX 300e bekam die 72,8 kWh des Modelljahrs 2023.
+
+    Bis 2022 hat er 64,8 kWh – bei unveränderter Leistung. Er verfehlt damit
+    eine 65-kWh-Grenze, bestand sie aber, weil die Datenbank keine Modelljahre
+    kannte. Beim BMW i3 ist es dasselbe: 22, 33 und 42 kWh bei stets 170 PS.
+    """
+    from kfz_crawler.ev_database import lookup_ev_spec_match
+    def brutto(titel, ps, jahr):
+        treffer = lookup_ev_spec_match(titel, "", power_ps=ps, year=jahr)
+        return treffer.spec.battery_gross_kwh if treffer else None
+
+    assert brutto("Lexus UX 300e 204 PS", 204, 2022) == 64.8
+    assert brutto("Lexus UX 300e 204 PS", 204, 2023) == 72.8
+    assert brutto("BMW i3", 170, 2015) == 22.0
+    assert brutto("BMW i3", 170, 2017) == 33.2
+    assert brutto("BMW i3", 170, 2020) == 42.2
+
+
+def test_ohne_baujahr_bleibt_die_zuordnung_offen():
+    """Zwei Varianten, die nur das Baujahr trennt – ohne Jahr kein Wert."""
+    from kfz_crawler.ev_database import lookup_ev_spec_match
+    assert lookup_ev_spec_match("Lexus UX 300e", "", power_ps=204) is None
+
+
+def test_variante_schlaegt_das_kuerzere_modellwort():
+    """"Pro S" erklärt mehr vom Titel als "Pro".
+
+    Zuvor gewann "Pro", weil sein Muster ausführlicher notiert ist – die
+    Zuordnung galt dann als mehrdeutig und die Kapazität blieb unbekannt.
+    """
+    from kfz_crawler.ev_database import lookup_ev_spec_match
+    treffer = lookup_ev_spec_match("VW ID.3 Pro S", "", power_ps=204)
+    assert treffer is not None
+    assert treffer.spec.battery_gross_kwh == 82.0
