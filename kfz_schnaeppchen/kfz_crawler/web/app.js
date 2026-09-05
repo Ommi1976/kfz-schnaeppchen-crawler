@@ -384,8 +384,20 @@ function renderDealsRows(deals) {
     const warrantyBadge = d.warranty
       ? `<span class="badge-warranty" title="${escapeHtml(d.warranty)}">🛡️ ${escapeHtml(d.warranty)}</span>`
       : "";
-    const subInfo = (locBadge || warrantyBadge)
-      ? `<div class="sub-info">${locBadge}${warrantyBadge}</div>`
+    // Dasselbe Auto auf einem anderen Portal - mit Preisunterschied, denn
+    // genau der ist der Grund, warum es zaehlt.
+    const andere = (d.andere_portale || []).map((a) => {
+      const diff = (a.price && d.price) ? a.price - d.price : null;
+      const zeichen = diff == null ? "" : diff < 0 ? ` ${euro(a.price)} −${euro(Math.abs(diff))}`
+                    : diff > 0 ? ` ${euro(a.price)} +${euro(diff)}` : " gleicher Preis";
+      const guenstiger = diff != null && diff < 0;
+      return `<a class="badge-dublette${guenstiger ? " guenstiger" : ""}" href="${a.url}"`
+           + ` target="_blank" rel="noopener"`
+           + ` title="Dasselbe Fahrzeug auf ${escapeHtml(a.portal)}">↔ ${escapeHtml(a.portal)}${zeichen}</a>`;
+    }).join("");
+
+    const subInfo = (locBadge || warrantyBadge || andere)
+      ? `<div class="sub-info">${locBadge}${warrantyBadge}${andere}</div>`
       : "";
 
     const staleBadge = d.is_stale

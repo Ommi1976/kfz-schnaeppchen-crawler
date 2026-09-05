@@ -52,3 +52,49 @@ def test_gleiches_fahrzeug_auf_zwei_portalen_wird_zusammengefuehrt():
                  price=27900, **gemeinsam)
     punkte, belege = identitaets_score(a, b)
     assert punkte >= SCHWELLE_SICHER, (punkte, belege)
+
+
+def test_andere_angebote_findet_dasselbe_auto_auf_anderen_portalen(tmp_path):
+    """Die Verknüpfung lag in vehicle_links bereit, wurde aber nie gezeigt.
+
+    Dasselbe Auto stand deshalb zweimal in der Liste, und der günstigere Preis
+    fiel nicht auf.
+    """
+    from kfz_crawler.storage import SeenStore
+
+    store = SeenStore(str(tmp_path / "fz.sqlite"))
+    with store._lock:
+        store.conn.execute(
+            "INSERT INTO vehicles (vehicle_id, make, model) VALUES ('v1','Cupra','Born')")
+        for offer, portal, preis, url in [
+            ("o1", "mobile.de", 25699, "https://mobile.test/1"),
+            ("o2", "Kleinanzeigen", 24990, "https://ka.test/1"),
+            ("o3", "mobile.de", 31000, "https://mobile.test/2"),   # anderes Auto
+        ]:
+            store.conn.execute(
+                "INSERT INTO offers (offer_id, vehicle_id, portal, price, url, status) "
+                "VALUES (?,?,?,?,?,'aktiv')",
+                (offer, "v1" if offer != "o3" else "v2", portal, preis, url))
+        for offer in ("o1", "o2"):
+            store.conn.execute(
+                "INSERT INTO vehicle_links (offer_id, vehicle_id, confidence) VALUES (?,?,0.9)",
+                (offer, "v1"))
+        store.conn.execute(
+            "INSERT INTO vehicle_links (offer_id, vehicle_id, confidence) VALUES ('o3','v2',0.9)")
+        store.conn.commit()
+
+    treffer = store.andere_angebote(["https://mobile.test/1", "https://mobile.test/2"])
+    assert list(treffer) == ["https://mobile.test/1"]
+    anderes = treffer["https://mobile.test/1"]
+    assert len(anderes) == 1
+    assert anderes[0]["portal"] == "Kleinanzeigen"
+    assert anderes[0]["price"] == 24990          # 709 € günstiger
+    store.close()
+
+
+def test_andere_angebote_ohne_treffer_bleibt_leer(tmp_path):
+    from kfz_crawler.storage import SeenStore
+    store = SeenStore(str(tmp_path / "leer.sqlite"))
+    assert store.andere_angebote([]) == {}
+    assert store.andere_angebote(["https://example.test/x"]) == {}
+    store.close()

@@ -576,6 +576,41 @@ class SeenStore:
                 params.append(search_name)
             return {r["fingerprint"]: r["body"] for r in self.conn.execute(sql, params)}
 
+    def andere_angebote(self, urls: list[str]) -> dict:
+        """Findet zu jedem Inserat dieselben Fahrzeuge auf anderen Portalen.
+
+        Die Zuordnung stammt aus ``vehicle_links`` und lief bisher ins Leere:
+        die Tabellen wurden gefuellt, aber nirgends angezeigt. Dasselbe Auto
+        stand deshalb zweimal in der Liste, und der guenstigere Preis fiel
+        nicht auf.
+        """
+        if not urls:
+            return {}
+        ergebnis: dict = {}
+        platzhalter = ",".join("?" * len(urls))
+        with self._lock:
+            try:
+                zeilen = self.conn.execute(
+                    "SELECT o1.url AS quelle, o2.portal, o2.price, o2.url "
+                    "FROM offers o1 "
+                    "JOIN vehicle_links l1 ON l1.offer_id = o1.offer_id "
+                    "JOIN vehicle_links l2 ON l2.vehicle_id = l1.vehicle_id "
+                    "                     AND l2.offer_id <> l1.offer_id "
+                    "JOIN offers o2 ON o2.offer_id = l2.offer_id "
+                    f"WHERE o1.url IN ({platzhalter}) "
+                    "  AND COALESCE(o2.status, 'aktiv') = 'aktiv' "
+                    "  AND o2.portal <> o1.portal",
+                    list(urls),
+                ).fetchall()
+            except sqlite3.Error:
+                # Ohne die Tabellen (alte Datenbank) bleibt die Liste einfach leer.
+                return {}
+        for z in zeilen:
+            ergebnis.setdefault(z["quelle"], []).append(
+                {"portal": z["portal"], "price": z["price"], "url": z["url"]}
+            )
+        return ergebnis
+
     def count_deals_by_portal(self, search_name: str | None = None,
                               deals_only: bool = False) -> dict:
         with self._lock:

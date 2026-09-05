@@ -432,3 +432,9 @@ th.sortable.active-sort .sort-icon {
 
 /* Aus der Modelldatenbank erschlossen, nicht im Inserat genannt. */
 .batt-badge.abgeleitet, .range-badge.abgeleitet { opacity: .72; border-style: dashed; }
+
+/* Dasselbe Fahrzeug auf einem anderen Portal. */
+.badge-dublette { display: inline-block; margin-left: 6px; padding: 1px 6px;
+  border: 1px solid var(--muted); border-radius: 10px; font-size: 11px;
+  color: var(--muted); text-decoration: none; }
+.badge-dublette.guenstiger { color: var(--good); border-color: var(--good); }

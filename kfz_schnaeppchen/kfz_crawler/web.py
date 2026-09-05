@@ -492,6 +492,18 @@ async def deals(search: str | None = None, limit: int = 400, deals_only: bool = 
         filtered.append(row)
     rows = filtered
 
+    # Dasselbe Auto steht oft auf mehreren Portalen. Die Zuordnung liegt in
+    # vehicle_links bereit, wurde aber nirgends gezeigt - der guenstigere
+    # Preis fiel damit nicht auf.
+    try:
+        weitere = app.state.store.andere_angebote([r.get("url") for r in rows if r.get("url")])
+        for row in rows:
+            row["andere_portale"] = weitere.get(row.get("url"), [])
+    except Exception:
+        logger.exception("Angebote auf anderen Portalen nicht ermittelbar")
+        for row in rows:
+            row["andere_portale"] = []
+
     # Portal-Aufteilung für die aktuelle Suche & Deals-Filterung berechnen
     portal_counts = {}
     for r in rows:
