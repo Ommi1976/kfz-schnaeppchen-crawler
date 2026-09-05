@@ -98,3 +98,65 @@ def test_andere_angebote_ohne_treffer_bleibt_leer(tmp_path):
     assert store.andere_angebote([]) == {}
     assert store.andere_angebote(["https://example.test/x"]) == {}
     store.close()
+
+
+def _fahrzeugakte_aufbauen(store):
+    """Ein Auto, zwei Inserate: mobile.de kennt den SoH, AutoUncle nicht."""
+    with store._lock:
+        store.conn.execute(
+            "INSERT INTO vehicles (vehicle_id, make, model, battery_soh, "
+            "battery_soh_level, battery_gross_kwh, battery_net_kwh, ev_range_km) "
+            "VALUES ('v1','Cupra','Born',91.0,'belegt',82.0,77.0,540)")
+        for offer, portal, url in [("o1", "mobile.de", "https://mobile.test/1"),
+                                   ("o2", "AutoUncle", "https://au.test/1")]:
+            store.conn.execute(
+                "INSERT INTO offers (offer_id, vehicle_id, portal, price, url, status) "
+                "VALUES (?, 'v1', ?, 25699, ?, 'aktiv')", (offer, portal, url))
+            store.conn.execute(
+                "INSERT INTO vehicle_links (offer_id, vehicle_id, confidence) "
+                "VALUES (?, 'v1', 0.9)", (offer,))
+        store.conn.commit()
+
+
+def test_fahrzeugakte_liefert_die_werte_des_nachbarinserats(tmp_path):
+    """AutoUncle nennt bei 1,3 % der Inserate einen SoH, mobile.de bei 30 %.
+
+    Steht dasselbe Auto auf beiden Portalen, ist der Wert bekannt – er stand
+    nur an der anderen Zeile.
+    """
+    from kfz_crawler.storage import SeenStore
+    store = SeenStore(str(tmp_path / "akte.sqlite"))
+    _fahrzeugakte_aufbauen(store)
+
+    akten = store.fahrzeugakte(["https://au.test/1"])
+    akte = akten["https://au.test/1"]
+    assert akte["battery_soh"] == 91.0
+    assert akte["battery_gross_kwh"] == 82.0
+    assert akte["portale"] == "mobile.de"      # das jeweils andere Portal
+    store.close()
+
+
+def test_luecken_werden_gefuellt_vorhandenes_bleibt(tmp_path):
+    """Nur Lücken schließen – eine Angabe des Verkäufers wiegt schwerer."""
+    from kfz_crawler.storage import SeenStore
+    from kfz_crawler.web import _ergaenze_aus_fahrzeugakte
+    import json
+
+    store = SeenStore(str(tmp_path / "akte2.sqlite"))
+    _fahrzeugakte_aufbauen(store)
+    zeilen = [
+        {"url": "https://au.test/1", "battery_soh": None, "battery_gross_kwh": None,
+         "ev_range_km": None, "evidence_json": "{}"},
+        {"url": "https://mobile.test/1", "battery_soh": 88.0, "evidence_json": "{}"},
+    ]
+    _ergaenze_aus_fahrzeugakte(store, zeilen)
+
+    assert zeilen[0]["battery_soh"] == 91.0
+    assert zeilen[0]["battery_kwh"] == 82.0        # treibt die Akkuschwelle
+    assert zeilen[0]["ev_range_km"] == 540
+    belege = json.loads(zeilen[0]["evidence_json"])
+    assert belege["battery_soh"]["source"] == "fahrzeugakte"
+    assert "mobile.de" in belege["battery_soh"]["evidence"]
+    # Der eigene Wert bleibt stehen.
+    assert zeilen[1]["battery_soh"] == 88.0
+    store.close()

@@ -351,12 +351,15 @@ function renderDealsRows(deals) {
         detail_text: "im Anzeigentext genannt",
         portal_structured: "Feld des Portals",
         ev_database: "aus Modell und Leistung erschlossen, nicht im Inserat genannt",
+        fahrzeugakte: "aus dem Inserat desselben Autos auf einem anderen Portal",
       };
       const quelle = quellen[item.source] || item.source || "unbekannt";
       return `${fallback} · ${quelle}${confidence}${item.evidence ? ` · ${item.evidence}` : ""}`;
     };
-    const sohBadge = d.battery_soh != null 
-      ? `<span class="soh-badge ${sohClass(d.battery_soh)}" title="${escapeHtml(sourceTitle("battery_soh", "Batteriezustand (State of Health)"))}">🔋 ${d.battery_soh} % SoH</span>`
+    // Ein Wert vom Nachbarinserat wird als solcher gekennzeichnet - "↔" statt
+    // "~", denn er ist gemessen, nur eben an einem anderen Inserat.
+    const sohBadge = d.battery_soh != null
+      ? `<span class="soh-badge ${sohClass(d.battery_soh)}${ausAkte("battery_soh") ? " uebernommen" : ""}" title="${escapeHtml(sourceTitle("battery_soh", "Batteriezustand (State of Health)"))}">🔋 ${ausAkte("battery_soh") ? "↔ " : ""}${d.battery_soh} % SoH</span>`
       : "";
     const batteryText = d.battery_net_kwh != null && d.battery_gross_kwh != null && d.battery_net_kwh !== d.battery_gross_kwh
       ? `${d.battery_net_kwh} netto / ${d.battery_gross_kwh} brutto`
@@ -366,11 +369,14 @@ function renderDealsRows(deals) {
     // sie woertlich im Text stand -, die Akkugroesse dagegen nie, obwohl sie
     // oft nur aus Modell und Leistung abgeleitet ist.
     const ausKatalog = (feld) => (evidence[feld] || {}).source === "ev_database";
-    const battTilde = ausKatalog("battery_kwh") ? "~" : "";
+    const ausAkte = (feld) => (evidence[feld] || {}).source === "fahrzeugakte";
+    const battTilde = ausKatalog("battery_kwh") ? "~"
+                    : (ausAkte("battery_gross_kwh") || ausAkte("battery_net_kwh")) ? "↔ " : "";
     const battInfo = batteryText != null
       ? `<span class="batt-badge${battTilde ? " abgeleitet" : ""}" title="${escapeHtml(sourceTitle("battery_kwh", "Akku-Kapazität"))}">⚡ ${battTilde}${batteryText} kWh</span>`
       : "";
-    const rangeTilde = ausKatalog("ev_range_km") ? "~" : "";
+    const rangeTilde = ausKatalog("ev_range_km") ? "~"
+                     : ausAkte("ev_range_km") ? "↔ " : "";
     const rangeInfo = d.ev_range_km != null
       ? `<span class="range-badge${rangeTilde ? " abgeleitet" : ""}" title="${escapeHtml(sourceTitle("ev_range_km", "Reichweite"))}">🌐 ${rangeTilde}${d.ev_range_km} km</span>`
       : "";

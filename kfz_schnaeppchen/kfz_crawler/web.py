@@ -420,6 +420,56 @@ async def run_one(search_id: str):
     return {"status": "started"}
 
 
+def _ergaenze_aus_fahrzeugakte(store, rows: list) -> None:
+    """Schliesst Luecken mit dem, was ein anderes Portal zum selben Auto weiss.
+
+    AutoUncle liefert die Breite, nennt aber praktisch nie den Batteriezustand
+    (1,3 % gegen 30 % bei mobile.de). Steht dasselbe Auto auf beiden Portalen,
+    ist der Wert bekannt - er stand nur an der anderen Zeile.
+    """
+    try:
+        akten = store.fahrzeugakte([r.get("url") for r in rows if r.get("url")])
+    except Exception:
+        logger.exception("Fahrzeugakte nicht lesbar")
+        return
+    if not akten:
+        return
+    for row in rows:
+        akte = akten.get(row.get("url"))
+        if not akte:
+            continue
+        portale = akte.get("portale") or ""
+        uebernommen = []
+        for feld in store.FAHRZEUGFELDER:
+            wert = akte.get(feld)
+            if wert in (None, "", "unbekannt"):
+                continue
+            if row.get(feld) not in (None, "", "unbekannt"):
+                continue
+            row[feld] = wert
+            uebernommen.append(feld)
+        if not uebernommen:
+            continue
+        # battery_kwh treibt die Akkuschwelle; brutto ist die Bezugsgroesse.
+        if "battery_kwh" not in row or row.get("battery_kwh") in (None, ""):
+            if akte.get("battery_gross_kwh"):
+                row["battery_kwh"] = akte["battery_gross_kwh"]
+        # Herkunft festhalten, damit die Oberflaeche es kennzeichnen kann.
+        try:
+            belege = json.loads(row.get("evidence_json") or "{}")
+        except (TypeError, ValueError):
+            belege = {}
+        for feld in uebernommen:
+            belege[feld] = {
+                "source": "fahrzeugakte",
+                "confidence": 0.9,
+                "evidence": f"aus dem Inserat desselben Autos auf {portale}"
+                            if portale else "aus der Fahrzeugakte",
+            }
+        row["evidence_json"] = json.dumps(belege)
+        row["aus_fahrzeugakte"] = uebernommen
+
+
 @app.get("/api/deals")
 async def deals(search: str | None = None, limit: int = 400, deals_only: bool = False,
                 portal: str | None = None, include_stale: bool = False):
@@ -427,6 +477,13 @@ async def deals(search: str | None = None, limit: int = 400, deals_only: bool = 
         limit=min(limit, 2000), search_name=search, deals_only=deals_only, portal=portal,
         include_stale=include_stale
     )
+    # Fehlende Felder aus der gemeinsamen Fahrzeugakte auffuellen, BEVOR
+    # gefiltert wird - sonst faellt ein AutoUncle-Treffer durch die
+    # Akkuschwelle, obwohl die Kapazitaet aus dem mobile.de-Inserat desselben
+    # Autos bekannt ist. Vorhandene Werte bleiben unangetastet: nur Luecken
+    # werden geschlossen.
+    _ergaenze_aus_fahrzeugakte(app.state.store, rows)
+
     specs = {s["name"]: SearchQuery.from_dict(s) for s in app.state.store.list_searches()}
     active_search_names = set(specs.keys())
 

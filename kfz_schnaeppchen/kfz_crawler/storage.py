@@ -576,6 +576,42 @@ class SeenStore:
                 params.append(search_name)
             return {r["fingerprint"]: r["body"] for r in self.conn.execute(sql, params)}
 
+    # Felder, die ein Portal liefern kann und ein anderes nicht. AutoUncle
+    # stellt die Breite, nennt aber praktisch nie SoH (1,3 %), Akkugroesse
+    # oder Garantie; mobile.de nennt den SoH bei 30 % der Inserate. Steht
+    # dasselbe Auto auf beiden, ist der Wert bekannt - er stand nur an der
+    # anderen Zeile.
+    FAHRZEUGFELDER = (
+        "battery_soh", "battery_soh_level", "battery_net_kwh",
+        "battery_gross_kwh", "ev_range_km", "ev_range_standard",
+        "power_ps", "first_registration_month",
+    )
+
+    def fahrzeugakte(self, urls: list[str]) -> dict:
+        """Liefert je Inserat die gemeinsame Fahrzeugakte und ihre Portale."""
+        if not urls:
+            return {}
+        platzhalter = ",".join("?" * len(urls))
+        felder = ", ".join("v." + f for f in self.FAHRZEUGFELDER)
+        with self._lock:
+            try:
+                zeilen = self.conn.execute(
+                    f"SELECT o.url AS quelle, {felder}, "
+                    "       GROUP_CONCAT(DISTINCT o2.portal) AS portale "
+                    "FROM offers o "
+                    "JOIN vehicle_links l ON l.offer_id = o.offer_id "
+                    "JOIN vehicles v ON v.vehicle_id = l.vehicle_id "
+                    "LEFT JOIN vehicle_links l2 ON l2.vehicle_id = v.vehicle_id "
+                    "LEFT JOIN offers o2 ON o2.offer_id = l2.offer_id "
+                    "                   AND o2.portal <> o.portal "
+                    f"WHERE o.url IN ({platzhalter}) "
+                    "GROUP BY o.url",
+                    list(urls),
+                ).fetchall()
+            except sqlite3.Error:
+                return {}
+        return {z["quelle"]: dict(z) for z in zeilen}
+
     def andere_angebote(self, urls: list[str]) -> dict:
         """Findet zu jedem Inserat dieselben Fahrzeuge auf anderen Portalen.
 

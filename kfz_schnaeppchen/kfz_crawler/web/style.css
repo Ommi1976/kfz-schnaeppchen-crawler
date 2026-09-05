@@ -438,3 +438,6 @@ th.sortable.active-sort .sort-icon {
   border: 1px solid var(--muted); border-radius: 10px; font-size: 11px;
   color: var(--muted); text-decoration: none; }
 .badge-dublette.guenstiger { color: var(--good); border-color: var(--good); }
+
+/* Wert aus dem Inserat desselben Autos auf einem anderen Portal. */
+.soh-badge.uebernommen, .batt-badge.uebernommen { border-style: dotted; }
