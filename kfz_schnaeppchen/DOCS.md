@@ -82,10 +82,12 @@ Getriebe, Leistung, Karosserie, Anbieter) steuert **alle Portale einheitlich**:
 - **Kleinanzeigen:** die Trefferliste liefert Kraftstoff/Getriebe/Leistung nicht;
   daher werden bei Bedarf **automatisch die Detailseiten nachgeladen**, damit
   derselbe Filter greift (z. B. `fuel: diesel` behält wirklich nur Diesel).
-- **mobile.de:** wird wieder über die öffentliche Suchseite vorbereitet. Das
-  Portal kann automatisierte Abrufe trotzdem mit HTTP 403/DataDome blockieren;
-  ein solcher Fehler stoppt die übrigen Portale nicht. In der Suche steht
-  zusätzlich ein direkter mobile.de-Link mit grob passenden Filtern bereit.
+- **mobile.de:** sucht über eine eigene, wiederverwendbare Firefox-Sitzung im
+  Add-on. Akku (`bc`) und ACC (`spc`) werden als native Filter übergeben und
+  auf der geladenen Seite überprüft. Für mindestens 450 km wird zunächst die
+  verfügbare Stufe 400 km verwendet, anschließend lokal exakt nachgefiltert.
+  Im toleranten Modus ergänzt eine Suche ohne Kapazitätsfilter die Treffer,
+  damit fehlende Portal-kWh nicht automatisch zum Ausschluss führen.
 - **Alle Portale:** zentraler **Nachfilter**, der ein Inserat nur ausschließt,
   wenn der Wert bekannt ist und ihn verletzt.
 
@@ -95,8 +97,8 @@ kWh-Angabe, darf ein Inserat als Fallback erscheinen, wenn die geforderte
 elektrische Reichweite nachweislich erfüllt ist; so bleiben brauchbare Treffer
 ohne Kapazitätsangabe erhalten.
 
-**Ausstattung:** Die Ausstattungs-Auswahl in der UI wirkt server-seitig nur bei
-AutoScout24. Für andere Portale dieselbe Wirkung über **Stichwörter** erzielen
+**Ausstattung:** Unterstützte Merkmale werden an die jeweiligen Portale
+übergeben, etwa Sitzheizung und ACC an mobile.de. Weitere Anforderungen lassen sich über **Stichwörter** ergänzen
 (z. B. „navi, ahk"). Tipp: Bei `fuel: elektro` ohne `make`/`model` mit
 `power_from` (echte PKW) oder Marke/Modell eingrenzen.
 
@@ -117,6 +119,50 @@ nicht nötig – das Add-on ruft die Dienste direkt auf.
   oder mit Rabatt ≥ `suspicious_discount` werden unterdrückt (im Log gezählt).
 
 ## Hinweise & Grenzen
+
+### Autonome mobile.de-Suche
+
+- HA bleibt der zentrale Datenspeicher. Profil: `/data/firefox_profile`;
+  Suchfortschritt, Cache und Schutzpause: SQLite-Einstellungen. Kein dauerhaft
+  laufender PC, Käuferkonto oder externer Cookie-Import erforderlich. Alte
+  Cookie-Endpunkte bleiben kompatibel, beeinflussen die Sitzung aber nicht.
+- Erst ein vollständiger Durchlauf bestätigt den Gesamtbestand. Pro Lauf
+  werden maximal zwölf Suchseiten bearbeitet, danach wird automatisch
+  fortgesetzt. Der Fortschritt wird erst nach dem Speichern der Treffer
+  bestätigt; ein Wiederholungsfenster reduziert Lücken bei verschobenen Seiten.
+  Innerhalb von 24 Stunden nach einem vollständigen Lauf werden jeweils die
+  ersten zwei Seiten der Suchvarianten nach neuesten Inseraten geprüft.
+- Sehr große Suchen werden innerhalb desselben Budgets in disjunkte
+  Preisintervalle aufgeteilt, sofern eine Preisobergrenze vorliegt. Das ist
+  keine Vollständigkeitsgarantie für ein laufend verändertes Portal.
+- Ein gemeinsamer Browser-Worker serialisiert alle verwalteten Abrufe:
+  mindestens zwölf Sekunden Abstand, höchstens 30 Suchseiten, zehn Details
+  und 20 Zertifikatsbilder pro Stundenfenster, über alle Suchen zusammen.
+  Normale Browser-Unterressourcen sind keine einzeln gezählten Seitenabrufe.
+  Diese Werte sind lokale Arbeitsbudgets, keine vom Portal zugesicherten Limits.
+- HTTP 403/429 oder eine Verifikationsseite pausieren Suche, Details und
+  Bildabrufe gemeinsam: zwei, sechs, dann 24 Stunden; ein längeres
+  `Retry-After` wird berücksichtigt (bis sieben Tage). Kein IP-/Cookie-Wechsel,
+  kein CAPTCHA-Löser, keine sofortige Wiederholung. Auch Neustarts oder alte
+  Cookie-Uploads löschen die Pause nicht. Danach wird automatisch erneut geprüft.
+- Höchstens drei Detailseiten je Suchlauf, bevorzugt noch ungeprüfte Fahrzeuge
+  mit fehlenden SoH-/Akku-/Reichweiten-/EZ-Angaben. Auch der gespeicherte
+  Altbestand kommt an die Reihe. Details werden 24 Stunden, fehlgeschlagene
+  Details sechs Stunden zwischengespeichert. Budgetpausen sind keine Negativbefunde.
+- Relevant sind nur Fahrzeugdaten und Beschreibung, nicht Empfehlungen für
+  andere Autos. SoH wird mit Belegstufe, Akku getrennt nach netto/brutto,
+  Reichweite mit Messstandard und EZ getrennt vom Modelljahr ausgewertet.
+  Dokumentartig bezeichnete Galeriebilder können im Hintergrund per OCR geprüft
+  werden; fehlende Angaben werden nicht als bestätigt ausgegeben.
+- Wiederholte Seiten, unbestätigte Leerstände, Parserlücken und Budgetenden
+  gelten als Teilabruf, nicht als vollständiges Ergebnis. Bestands-Inserate
+  werden deshalb bei einem solchen Lauf nicht als verschwunden markiert.
+- Die Statuskarte **mobile.de-Sitzung** zeigt Automatik oder Schutzpause;
+  der Hinweistext nennt den letzten Suchfortschritt. `/api/status` enthält
+  zusätzlich `mobile_runtime` mit Budgetzählern und Pausenende.
+
+### Grenzen der Quellen
+
 - **AutoUncle:** wird als zusätzlicher Discovery-Kanal über eine persistente
   Firefox-Session abgefragt. Sichtbare Angebotskarten werden in URL, Preis, EZ,
   km, Leistung, Reichweite, Akkuangabe und Standort normalisiert. AutoUncle
@@ -128,15 +174,14 @@ nicht nötig – das Add-on ruft die Dienste direkt auf.
   britische Inhalte und ist für DE nicht nutzbar.
 - **Browser-Modus (`use_browser`, #1):** Das Add-on-Image enthält Playwright
   sowie Chromium und Firefox. Eine AutoUncle-/mobile.de-Anmeldung aus einem
-  anderen Browser wird nicht automatisch übernommen. Für mobile.de kann die
-  bestehende Cookie-Synchronisierung genutzt werden; Zugangsdaten werden nicht
-  im Add-on gespeichert.
+  anderen Browser wird nicht automatisch übernommen. Das mobile.de-Profil
+  verwaltet seine eigenen Sitzungscookies persistent im Add-on.
 - **Konten und Suchagenten:** Ein mobile.de-Konto erlaubt gespeicherte Suchen
   und Benachrichtigungen, erweitert aber nicht automatisch den Datenzugriff des
-  Crawlers. Es kann die Session-Stabilität verbessern, ist aber keine API und
-  keine Garantie gegen Akamai-Blocks.
-- **Proxy/Tor (`proxy`):** hilft nur gegen IP-Rate-Limits, **nicht** gegen die
-  403-Blocks. Für Tor z. B. `socks5h://127.0.0.1:9050`.
+  Crawlers. Der autonome Suchpfad benötigt kein Konto; Anmeldung ist keine
+  API-Berechtigung und keine Garantie gegen Blocks.
+- **Proxy (`proxy`):** optional fest konfigurierbar, kein automatischer Wechsel.
+  Bei Änderung ist ein Neustart erforderlich. Auch ein Proxy garantiert keinen Zugriff.
 - **Selektor-Änderungen:** Portale ändern regelmäßig ihr HTML/JSON. Liefert
   ein Portal dauerhaft 0 Treffer, müssen die Parser im Code angepasst werden.
 - **Fairer Umgang:** `request_delay` nicht zu klein wählen und die

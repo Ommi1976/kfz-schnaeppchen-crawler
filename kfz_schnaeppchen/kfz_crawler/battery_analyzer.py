@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import io
+import hashlib
 import json
 import logging
 import re
@@ -198,7 +199,7 @@ def _cache_put(url: str, value: Optional[float]) -> None:
         _URL_SOH_CACHE[url] = value
 
 
-def _fetch_and_ocr_single_image(url: str, sess: requests.Session, timeout: float = 4.0) -> Tuple[str, Optional[float]]:
+def _fetch_and_ocr_single_image(url: str, sess: requests.Session, timeout: float = 4.0, fetch_bytes=None) -> Tuple[str, Optional[float]]:
     """Lädt ein einzelnes Bild herunter und führt blitzschnelle OCR durch."""
     # Cache: dasselbe Bild nicht erneut laden/OCR-en (auch None wird gemerkt).
     cached = _cache_get(url)
@@ -206,31 +207,36 @@ def _fetch_and_ocr_single_image(url: str, sess: requests.Session, timeout: float
         return url, cached
     try:
         hd_url = upgrade_image_url_to_highres(url)
-        resp = sess.get(hd_url, timeout=timeout)
-        if resp.status_code != 200 or not resp.content:
-            _cache_put(url, None)
-            return url, None
-
-        text = ocr_image_bytes(resp.content, url=url)
+        if fetch_bytes:
+            data = fetch_bytes(hd_url)
+        else:
+            resp = sess.get(hd_url, timeout=timeout)
+            if resp.status_code != 200 or not resp.content:
+                _cache_put(url, None)
+                return url, None
+            data = resp.content
+        text = ocr_image_bytes(data, url=url)
         soh = extract_battery_soh(text) if text else None
         _cache_put(url, soh)
         return url, soh
     except Exception as e:
+        if fetch_bytes:
+            raise  # A deferred/failed download is NOT negative OCR evidence.
         logger.debug("Fehler beim OCR-Abruf von %s: %s", url, e)
         return url, None
 
 
-def extract_soh_from_image_urls(image_urls: List[str], max_images: int = 15, timeout: float = 4.0) -> Optional[float]:
+def extract_soh_from_image_urls(image_urls: List[str], max_images: int = 15, timeout: float = 4.0, fetch_bytes=None) -> Optional[float]:
     """Prüft Bilder parallel und löst widersprüchliche OCR-Werte per Konsens."""
     if not HAS_OCR or not image_urls:
         return None
 
     sorted_urls = sorted(
-        image_urls[:max_images],
+        list(dict.fromkeys(image_urls)),
         key=lambda u: (
             0 if any(k in u.lower() for k in ["cert", "test", "dok", "doc", "bericht", "aviloo", "dekra", "tuev", "tüv", "tacho", "batterie", "soh", "diag"]) else 1
         )
-    )
+    )[:max_images]
 
     sess = requests.Session()
     sess.headers.update({
@@ -240,14 +246,21 @@ def extract_soh_from_image_urls(image_urls: List[str], max_images: int = 15, tim
     # Nur 3 Worker: die OCR ist CPU-lastig und läuft im Hintergrund – so bleibt
     # die Box benutzbar, während der Early-Exit die Latenz kurz hält.
     values: list[tuple[str, float]] = []
-    with ThreadPoolExecutor(max_workers=3) as executor:
-        futures = {executor.submit(_fetch_and_ocr_single_image, u, sess, timeout): u for u in sorted_urls}
+    with ThreadPoolExecutor(max_workers=1 if fetch_bytes else 3) as executor:
+        futures = {
+            (executor.submit(_fetch_and_ocr_single_image, u, sess, timeout, fetch_bytes)
+             if fetch_bytes else executor.submit(_fetch_and_ocr_single_image, u, sess, timeout)): u
+            for u in sorted_urls}
         for fut in as_completed(futures):
             try:
                 url, soh = fut.result()
                 if soh is not None:
                     values.append((url, soh))
             except Exception:
+                if fetch_bytes:
+                    for pending in futures:
+                        pending.cancel()
+                    raise
                 continue
 
     if not values:
@@ -273,12 +286,16 @@ def extract_soh_from_image_urls(image_urls: List[str], max_images: int = 15, tim
 
 def _relevant_detail_text(soup: BeautifulSoup) -> str:
     """Begrenzt Felderkennung auf das eigentliche Inserat statt Empfehlungen."""
+    # Remove related cars and page chrome before the broad fallback. A SoH
+    # from a recommendation must never become this vehicle's battery health.
+    for node in soup.select("script, style, nav, footer, [data-testid*='recommend'], [data-testid*='similar'], [data-testid*='listing-card']"):
+        node.decompose()
     selectors = (
         "h1",
         "[data-testid*='battery']",
         "[data-testid*='description']",
         "[data-testid*='vehicle']",
-        "main",
+        "[data-testid*='technical']",
     )
     parts: list[str] = []
     seen: set[str] = set()
@@ -288,44 +305,44 @@ def _relevant_detail_text(soup: BeautifulSoup) -> str:
             if text and text not in seen:
                 seen.add(text)
                 parts.append(text)
-    if not parts:
-        return soup.get_text(" ", strip=True)[:30000]
+    if len(parts) <= 1:
+        main = soup.select_one("main")
+        return (main or soup).get_text(" ", strip=True)[:30000]
     return " ".join(parts)[:30000]
 
 
-def fetch_mobile_de_detail_data(raw_id: str) -> dict:
-    """Lädt die unblockierte mobile.de Detailseite und extrahiert SoH, Reichweite, Kapazität, Garantie und Bilder."""
-    if not raw_id:
+def mobile_detail_snapshot(html: str) -> str:
+    """Cache only vehicle text and allowlisted gallery metadata, never scripts."""
+    from html import escape
+    from urllib.parse import urlparse
+    soup = BeautifulSoup(html, "lxml")
+    text = _relevant_detail_text(soup)  # Also removes recommendation galleries.
+    images = []
+    for img in soup.select("img[src], img[data-src]"):
+        url = img.get("src") or img.get("data-src") or ""
+        try:
+            parsed = urlparse(url)
+            allowed = (parsed.scheme == "https" and parsed.hostname in {"img.classistatic.de", "i.classistatic.de"}
+                       and not parsed.username and not parsed.password and parsed.port in (None, 443))
+        except ValueError:
+            allowed = False
+        if allowed:
+            alt = img.get("alt", "")[:300]
+            images.append(f'<img src="{escape(url, quote=True)}" alt="{escape(alt, quote=True)}">')
+    return "<main>" + escape(text) + "".join(dict.fromkeys(images)) + "</main>"
+
+
+def fetch_mobile_de_detail_data(raw_id: str, store=None) -> dict:
+    """Compatibility helper using the same budgeted browser as the search."""
+    if not raw_id or not str(raw_id).isdigit():
         return {}
     out = {}
-    target_urls = [
-        f"https://suchen.mobile.de/auto-inserat/car/{raw_id}.html",
-        f"https://m.mobile.de/auto-inserat/car/{raw_id}.html",
-    ]
-    sess = requests.Session()
-    sess.headers.update({
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:128.0) Gecko/20100101 Firefox/128.0",
-        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-        "Accept-Language": "de,en-US;q=0.7,en;q=0.3",
-    })
-    html = ""
-    for url in target_urls:
-        try:
-            resp = sess.get(url, headers=sess.headers, timeout=5.0)
-            if resp.status_code == 200 and len(resp.text) > 4000:
-                html = resp.text
-                break
-        except Exception:
-            continue
-
-    if not html:
-        try:
-            from kfz_crawler.browser import fetch_rendered
-            html = fetch_rendered(target_urls[0], engine="chromium")
-        except Exception:
-            pass
-
-    if not html:
+    try:
+        from .mobile_runtime import mobile_browser
+        html = mobile_browser().fetch(
+            f"https://suchen.mobile.de/fahrzeuge/details.html?id={raw_id}",
+            store=store, kind="detail")
+    except Exception:
         return {}
 
     soup = BeautifulSoup(html, "lxml")
@@ -358,12 +375,6 @@ def fetch_mobile_de_detail_data(raw_id: str) -> dict:
     if valid_imgs:
         out["image_urls"] = valid_imgs
 
-    # 6. Bild-OCR Fallback
-    if "battery_soh" not in out and valid_imgs:
-        img_soh = extract_soh_from_image_urls(valid_imgs, max_images=8)
-        if img_soh:
-            out["battery_soh"] = img_soh
-
     return out
 
 
@@ -374,74 +385,64 @@ _OCR_TRIED_FP: set = set()
 _BG_MAX_LISTINGS_PER_PASS = 40
 
 
-def run_background_image_enrichment(store, max_listings: int = _BG_MAX_LISTINGS_PER_PASS) -> int:
-    """Scannt im Hintergrund E-Auto-Inserate ohne SoH (inkl. blockfreiem mobile.de Detailabruf & Turbo-OCR)."""
-    rows = store.conn.execute(
-        "SELECT fingerprint, portal, url, title, image_urls FROM deals "
+def run_background_image_enrichment(store, max_listings: int = _BG_MAX_LISTINGS_PER_PASS, proxy=None) -> int:
+    """Bounded OCR; mobile details are handled in the normal enrichment queue."""
+    with store._lock:
+        rows = store.conn.execute(
+        "SELECT fingerprint, portal, url, title, image_urls, evidence_json FROM deals "
         "WHERE (fuel LIKE '%elektro%' OR fuel LIKE '%electric%') "
         "AND battery_soh IS NULL AND COALESCE(is_stale, 0) = 0 ORDER BY last_seen DESC"
-    ).fetchall()
+        ).fetchall()
 
     found = 0
     processed = 0
     updates: list[dict] = []
     for r in rows:
         fp = r["fingerprint"]
-        if fp in _OCR_TRIED_FP:
+        if r["portal"] != "mobile.de" and fp in _OCR_TRIED_FP:
             continue
         if processed >= max_listings:
             break
+        processed += 1  # every attempted listing counts, not just the OCR branch
         title = r["title"]
         portal = r["portal"] or ""
         url = r["url"] or ""
         imgs_json = r["image_urls"]
 
-        # 1. mobile.de: Detaildaten blockfrei im Hintergrund abrufen
-        if "mobile" in portal.lower() or "mobile.de" in url:
-            m = re.search(r"id=(\d+)", url) or re.search(r"/(\d+)\.html", url)
-            raw_id = m.group(1) if m else None
-            if raw_id:
-                try:
-                    det = fetch_mobile_de_detail_data(raw_id)
-                    if det:
-                        soh = det.get("battery_soh")
-                        rng = det.get("ev_range_km")
-                        kwh = det.get("battery_kwh")
-                        warr = det.get("warranty")
-                        new_imgs = det.get("image_urls")
-                        imgs_str = json.dumps(new_imgs, ensure_ascii=False) if new_imgs else None
-
-                        updates.append({
-                            "fingerprint": fp,
-                            "battery_soh": soh,
-                            "ev_range_km": rng,
-                            "battery_kwh": kwh,
-                            "warranty": warr,
-                            "image_urls": imgs_str,
-                            "soh_source": "detail_text",
-                            "soh_confidence": 0.93,
-                            "soh_evidence": "mobile.de Batterie-Information",
-                        })
-                        if soh:
-                            found += 1
-                            logger.info("⚡ mobile.de Detail-Sync: SoH=%.1f%% für %s gespeichert", soh, title[:50])
-                            _OCR_TRIED_FP.add(fp)
-                            continue
-                except Exception as e:
-                    logger.debug("mobile.de Detail-Sync Fehler für %s: %s", title[:40], e)
-
-        # 2. Bild-OCR Fallback für andere Portale & Galerien
+        # No independent requests/Chromium detail path bypassing the breaker.
         if not HAS_OCR or not imgs_json:
             continue
         try:
             urls = json.loads(imgs_json) if isinstance(imgs_json, str) else imgs_json
             if not urls:
                 continue
-            processed += 1
+            mobile = "mobile" in portal.lower() or "mobile.de" in url
+            if mobile:
+                from .mobile_runtime import load_state, save_state, mobile_browser, mobile_status
+                if mobile_status(store).get("blocked_until", 0) > time.time():
+                    continue
+                evidence = json.loads(r["evidence_json"] or "{}")
+                documents = evidence.get("certificate_images", {}).get("urls", [])
+                cache_key = "mobile.ocr.v1." + hashlib.sha256(json.dumps([urls, documents]).encode()).hexdigest()
+                cached = load_state(store, cache_key)
+                if cached.get("until", 0) > time.time():
+                    continue
+                # Only document-like URLs; don't download entire vehicle galleries
+                # speculatively. A negative result survives process restarts.
+                urls = [u for u in urls if u in documents or re.search(r"cert|aviloo|dekra|bericht|batter|soh|diagnos", u, re.I)]
+                if not urls:
+                    save_state(store, cache_key, {"until": time.time() + 3 * 86400})
+                    continue
             if len(_OCR_TRIED_FP) > 20000:
                 _OCR_TRIED_FP.clear()
-            _OCR_TRIED_FP.add(fp)
-            soh = extract_soh_from_image_urls(urls, max_images=10)
+            if not mobile:
+                _OCR_TRIED_FP.add(fp)
+            if mobile:
+                soh = extract_soh_from_image_urls(urls, max_images=3,
+                    fetch_bytes=lambda u: mobile_browser().fetch_image(u, store=store, proxy=proxy))
+                save_state(store, cache_key, {"until": time.time() + 3 * 86400})
+            else:
+                soh = extract_soh_from_image_urls(urls, max_images=10)
             if soh:
                 updates.append({
                     "fingerprint": fp,
@@ -475,7 +476,7 @@ def parse_mobile_de_detail_html(html: str, listing: Listing) -> None:
     soup = BeautifulSoup(html, "lxml")
 
     full_text = _relevant_detail_text(soup)
-    if full_text:
+    if full_text and full_text not in (listing.body or ""):
         listing.body = f"{getattr(listing, 'body', '') or ''} {full_text}".strip()
 
     imgs = [img.get("src") or img.get("data-src") for img in soup.select("img[src], img[data-src]")]
@@ -487,10 +488,19 @@ def parse_mobile_de_detail_html(html: str, listing: Listing) -> None:
                 existing.append(img_url)
         listing.image_urls = existing
 
-    from kfz_crawler.models import infer_listing_battery, infer_listing_range
+    documents = []
+    for img in soup.select("img[src], img[data-src]"):
+        url = img.get("src") or img.get("data-src")
+        document_alt = re.search(r"cert|zertifikat|aviloo|dekra|prüfbericht|batterietest", img.get("alt", ""), re.I)
+        document_url = re.search(r"cert|aviloo|dekra|bericht|batter|soh|diagnos", url or "", re.I)
+        if url in valid_imgs and (document_alt or document_url):
+            documents.append(url)
+    if documents:
+        listing.field_evidence["certificate_images"] = {"source": "detail_gallery", "urls": list(dict.fromkeys(documents))}
+
+    from kfz_crawler.models import infer_listing_details
     # Nur Text-Auswertung im Suchpfad – Bild-OCR erledigt der Hintergrund-Daemon.
-    infer_listing_battery(listing, check_images=False)
-    infer_listing_range(listing)
+    infer_listing_details(listing)
 
 
 def enrich_listing_battery_deep(listing: Listing, image_urls: Optional[List[str]] = None) -> bool:

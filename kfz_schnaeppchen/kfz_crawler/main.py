@@ -40,6 +40,11 @@ class PortalSearchResult:
     status: str = "ok"
     error: str = ""
     exclusions: Dict[str, int] = field(default_factory=dict)
+    complete: bool = True
+    active_fingerprints: Set[str] | None = None
+    coverage: dict = field(default_factory=dict)
+    checkpoint_key: str = ""
+    checkpoint: dict | None = None
 
 
 def _search_one_portal(cfg: Config, key: str, query: SearchQuery, store=None) -> PortalSearchResult:
@@ -48,19 +53,15 @@ def _search_one_portal(cfg: Config, key: str, query: SearchQuery, store=None) ->
     if portal_cls is None:
         console.print(f"[yellow]Unbekanntes Portal in config: {key}[/yellow]")
         return PortalSearchResult(key, status="error", error="Unbekanntes Portal")
-    if key == "mobile_de" and store and hasattr(store, "portal_cooldown_remaining"):
-        remaining = store.portal_cooldown_remaining(query.name, portal_cls.name)
-        if remaining > 0:
-            minutes = max(1, int((remaining + 59) // 60))
-            message = f"Schutzpause aktiv, neuer Versuch in ca. {minutes} min"
-            console.print(f"  [yellow]{portal_cls.name}: {message}[/yellow]")
-            return PortalSearchResult(portal_cls.name, status="cooldown", error=message)
     portal = portal_cls(
         request_delay=cfg.settings.request_delay,
         max_pages=cfg.settings.max_pages,
         proxy=cfg.settings.proxy or None,
         render=cfg.settings.use_browser,
     )
+    if key == "mobile_de":
+        portal.store = store
+    from .mobile_runtime import MobileDeferred
     try:
         result_status = "ok"
         result_error = ""
@@ -71,6 +72,13 @@ def _search_one_portal(cfg: Config, key: str, query: SearchQuery, store=None) ->
             result_status = "partial"
             result_error = str(exc)
             console.print(f"  [yellow]{exc}[/yellow]")
+        coverage = getattr(portal, "coverage", {})
+        complete = getattr(portal, "complete_sweep", result_status == "ok")
+        if key == "mobile_de" and result_status == "ok" and not complete:
+            result_status = "incremental" if coverage.get("mode") == "delta" else "partial"
+            result_error = (f"{coverage.get('pages', 0)} Seiten gelesen; "
+                            f"{coverage.get('unique_seen', 0)} eindeutige Inserate; "
+                            f"Fortsetzung automatisch ({coverage.get('reason', 'budget')})")
         # Viele Portale liefern die Akku-Kapazität nur im Titel (z. B. "62 kWh").
         # WICHTIG: hier NUR Text-Auswertung (billig). Die teure Bild-OCR läuft
         # asynchron im Hintergrund-Daemon (run_background_image_enrichment) und
@@ -127,7 +135,7 @@ def _search_one_portal(cfg: Config, key: str, query: SearchQuery, store=None) ->
         # also überwiegend an Ausschuss, und die angezeigten Inserate hatten nur
         # die abgeschnittene Vorschau aus der Trefferkarte. Genau dort fehlten
         # die Hinweise auf Leasing oder Beschädigung.
-        if result_status == "ok" and matching and hasattr(portal, "enrich"):
+        if (matching or key == "mobile_de") and hasattr(portal, "enrich") and (result_status == "ok" or key == "mobile_de"):
             matching = _mit_detailtext_nachpruefen(
                 portal, matching, query, cfg, home_zip, exclusions, store
             )
@@ -140,13 +148,23 @@ def _search_one_portal(cfg: Config, key: str, query: SearchQuery, store=None) ->
             status=result_status,
             error=result_error,
             exclusions=dict(exclusions),
+            complete=complete,
+            active_fingerprints=getattr(portal, "active_fingerprints", None),
+            coverage=coverage,
+            checkpoint_key=getattr(portal, "checkpoint_key", ""),
+            checkpoint=getattr(portal, "pending_checkpoint", None),
         )
+    except MobileDeferred as e:
+        return PortalSearchResult(portal.name, status="cooldown", error=str(e), complete=False)
     except PortalError as e:
         console.print(f"  [yellow]{e}[/yellow]")
-        return PortalSearchResult(portal.name, status="blocked", error=str(e))
+        status = "blocked"
+        if key == "mobile_de" and getattr(portal, "coverage", {}).get("reason") != "blocked":
+            status = "error"
+        return PortalSearchResult(portal.name, status=status, error=str(e), complete=False)
     except Exception as e:  # pragma: no cover - robuster Lauf trotz Portalfehler
         console.print(f"  [red]{portal.name}: Fehler – {e}[/red]")
-        return PortalSearchResult(portal.name, status="error", error=str(e))
+        return PortalSearchResult(portal.name, status="error", error=str(e), complete=False)
 
 
 def _mit_detailtext_nachpruefen(portal, matching, query, cfg, home_zip,
@@ -161,7 +179,7 @@ def _mit_detailtext_nachpruefen(portal, matching, query, cfg, home_zip,
 
     # Bereits nachgeladene Texte wiederverwenden, statt sie erneut abzurufen.
     bekannt = {}
-    if store is not None and not cfg.settings.verify_details:
+    if store is not None and not cfg.settings.verify_details and portal.name != "mobile.de":
         try:
             bekannt = store.detailtexte(query.name)
         except Exception:
@@ -205,7 +223,7 @@ def _mit_detailtext_nachpruefen(portal, matching, query, cfg, home_zip,
     return geprueft
 
 
-def run_search(cfg: Config, query: SearchQuery, store: SeenStore) -> List[Listing]:
+def run_search(cfg: Config, query: SearchQuery, store: SeenStore, *, include_seen=False) -> List[Listing]:
     """Führt eine Suche auf allen aktiven Portalen aus und liefert neue Deals.
 
     Die Portale laufen PARALLEL (verschiedene Hosts) – das halbiert die Laufzeit,
@@ -293,14 +311,15 @@ def run_search(cfg: Config, query: SearchQuery, store: SeenStore) -> List[Listin
     # Anzeige: bekannte Fahrzeuge werden bei jedem Lauf aktualisiert.
     new_deals = []
     portal_active_fps: Dict[str, Set[str]] = {
-        portal_name: {listing.fingerprint for listing in portal_result.listings}
+        portal_name: (portal_result.active_fingerprints if portal_result.active_fingerprints is not None
+                      else {listing.fingerprint for listing in portal_result.listings})
         for portal_name, portal_result in portal_results.items()
-        if portal_result.status == "ok" and portal_result.listings
+        if portal_result.status == "ok" and portal_result.complete
     }
 
     for l in result.priced:
         is_new = store.is_new(l)
-        if is_new and l.is_deal:
+        if (is_new or include_seen) and l.is_deal:
             new_deals.append(l)
 
     new_items = [listing for listing in result.priced if store.is_new(listing)]
@@ -318,13 +337,20 @@ def run_search(cfg: Config, query: SearchQuery, store: SeenStore) -> List[Listin
     if hasattr(store, "sync_active_deals"):
         store.sync_active_deals(query.name, portal_active_fps)
     for portal_name, portal_result in portal_results.items():
-        if portal_result.status in {"blocked", "error"}:
+        if portal_name != "mobile.de" and portal_result.status in {"blocked", "error"}:
             if hasattr(store, "mark_portal_stale"):
                 store.mark_portal_stale(query.name, portal_name)
     if hasattr(store, "purge_unmatching_deals"):
         store.purge_unmatching_deals(query.name, query)
     if hasattr(store, "prune"):
         store.prune()
+
+    # Cursor advancement follows successful persistence/filtering. If any write
+    # fails, the next run repeats its chunk instead of losing unseen vehicles.
+    from .mobile_runtime import save_state
+    for portal_result in portal_results.values():
+        if portal_result.checkpoint_key and portal_result.checkpoint is not None:
+            save_state(store, portal_result.checkpoint_key, portal_result.checkpoint)
 
     return new_deals
 
@@ -354,13 +380,8 @@ def main(argv: List[str] | None = None) -> int:
     try:
         for query in cfg.searches:
             console.print(f"\n[bold]🔎 Suche: {query.name}[/bold]")
-            if args.all:
-                # Frischer Store-Blick: temporär alles als neu behandeln.
-                store_new = SeenStore(":memory:")
-                deals = run_search(cfg, query, store_new)
-                store_new.close()
-            else:
-                deals = run_search(cfg, query, store)
+            # --all affects notifications, never the persistent portal gate.
+            deals = run_search(cfg, query, store, include_seen=args.all)
 
             if deals:
                 total_deals += len(deals)
@@ -368,6 +389,8 @@ def main(argv: List[str] | None = None) -> int:
             else:
                 console.print("  [dim]Keine neuen Schnäppchen.[/dim]")
     finally:
+        from .mobile_runtime import close_mobile_browser
+        close_mobile_browser()
         store.close()
 
     console.print(f"\n[bold green]Fertig. {total_deals} neue Schnäppchen gefunden.[/bold green]")

@@ -86,7 +86,7 @@ def test_mobile_de_url_builder():
     assert "rad=100" in url
     assert "q=bmw+320" in url
     assert "fe=ELECTRIC_HEATED_SEATS" in url
-    assert "fe=ADAPTIVE_CRUISE_CONTROL" in url
+    assert "spc=ADAPTIVE_CRUISE_CONTROL" in url
 
 
 def test_autouncle_url_builder():

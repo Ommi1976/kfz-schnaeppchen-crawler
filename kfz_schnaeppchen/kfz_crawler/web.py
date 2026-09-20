@@ -140,10 +140,13 @@ def _run_all(app: FastAPI, only_id: str | None = None) -> dict:
 
 async def _do_run(app: FastAPI, only_id: str | None = None) -> None:
     async with app.state.run_lock:
+        if getattr(app.state, "closing", False):
+            return
         app.state.running = True
         app.state.last_run_at = _now_iso()
         try:
-            report = await asyncio.to_thread(_run_all, app, only_id)
+            app.state.search_task = asyncio.create_task(asyncio.to_thread(_run_all, app, only_id))
+            report = await asyncio.shield(app.state.search_task)
             app.state.last_report = report
 
             # Altbestand mit der aktuellen Erkennung nachziehen. Kostet keine
@@ -175,7 +178,8 @@ async def _do_run(app: FastAPI, only_id: str | None = None) -> None:
                 task = getattr(app.state, "enrichment_task", None)
                 if task is None or task.done():
                     app.state.enrichment_task = asyncio.create_task(
-                        asyncio.to_thread(run_background_image_enrichment, app.state.store)
+                        asyncio.to_thread(run_background_image_enrichment, app.state.store,
+                                          proxy=app.state.cfg.settings.proxy or None)
                     )
             except Exception:
                 pass
@@ -190,13 +194,15 @@ async def _do_run(app: FastAPI, only_id: str | None = None) -> None:
 async def _scheduler(app: FastAPI) -> None:
     # Kleiner Vorlauf, damit der Server zuerst sauber hochkommt.
     await asyncio.sleep(5)
-    while True:
+    while not getattr(app.state, "closing", False):
         try:
             await _do_run(app)
         except asyncio.CancelledError:
             raise
         except Exception:
             logger.exception("Scheduler-Durchlauf fehlgeschlagen")
+        if getattr(app.state, "closing", False):
+            return
         interval = _interval_minutes()
         _schedule_next(app)
         await asyncio.sleep(interval * 60)
@@ -241,12 +247,8 @@ async def lifespan(app: FastAPI):
     _schedule_next(app)
     app.state.last_report = {}
     app.state.enrichment_task = None
-    # Einmal beim Start ausgeben: die Browser-Erweiterung braucht es.
-    try:
-        logger.info("Cookie-Token für die Browser-Erweiterung: %s",
-                    app.state.store.ingest_token())
-    except Exception:
-        logger.exception("Cookie-Token konnte nicht bereitgestellt werden")
+    app.state.search_task = None
+    app.state.closing = False
     # Nach einem Versionssprung ist der Altbestand veraltet: Felder, die die
     # neue Erkennung fuellen wuerde, bleiben leer, und falsch uebernommene
     # Werte (etwa der Kraftstoff bei Kleinanzeigen) filtern weiter falsch.
@@ -259,12 +261,27 @@ async def lifespan(app: FastAPI):
     try:
         yield
     finally:
-        app.state.startup_reevaluation.cancel()
-        app.state.scheduler.cancel()
+        app.state.closing = True
+        # Never cancel a task in the middle of to_thread: its SQLite writes
+        # continue even after cancellation. A running scheduler exits below.
+        if not app.state.running:
+            app.state.scheduler.cancel()
         try:
             await app.state.scheduler
         except asyncio.CancelledError:
             pass
+        async with app.state.run_lock:
+            pass  # Also drain a manually started run, including post-processing.
+        # Cancelling asyncio.to_thread does not stop its thread. Finish pending
+        # writes before closing SQLite or the owning Playwright worker.
+        for task in (app.state.search_task, app.state.enrichment_task, app.state.startup_reevaluation):
+            if task:
+                try:
+                    await task
+                except (asyncio.CancelledError, Exception):
+                    pass
+        from .mobile_runtime import close_mobile_browser
+        await asyncio.to_thread(close_mobile_browser)
         app.state.store.close()
 
 
@@ -327,6 +344,7 @@ async def meta():
 
 @app.get("/api/status")
 async def status():
+    from .mobile_runtime import mobile_status
     cfg: Config = app.state.cfg
     per = app.state.last_report.get("per_search", {})
     searches = []
@@ -348,8 +366,8 @@ async def status():
         "portal_health": app.state.store.list_portal_health(),
         "searches": searches,
         "last_report": app.state.last_report,
-        # Ohne frisches Sitzungscookie liefert mobile.de nichts. Das war
-        # bisher nur im Protokoll sichtbar.
+        "mobile_runtime": mobile_status(app.state.store),
+        # Legacy metadata only; the autonomous worker owns its own session.
         "mobile_cookies": _mobile_cookie_status(),
     }
 
@@ -625,25 +643,10 @@ async def save_mobile_cookies_endpoint(request: Request, payload: dict = Body(..
         raise HTTPException(status_code=400, detail="Kein _abck-Cookie enthalten")
     logger.info("mobile.de-Cookies aktualisiert: %d Werte", len(saved))
 
-    # Mit einer frischen Sitzung ist die Ausgangslage eine andere. Die
-    # Schutzpause aus vorherigen Blocks würde den nächsten Versuch sonst um
-    # Stunden verzögern, obwohl sich die Bedingungen gerade geändert haben.
-    freigegeben = 0
-    try:
-        store = app.state.store
-        with store._lock:
-            cur = store.conn.execute(
-                "UPDATE portal_health SET block_count = 0, last_run = 0 "
-                "WHERE portal LIKE '%mobile%' AND status != 'ok'"
-            )
-            store.conn.commit()
-            freigegeben = cur.rowcount
-        if freigegeben:
-            logger.info("mobile.de-Schutzpause aufgehoben – neue Sitzung liegt vor")
-    except Exception:
-        logger.exception("Schutzpause konnte nicht aufgehoben werden")
-
-    return {"status": "ok", "saved_count": len(saved), "cooldown_geloest": freigegeben}
+    # Receipt of cookies is not evidence that the service accepted the session.
+    # Keep compatibility with old extensions, but never reset the circuit breaker.
+    return {"status": "legacy", "saved_count": len(saved), "cooldown_geloest": 0,
+            "message": "Autonome Add-on-Sitzung aktiv; importierte Cookies werden nicht benötigt."}
 
 
 @app.get("/api/discovered-ev")

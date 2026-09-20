@@ -20,7 +20,7 @@ SAMPLE_MOBILE_HTML = """
 """
 
 def test_mobile_de_autonomous_search():
-    with patch("kfz_crawler.portals.mobile_de.MobileDe._fetch", return_value=SAMPLE_MOBILE_HTML):
+    with patch("kfz_crawler.portals.mobile_de.MobileDe._fetch", return_value='<h1>1 Angebote</h1>' + SAMPLE_MOBILE_HTML):
         portal = MobileDe(max_pages=1)
         q = SearchQuery(name="Golf", make="volkswagen", model="golf")
         listings = portal.search(q)
@@ -45,7 +45,7 @@ def test_mobile_de_crawls_past_configured_page_sample():
     def fetch_page(url):
         page = int(url.split("pageNumber=")[1].split("&", 1)[0])
         if page > 8:
-            return "<html><body></body></html>"
+            return "<html><body><h1>0 Angebote</h1></body></html>"
         return f"""
         <html><body><article data-testid="result-listing">
             <a href="/fahrzeuge/details.html?id={page}">

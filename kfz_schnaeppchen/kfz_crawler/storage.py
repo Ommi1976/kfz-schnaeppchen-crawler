@@ -482,6 +482,29 @@ class SeenStore:
                 )
             self.conn.commit()
 
+    def update_mobile_details(self, fingerprint: str, listing: Listing) -> None:
+        """Enrich a queued car without pretending it was seen in today's search.
+
+        Never change price, deal classification, last_seen or stale status here.
+        The normal local query check runs after the enrichment queue.
+        """
+        columns = ("body", "year", "year_kind", "first_registration_month", "power_ps",
+                   "battery_kwh", "battery_net_kwh", "battery_gross_kwh",
+                   "battery_observed_kind", "battery_soh", "battery_soh_level",
+                   "ev_range_km", "ev_range_standard", "warranty")
+        with self._lock:
+            row = self.conn.execute("SELECT evidence_json FROM deals WHERE fingerprint=?", (fingerprint,)).fetchone()
+            if not row:
+                return
+            evidence = json.loads(row["evidence_json"] or "{}")
+            evidence.update(listing.field_evidence)
+            self.conn.execute(
+                "UPDATE deals SET " + ",".join(f"{column}=COALESCE(?,{column})" for column in columns)
+                + ",evidence_json=?,image_urls=? WHERE fingerprint=? AND portal='mobile.de'",
+                [getattr(listing, column) for column in columns] + [json.dumps(evidence, ensure_ascii=False),
+                    json.dumps(listing.image_urls), fingerprint])
+            self.conn.commit()
+
     # Rückwärtskompatibler Alias.
     record_deal = record_listing
 
@@ -699,6 +722,7 @@ class SeenStore:
         from .models import Listing, matches_query, infer_listing_details
         deals = self.list_deals(limit=2000, search_name=search_name)
         to_delete = []
+        refresh = []
         for d in deals:
             l = Listing(
                 portal=d.get("portal") or "",
@@ -715,22 +739,32 @@ class SeenStore:
                 location=d.get("location"),
                 body=d.get("body") or "",
                 country=d.get("country"),
+                year_kind=d.get("year_kind") or "unbekannt",
+                first_registration_month=d.get("first_registration_month"),
+                battery_net_kwh=d.get("battery_net_kwh"),
+                battery_gross_kwh=d.get("battery_gross_kwh"),
+                battery_observed_kind=d.get("battery_observed_kind") or "unbekannt",
+                battery_soh_level=d.get("battery_soh_level") or "unbekannt",
+                ev_range_standard=d.get("ev_range_standard") or "unbekannt",
             )
+            try:
+                l.field_evidence = json.loads(d.get("evidence_json") or "{}")
+            except (TypeError, ValueError):
+                pass
             infer_listing_details(l)
             if not matches_query(l, query):
                 to_delete.append(d["fingerprint"])
             else:
                 # Aktualisierte Werte sichern
-                self.conn.execute(
-                    "UPDATE deals SET battery_kwh = ?, ev_range_km = ? WHERE fingerprint = ?",
-                    (l.battery_kwh, l.ev_range_km, d["fingerprint"])
-                )
+                refresh.append((l.battery_kwh, l.ev_range_km, d["fingerprint"]))
 
-        if to_delete:
-            with self._lock:
+        with self._lock:
+            self.conn.executemany(
+                "UPDATE deals SET battery_kwh = ?, ev_range_km = ? WHERE fingerprint = ?", refresh)
+            if to_delete:
                 placeholders = ",".join("?" * len(to_delete))
                 self.conn.execute(f"DELETE FROM deals WHERE fingerprint IN ({placeholders})", to_delete)
-                self.conn.commit()
+            self.conn.commit()
         return len(to_delete)
 
     def sync_active_deals(

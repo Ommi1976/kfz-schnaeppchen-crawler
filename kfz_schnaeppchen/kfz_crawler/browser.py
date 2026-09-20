@@ -1,9 +1,4 @@
-"""Browser-Backend (Playwright) für JS-lastige und bot-geschützte Portale (z. B. mobile.de).
-
-Nutzt standardmäßig Playwright Firefox Headless, da die native Gecko-Engine
-den Akamai Bot Manager von mobile.de server-seitig zuverlässig und ohne
-Sperren (Status 200) passiert.
-"""
+"""Browser backends. mobile.de uses its own persistent, budgeted worker."""
 
 from __future__ import annotations
 
@@ -93,8 +88,14 @@ _BLOCK_MARKERS = (
 
 
 def _is_block_page(html: str) -> bool:
-    head = (html or "").lower()[:5000]
-    return any(marker in head for marker in _BLOCK_MARKERS)
+    from bs4 import BeautifulSoup
+    soup = BeautifulSoup(html or "", "lxml")
+    for node in soup.select("script, style, noscript"):
+        node.decompose()
+    text = soup.get_text(" ", strip=True).lower()
+    # A script filename containing 'captcha' is not a challenge. Conversely,
+    # an actual challenge after a large document head must not be overlooked.
+    return any(marker in text for marker in _BLOCK_MARKERS)
 
 
 def _page_number(url: str) -> Optional[str]:
@@ -144,30 +145,6 @@ def _matching_user_agent(browser) -> str:
         probe_context.close()
 
 
-def _inject_saved_mobile_cookies(context) -> int:
-    """Übernimmt nur explizit im Add-on gespeicherte mobile.de-Cookies."""
-    try:
-        from .cookie_storage import get_mobile_cookies, COOKIE_MAX_ALTER
-        saved = get_mobile_cookies(max_age_seconds=COOKIE_MAX_ALTER)
-        cookies = [
-            {
-                "name": str(name),
-                "value": str(value),
-                "domain": ".mobile.de",
-                "path": "/",
-                "secure": True,
-            }
-            for name, value in saved.items()
-            if name and value
-        ]
-        if cookies:
-            context.add_cookies(cookies)
-        return len(cookies)
-    except Exception as exc:
-        logger.debug("Gespeicherte mobile.de-Cookies konnten nicht geladen werden: %s", exc)
-        return 0
-
-
 def fetch_rendered(
     url: str,
     proxy: Optional[str] = None,
@@ -181,22 +158,19 @@ def fetch_rendered(
 ) -> str:
     """Lädt eine URL in Playwright Chromium/Firefox und liefert das HTML.
 
-    Ohne Fingerprint-Manipulation (K4 §21). Tor wird nur genutzt, wenn es
-    ausdrücklich über KFZ_USE_TOR aktiviert ist – Exit-Nodes sind bei
-    großen Portalen reputationsbelastet und verschlechtern die Lage eher.
+    Ohne Fingerprint-Manipulation (K4 §21). mobile.de läuft ausschließlich
+    über den gemeinsamen Dienst; ein Proxy wird nur explizit übergeben.
     """
+    from .mobile_runtime import is_mobile_url, mobile_browser
+    if is_mobile_url(url):
+        return mobile_browser().fetch(
+            url, proxy=proxy, kind="search" if "/search.html" in url else "detail")
     try:
         from playwright.sync_api import sync_playwright
     except ImportError as e:
         raise BrowserUnavailable("Playwright nicht installiert.") from e
 
-    from .tor_service import is_tor_available, renew_tor_identity
-
-    # Tor-Exit-Nodes sind bei großen Portalen oft bereits reputationsbelastet.
-    # Deshalb nur auf ausdrückliche Konfiguration verwenden, nie automatisch.
     effective_proxy = proxy
-    if not effective_proxy and os.environ.get("KFZ_USE_TOR") == "1" and "mobile.de" in url and is_tor_available():
-        effective_proxy = "socks5://127.0.0.1:9050"
 
     with _lock:
         for attempt in range(max_retries + 1):
@@ -229,14 +203,6 @@ def fetch_rendered(
                     pass
 
                 try:
-                    # Akamai Session Warmup auf Startseite
-                    if "mobile.de" in url:
-                        try:
-                            page.goto("https://www.mobile.de/", wait_until="domcontentloaded", timeout=15000)
-                            time.sleep(1.5)
-                        except Exception:
-                            pass
-
                     page.goto(url, wait_until=wait_until, timeout=timeout_ms)
 
                     if wait_selector:
@@ -254,10 +220,6 @@ def fetch_rendered(
 
                     # Prüfe auf Blockseite
                     if _is_block_page(html):
-                        if attempt < max_retries and effective_proxy and "9050" in effective_proxy:
-                            logger.info("mobile.de blockiert Tor-Node. Fordere neue Tor-Identität (Circuit) an (Versuch %d/%d)...", attempt + 1, max_retries)
-                            renew_tor_identity()
-                            continue
                         raise BrowserBlocked(f"Browserzugriff blockiert: {url}")
 
                     return html
@@ -283,6 +245,13 @@ def rendered_session(
     über Läufe hinweg eine konsistente, normale Browsersitzung ohne Cookie- oder
     Engine-Wechsel.
     """
+    from .mobile_runtime import is_mobile_url, mobile_browser
+    if warmup_url and is_mobile_url(warmup_url):
+        def mobile_fetch(url, **_kwargs):
+            return mobile_browser().fetch(
+                url, proxy=proxy, kind="search" if "/search.html" in url else "detail")
+        yield mobile_fetch
+        return
     try:
         from playwright.sync_api import sync_playwright
     except ImportError as exc:
@@ -320,13 +289,8 @@ def rendered_session(
                 if page_script:
                     context.add_init_script(page_script)
 
-            # Vom Nutzer uebertragene mobile.de-Sitzung einspielen. Der
-            # Container-Browser erreicht selbst keinen validierten Zustand
-            # (kein GPU, navigator.webdriver=true); eine echte Sitzung aus dem
-            # Browser des Nutzers ist der einzige Weg an mobile.de-Daten.
-            anzahl = _inject_saved_mobile_cookies(context)
-            if anzahl:
-                logger.info("mobile.de: %d gespeicherte Sitzungscookies eingespielt", anzahl)
+            # Portal-specific profiles keep their own cookies. Never inject a
+            # desktop mobile.de session into another portal's browser context.
             page = context.pages[0] if context.pages else context.new_page()
             last_request_at = 0.0
 
@@ -345,6 +309,9 @@ def rendered_session(
                     max_retries: int = 0,
                 ) -> str:
                     nonlocal last_request_at
+                    if is_mobile_url(url):
+                        return mobile_browser().fetch(url, proxy=proxy,
+                            kind="search" if "/search.html" in url else "detail")
                     for attempt in range(max_retries + 1):
                         elapsed = time.monotonic() - last_request_at
                         polite_delay = random.uniform(*request_delay_range)
@@ -399,6 +366,14 @@ def fetch_rendered_batch(
 
     Gibt (srp_html, {detail_url: detail_html, ...}) zurück.
     """
+    from .mobile_runtime import is_mobile_url, mobile_browser
+    if is_mobile_url(srp_url):
+        worker = mobile_browser()
+        srp = worker.fetch(srp_url, proxy=proxy)
+        details = {}
+        for url in detail_urls:
+            details[url] = worker.fetch(url, proxy=proxy, kind="detail")
+        return srp, details
     try:
         from playwright.sync_api import sync_playwright
     except ImportError as e:
@@ -415,14 +390,7 @@ def fetch_rendered_batch(
                     viewport={"width": 1440, "height": 900},
                 )
                 try:
-                    # 1. Warmup auf Startseite
-                    try:
-                        page.goto("https://www.mobile.de/", wait_until="domcontentloaded", timeout=15000)
-                        time.sleep(1.5)
-                    except Exception:
-                        pass
-
-                    # 2. SRP abrufen (etabliert Akamai-Session)
+                    # Non-mobile SRP; never warm up a different host.
                     page.goto(srp_url, wait_until="domcontentloaded", timeout=timeout_ms)
                     try:
                         page.wait_for_selector("article a[href*='details.html']", timeout=20000)
@@ -436,6 +404,9 @@ def fetch_rendered_batch(
                     details: Dict[str, str] = {}
                     for url in detail_urls:
                         try:
+                            if is_mobile_url(url):
+                                details[url] = mobile_browser().fetch(url, proxy=proxy, kind="detail")
+                                continue
                             page.goto(url, wait_until="domcontentloaded", timeout=timeout_ms)
                             # Auf den Detail-Inhalt warten (Titel) statt nur fester
                             # Delay – auf langsamer Box sonst leere Seite -> kein SoH.

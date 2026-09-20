@@ -133,8 +133,8 @@ async function loadStatus() {
     { k: "Letzter Lauf", v: fmtClock(s.last_finished_at || s.last_run_at), cls: "card" },
     { k: "Nächster Lauf", v: nextIn == null ? "–" : `in ${nextIn} min`, cls: "card" },
     { k: "Schwelle", v: Math.round((s.deal_threshold || 0) * 100) + " %", cls: "card" },
-    { k: "mobile.de-Cookie", v: cookieStatusText(s.mobile_cookies), cls: "card",
-      title: cookieStatusHinweis(s.mobile_cookies, s) },
+    { k: "mobile.de-Sitzung", v: mobileRuntimeText(s.mobile_runtime), cls: "card",
+      title: mobileRuntimeHint(s.mobile_runtime, s) },
   ];
   document.getElementById("stats").innerHTML = cards
     .map((c) => `<div class="${c.cls || 'card'}" id="${c.id || ''}"` +
@@ -521,7 +521,7 @@ function renderPortalFilters(counts, dealCount) {
   ];
   for (const p of portals) {
     const healthRows = (statusCache?.portal_health || []).filter((h) => h.portal === p);
-    const unhealthy = healthRows.some((h) => h.status && h.status !== "ok");
+    const unhealthy = healthRows.some((h) => h.status && !["ok", "incremental"].includes(h.status));
     const healthTitle = unhealthy
       ? healthRows.filter((h) => h.status !== "ok").map((h) => `${h.search_name}: ${h.status}${h.error ? ` – ${h.error}` : ""}`).join(" | ")
       : "Letzter Abruf erfolgreich";
@@ -725,46 +725,22 @@ function poll() {
 })();
 
 
-// --- mobile.de-Cookie ----------------------------------------------------
-// Ohne frisches Sitzungscookie aus dem Browser liefert mobile.de nichts.
-//
-// Angezeigt wird bewusst das *Alter*, nicht eine Restlaufzeit: Cookies kommen
-// dann, wenn mobile.de im Browser geöffnet war, nicht nach einem festen Takt.
-// Eine Restlaufzeit würde einen Rhythmus vorgeben, den es nicht gibt.
-function cookieStatusText(c) {
-  if (!c || !c.has_cookies) return `<span class="dot bad"></span>keins`;
-  const alter = alterKurz(c.age_seconds);
-  if (!c.is_fresh) return `<span class="dot bad"></span>alt (${alter})`;
-  const knapp = (c.expires_in_seconds || 0) <= 2 * 3600;
-  return `<span class="dot ${knapp ? "warn" : "on"}"></span>vor ${alter}`;
+// --- Autonomous HA-owned mobile.de session --------------------------------
+function mobileRuntimeText(m) {
+  if ((m?.blocked_until || 0) > Date.now() / 1000) {
+    return `<span class="dot warn"></span>Schutzpause`;
+  }
+  if (m?.status === "error") return `<span class="dot warn"></span>Abruf prüfen`;
+  return `<span class="dot ${m?.last_success ? "on" : "idle"}"></span>automatisch`;
 }
 
-function alterKurz(sekunden) {
-  const min = Math.round((sekunden || 0) / 60);
-  if (min < 90) return `${min} min`;
-  const std = Math.round(min / 60);
-  return std < 48 ? `${std} h` : `${Math.round(std / 24)} Tagen`;
-}
-
-function cookieStatusHinweis(c, status) {
-  if (!c || !c.has_cookies) {
-    return "Noch kein Cookie empfangen. Die Browser-Erweiterung überträgt es, "
-         + "sobald mobile.de im Browser geöffnet war.";
+function mobileRuntimeHint(m, status) {
+  let text = "Eigene Browsersitzung im HA-Add-on; kein laufender PC und kein Cookie-Import erforderlich. ";
+  if ((m?.blocked_until || 0) > Date.now() / 1000) {
+    text += "Alle mobile.de-Abrufe pausiert bis " + new Date(m.blocked_until * 1000).toLocaleString("de-DE") + ". ";
   }
-  const grenze = Math.round((c.max_age_seconds || 0) / 3600);
-  let text = `${c.count} Cookies, empfangen vor ${alterKurz(c.age_seconds)}`
-           + `${c.has_abck ? ", mit _abck" : ", ohne _abck"}. `
-           + `Nach ${grenze} h gelten sie als veraltet – das ist eine eigene `
-           + `Vorsichtsregel, keine Vorgabe von mobile.de.`;
-  const mobil = (status?.portal_health || []).find((p) => p.portal === "mobile.de");
-  if (mobil) {
-    text += mobil.last_success
-      ? ` Zuletzt geliefert hat mobile.de vor ${alterKurz(Date.now() / 1000 - mobil.last_success)}.`
-      : " mobile.de hat damit noch nichts geliefert.";
-  }
-  if (!c.is_fresh) {
-    text += " Für neue Treffer mobile.de im Browser öffnen, dann überträgt die "
-          + "Erweiterung ein frisches.";
-  }
+  if (m?.last_error) text += m.last_error + ". ";
+  const runs = (status?.portal_health || []).filter(p => p.portal === "mobile.de");
+  text += runs.map(p => `${p.search_name}: ${p.kept_count}/${p.raw_count} passend/Roh${p.error ? " – " + p.error : ""}`).join(" | ");
   return text;
 }

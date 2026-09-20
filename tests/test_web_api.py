@@ -8,6 +8,7 @@ def client(tmp_path, monkeypatch):
     # Temporäre DB für die Tests verwenden
     test_db = tmp_path / "test_seen.db"
     monkeypatch.setenv("KFZ_DB_PATH", str(test_db))
+    monkeypatch.setattr('kfz_crawler.cookie_storage.COOKIE_FILE', tmp_path / 'test_cookies.json')
     with TestClient(app) as c:
         # Die Oberfläche läuft über den Home-Assistant-Ingress; dieser Header
         # kennzeichnet den Weg. Direktzugriffe ohne ihn brauchen ein Token.
@@ -37,6 +38,8 @@ def test_api_status(client):
     assert "version" in status
     assert "running" in status
     assert "searches" in status
+    assert status['mobile_runtime']['mode'] == 'autonomous'
+    assert status['mobile_runtime']['desktop_required'] is False
 
 
 def test_api_searches_lifecycle(client):
@@ -120,8 +123,8 @@ def test_mobile_cookie_endpoint_requires_token_and_abck(client):
     assert r_ok.json()["saved_count"] >= 2
 
 
-def test_fresh_cookies_release_the_mobile_cooldown(client):
-    """Eine neue Sitzung hebt die Schutzpause auf – sonst wartet der Lauf Stunden."""
+def test_legacy_cookies_do_not_release_the_mobile_cooldown(client):
+    """Legacy imports must not reset the autonomous portal-wide circuit breaker."""
     store = client.app.state.store
     token = store.ingest_token()
 
@@ -129,12 +132,16 @@ def test_fresh_cookies_release_the_mobile_cooldown(client):
     store.record_portal_run("EV", "mobile.de", "blocked", error="HTTP 403")
     store.record_portal_run("EV", "mobile.de", "blocked", error="HTTP 403")
     assert store.portal_cooldown_remaining("EV", "mobile.de") > 0
+    from kfz_crawler.mobile_runtime import RequestControl, MobileDeferred
+    RequestControl(store).blocked()
 
     antwort = client.post("/api/mobile-cookies",
                           json={"cookies": "sitzung=1; _abck=frischundgueltig"},
                           headers={"X-KFZ-Token": token})
     assert antwort.status_code == 200
-    assert antwort.json()["cooldown_geloest"] >= 1
+    assert antwort.json()["cooldown_geloest"] == 0
 
-    # Der nächste Lauf darf mobile.de sofort wieder versuchen.
-    assert store.portal_cooldown_remaining("EV", "mobile.de") == 0
+    assert store.portal_cooldown_remaining("EV", "mobile.de") > 0
+    import pytest
+    with pytest.raises(MobileDeferred):
+        RequestControl(store).reserve('search')
