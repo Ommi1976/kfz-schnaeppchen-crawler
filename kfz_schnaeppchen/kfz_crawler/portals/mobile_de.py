@@ -108,6 +108,11 @@ class MobileDe(BasePortal):
     def search(self, query: SearchQuery) -> List[Listing]:
         return self._crawl_pages(query, self._fetch)
 
+    def _publish_progress(self):
+        progress = getattr(self, "progress", None)
+        if progress is not None:
+            progress.coverage(self.coverage)
+
     def _crawl_pages(self, query: SearchQuery, fetcher) -> List[Listing]:
         from ..mobile_runtime import load_state, search_page_info, MobileDeferred
         from ..browser import BrowserBlocked
@@ -135,7 +140,10 @@ class MobileDe(BasePortal):
             start_page = int(state.get("page", 1))
             active = set(state.get("active", []))
         self.coverage = {"mode": "delta" if delta else "full", "pages": 0,
-                         "complete": False, "reason": "budget", "unique_seen": len(active)}
+                         "complete": False, "reason": "budget", "unique_seen": len(active),
+                         "run_unique_seen": 0, "provider_reported_counts": []}
+        reports = {}
+        self._publish_progress()
         budget = int(getattr(self, "page_budget", 0) or self.PAGE_BUDGET)
         max_limit = max(1, min(budget, self.FULL_CRAWL_MAX_PAGES))
         used = 0
@@ -152,12 +160,14 @@ class MobileDe(BasePortal):
             variant_pages = 0
             while used < max_limit and (not delta or variant_pages < self.DELTA_PAGES):
                 self.coverage.update(variant=variant_index + 1, next_page=page)
+                self._publish_progress()
                 if not delta:
                     checkpoint(variant_index, page)
                 try:
                     html = fetcher(self._build_url(variants[variant_index], page))
                 except Exception as exc:
                     self.coverage["reason"] = "blocked" if isinstance(exc, BrowserBlocked) else "deferred" if isinstance(exc, MobileDeferred) else "error"
+                    self._publish_progress()
                     if results:
                         raise PortalPartialError(f"mobile.de: Teilabruf, Seite {page}: {exc}", results, page) from exc
                     if isinstance(exc, MobileDeferred):
@@ -166,14 +176,29 @@ class MobileDe(BasePortal):
                 used += 1
                 variant_pages += 1
                 self.coverage["pages"] = used
+                self._publish_progress()  # A fetched page counts even if its parser fails.
                 cards = self._parse_cards(html)
                 info = search_page_info(html)
+                variant = variants[variant_index]
+                variant_id = hashlib.sha256(json.dumps(variant.to_dict(), sort_keys=True).encode()).hexdigest()[:24]
+                if info["total"] is not None:
+                    reports[variant_id] = {
+                        "variant_id": variant_id, "variant": variant_index + 1,
+                        "battery_from_kwh": variant.battery_from_kwh,
+                        "price_from": variant.price_from, "price_to": variant.price_to,
+                        "reported_total": info["total"], "page": page,
+                        "refreshed_at": time.time(),
+                    }
+                    self.coverage["provider_reported_counts"] = list(reports.values())
+                self._publish_progress()
                 ids = {l.raw_id or l.fingerprint for l in cards}
                 if not cards and not info["empty"]:
                     self.coverage["reason"] = "unverified_empty"
+                    self._publish_progress()
                     raise PortalPartialError("mobile.de: Leere Seite nicht als Suchende bestätigt", results, page)
                 if ids and ids == previous_ids:
                     self.coverage["reason"] = "repeated_page"
+                    self._publish_progress()
                     raise PortalPartialError("mobile.de: Seitenwechsel lieferte dieselben Inserate", results, page)
                 previous_ids = ids
                 for listing in cards:
@@ -182,14 +207,16 @@ class MobileDe(BasePortal):
                     if identity not in seen_ids:
                         seen_ids.add(identity)
                         results.append(listing)
-                self.coverage.update(unique_seen=len(active), reported_total=info["total"])
+                self.coverage.update(unique_seen=len(active), run_unique_seen=len(seen_ids),
+                                     reported_total=info["total"])
+                self._publish_progress()
                 if info["ids"] - ids:
                     self.coverage["reason"] = "parser_incomplete"
+                    self._publish_progress()
                     raise PortalPartialError("mobile.de: Nicht alle Inseratkarten erkannt", results, page)
                 # Public result navigation is capped. Narrow large result sets
                 # into disjoint price intervals, under the SAME request budget.
                 # Never increase traffic or change identity to get past a block.
-                variant = variants[variant_index]
                 if not delta and page == 1 and (info["total"] or 0) > 900:
                     low, high = variant.price_from or 0, variant.price_to
                     if high is not None and high > low and len(variants) < 64:
@@ -204,6 +231,7 @@ class MobileDe(BasePortal):
                     # mobile can cap the UI at 50 pages. That is not completeness.
                     if info["total"] and page >= 50 and info["total"] > page * max(1, len(ids)):
                         self.coverage["reason"] = "provider_limit"
+                        self._publish_progress()
                         return results
                     if not delta:
                         checkpoint(variant_index + 1, 1)
@@ -228,6 +256,7 @@ class MobileDe(BasePortal):
             self.pending_checkpoint = {"completed_at": now, "variant": 0, "page": 1}
         else:
             self.coverage["reason"] = "delta"
+        self._publish_progress()
         return results
 
     def enrich(self, listings, query, force=False):

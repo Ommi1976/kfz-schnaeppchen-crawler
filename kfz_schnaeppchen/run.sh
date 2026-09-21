@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
+umask 077
 
 export TZ="Europe/Berlin"
 export PYTHONUNBUFFERED=1
@@ -25,4 +26,4 @@ fi
 echo "[KFZ Schnäppchen] Starte Weboberfläche + Crawler auf Port 8099..."
 cd /app
 exec python3 -m uvicorn kfz_crawler.web:app --host 0.0.0.0 --port 8099 \
-    --proxy-headers --forwarded-allow-ips="*"
+    --no-proxy-headers --no-access-log

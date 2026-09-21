@@ -165,7 +165,84 @@ async function loadStatus() {
   sel.value = cur;
 
   renderSearches(s.searches || []);
+  renderCrawlProgress(s.crawl_progress);
   document.getElementById("run").disabled = running;
+}
+
+// Search coverage is independent of account/session readiness.
+function renderCrawlProgress(rows) {
+  let section = document.getElementById("crawl-progress");
+  if (!section) {
+    const anchor = document.getElementById("search-list")?.closest("section")
+      || document.getElementById("stats");
+    if (!anchor) return;
+    section = document.createElement("section");
+    section.id = "crawl-progress";
+    section.className = "block";
+    section.setAttribute("aria-label", "Suchfortschritt und Vollständigkeit");
+    anchor.insertAdjacentElement("afterend", section);
+  }
+  const head = '<div class="block-head"><h2>Suchfortschritt</h2></div>';
+  if (!Array.isArray(rows) || !rows.length) {
+    section.innerHTML = head + '<div class="empty">'
+      + (Array.isArray(rows) ? "Noch kein gespeicherter Suchlauf." : "Suchfortschritt noch nicht verfügbar.")
+      + '</div>';
+    return;
+  }
+  const phases = {
+    starting: "Startet", crawling: "Seitenabruf", filtering: "Lokale Filter",
+    enriching: "Detailprüfung", persisting: "Speichern", finished: "Abruf gespeichert",
+    deferred: "Zurückgestellt", blocked: "Blockiert", error: "Fehler",
+  };
+  const completeness = {
+    full: "Suchende erreicht", delta: "Neue Angebote geprüft",
+    partial: "Teilstand", blocked: "Blockiert",
+  };
+  const reasons = {
+    coverage_unverified: "Suchende nicht bestätigt", budget: "Seitenbudget erreicht",
+    deferred: "Abruf zurückgestellt", blocked: "Zugriff blockiert", error: "Abruffehler",
+    run_error: "Verarbeitung oder Speicherung fehlgeschlagen", end: "Suchende bestätigt",
+    delta: "Nur aktuelle Seiten geprüft", unverified_empty: "Leere Seite nicht bestätigt",
+    repeated_page: "Seite wiederholt", parser_incomplete: "Nicht alle Karten erkannt",
+    provider_limit: "Seitengrenze des Anbieters erreicht",
+  };
+  const esc = value => escapeHtml(String(value ?? ""));
+  const count = value => Number.isFinite(value) && value >= 0
+    ? new Intl.NumberFormat("de-DE").format(value) : "unbekannt";
+  const timestamp = value => Number.isFinite(value) && value > 0
+    ? new Date(value * 1000).toLocaleString("de-DE") : "unbekannt";
+  section.innerHTML = head
+    + '<p style="padding:0 16px;font-size:12px">Letzter gespeicherter Stand je Suche und Portal. '
+    + 'Seiten und Zähler beziehen sich auf diesen Abruf. Anbieterzahlen gelten je Suchvariante und können sich überschneiden; '
+    + 'sie werden nicht addiert. Lokale Filter und Dubletten verringern die Trefferzahl. '
+    + 'Die Prüfung neuer Angebote ersetzt keinen vollständigen Abgleich.</p>'
+    + '<div class="tablewrap"><table><thead><tr>'
+    + '<th>Portal / Suche</th><th>Phase / Vollständigkeit</th><th>Seiten</th>'
+    + '<th>Anbieter gemeldet</th><th>Eindeutig beobachtet</th><th>Behalten / gefiltert</th>'
+    + '<th>Stand</th></tr></thead><tbody>'
+    + rows.filter(row => row && typeof row === "object").map(row => {
+      const reports = Array.isArray(row.provider_reported_counts) ? row.provider_reported_counts : [];
+      const provider = reports.length ? reports.map(report => {
+        const scope = `Variante ${report.variant ?? "?"} · Akku ${report.battery_from_kwh == null ? "ohne Mindestwert" : `ab ${report.battery_from_kwh} kWh`}`
+          + ` · Preis ${report.price_from ?? "offen"}–${report.price_to ?? "offen"} €`;
+        return `${esc(scope)}: ${esc(count(report.reported_total))}`;
+      }).join("<br>") : "unbekannt";
+      const reason = row.error || reasons[row.reason] || row.reason || "";
+      const sweep = Number.isFinite(row.sweep_observed_unique) && row.sweep_observed_unique !== row.observed_unique
+        ? `<br><small>${esc(count(row.sweep_observed_unique))} im fortgesetzten Durchlauf</small>` : "";
+      const persisted = row.persisted
+        ? `${count(row.persisted_count)} nach Dublettenabgleich gespeichert`
+        : "Speicherung dieses Abrufs nicht bestätigt";
+      return `<tr><td>${esc(row.portal)}<br><small>${esc(row.search_name)}</small></td>`
+        + `<td>${esc(phases[row.phase] || row.phase)}<br>${esc(completeness[row.completeness] || completeness.partial)}`
+        + `<br><small>${esc(reason)}</small></td><td>${esc(count(row.pages))}</td>`
+        + `<td>${provider}</td><td>${esc(count(row.observed_unique))}${sweep}</td>`
+        + `<td>${esc(count(row.kept))} behalten · ${esc(count(row.filtered_count))} gefiltert`
+        + `<br><small>${esc(persisted)}</small></td>`
+        + `<td>${esc(timestamp(row.refreshed_at))}`
+        + (row.last_full_at ? `<br><small>Letzter Vollabgleich: ${esc(timestamp(row.last_full_at))}</small>` : "")
+        + '</td></tr>';
+    }).join("") + '</tbody></table></div>';
 }
 
 // ---------- Suchen ----------
@@ -731,7 +808,9 @@ function mobileRuntimeText(m) {
     return `<span class="dot warn"></span>Schutzpause`;
   }
   if (m?.status === "error") return `<span class="dot warn"></span>Abruf prüfen`;
-  return `<span class="dot ${m?.last_success ? "on" : "idle"}"></span>automatisch`;
+  return m?.last_success
+    ? `<span class="dot on"></span>Abruf bestätigt`
+    : `<span class="dot idle"></span>Noch ungeprüft`;
 }
 
 function mobileRuntimeHint(m, status) {

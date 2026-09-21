@@ -206,13 +206,23 @@ class RequestControl:
 
 
 class MobileBrowser:
-    def __init__(self):
+    def __init__(self, profile_dir=None):
         self._executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="mobile-browser")
         self._playwright = self._context = self._page = None
         self._proxy = None
         self._control = RequestControl()
         self._lock = threading.Lock()
         self._closed = False
+        self._profile_dir = Path(profile_dir) if profile_dir else PROFILE_DIR
+        self._account_session = None
+
+    def _defer_during_login(self):
+        session = self._account_session
+        if session and session["expires_at"] > time.time():
+            raise MobileDeferred("Anmeldung im Add-on geöffnet; Suche wird anschließend fortgesetzt")
+        if session:
+            self._close()
+        self._account_session = None
 
     def fetch(self, url: str, *, store=None, proxy=None, kind="search") -> str:
         if not is_mobile_url(url):
@@ -228,6 +238,7 @@ class MobileBrowser:
         return self._executor.submit(self._fetch_image, url, store, proxy).result()
 
     def _fetch_image(self, url, store, proxy):
+        self._defer_during_login()
         if store is not None:
             self._control = RequestControl(store)
         control = self._control
@@ -261,13 +272,17 @@ class MobileBrowser:
         try:
             from playwright.sync_api import sync_playwright
             self._playwright = sync_playwright().start()
-            Path(PROFILE_DIR).mkdir(parents=True, exist_ok=True)
+            self._profile_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
+            if os.name != "nt":
+                self._profile_dir.chmod(0o700)
             kwargs = dict(headless=not bool(os.environ.get("DISPLAY")),
                           locale="de-DE", timezone_id="Europe/Berlin",
-                          viewport={"width": 1440, "height": 900})
+                          viewport={"width": 1440, "height": 900},
+                          accept_downloads=False,
+                          firefox_user_prefs={"signon.rememberSignons": False})
             if proxy:
                 kwargs["proxy"] = {"server": proxy}
-            self._context = self._playwright.firefox.launch_persistent_context(str(PROFILE_DIR), **kwargs)
+            self._context = self._playwright.firefox.launch_persistent_context(str(self._profile_dir), **kwargs)
             self._page = self._context.pages[0] if self._context.pages else self._context.new_page()
             self._proxy = proxy
         except Exception as exc:
@@ -276,6 +291,7 @@ class MobileBrowser:
 
     def _fetch(self, url, store, proxy, kind):
         # Only this worker accesses the gate and browser; no check/submit races.
+        self._defer_during_login()
         if store is not None:
             self._control = RequestControl(store)
         control = self._control

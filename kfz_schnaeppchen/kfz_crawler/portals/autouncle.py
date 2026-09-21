@@ -132,29 +132,17 @@ class AutoUncle(BasePortal):
         return variants
 
     def search(self, query: SearchQuery) -> List[Listing]:
-        # Eine konsistente Firefox-Session ist robuster als pro Seite ein neuer
-        # Browser. Das Profil bleibt lokal unter /data und enthält keine von
-        # uns abgefragten Zugangsdaten; eine bestehende AutoUncle-Anmeldung kann
-        # nur durch eine explizit auf dem HA-Host eingerichtete Session genutzt
-        # werden.
+        # Login view and crawler share the same serialized HA-owned profile.
         if self._use_browser:
             try:
-                from ..browser import rendered_session
-                profile = os.environ.get("AUTO_UNCLE_PROFILE")
-                if not profile:
-                    profile = (
-                        "/data/autouncle_profile"
-                        if Path("/data").exists()
-                        else str(Path(__file__).parent.parent / "autouncle_profile")
-                    )
-                with rendered_session(
-                    proxy=self.proxy,
-                    engine="firefox",
-                    request_delay_range=(3.5, 6.5),
-                    warmup_url=f"{self.BASE}/",
-                    profile_dir=profile,
-                ) as fetch:
-                    return self._search_variants(query, fetch)
+                from ..portal_accounts import portal_browser
+                from ..mobile_runtime import MobileDeferred
+                def fetch(url, **kwargs):
+                    return portal_browser("autouncle").fetch(
+                        url, store=getattr(self, "store", None), proxy=self.proxy, **kwargs)
+                return self._search_variants(query, fetch)
+            except MobileDeferred:
+                raise
             except PortalPartialError:
                 raise
             except Exception as exc:
@@ -165,6 +153,7 @@ class AutoUncle(BasePortal):
     def _search_variants(self, query: SearchQuery, fetcher) -> List[Listing]:
         results: List[Listing] = []
         seen_ids = set()
+        self.coverage = {"pages": 0, "mode": "full", "reason": "coverage_unverified"}
         # Das Seitenbudget gilt für die Suche als Ganzes: Fallback-Varianten
         # bekommen nur, was die vorherigen übrig gelassen haben.
         budget = int(getattr(self, "page_budget", 0) or self.PAGE_BUDGET)
@@ -220,6 +209,10 @@ class AutoUncle(BasePortal):
                         failed_page=page,
                     ) from exc
                 raise
+            self.coverage = getattr(self, "coverage", {})
+            self.coverage["pages"] = self.coverage.get("pages", 0) + 1
+            if getattr(self, "progress", None):
+                self.progress.coverage(self.coverage)
             items = self._parse(html)
             if not items:
                 break

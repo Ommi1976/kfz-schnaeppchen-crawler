@@ -9,7 +9,7 @@ def client(tmp_path, monkeypatch):
     test_db = tmp_path / "test_seen.db"
     monkeypatch.setenv("KFZ_DB_PATH", str(test_db))
     monkeypatch.setattr('kfz_crawler.cookie_storage.COOKIE_FILE', tmp_path / 'test_cookies.json')
-    with TestClient(app) as c:
+    with TestClient(app, client=("172.30.32.2", 12345)) as c:
         # Die Oberfläche läuft über den Home-Assistant-Ingress; dieser Header
         # kennzeichnet den Weg. Direktzugriffe ohne ihn brauchen ein Token.
         c.headers.update({"X-Ingress-Path": "/api/hassio_ingress/test"})

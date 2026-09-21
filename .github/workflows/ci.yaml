@@ -19,6 +19,10 @@ jobs:
         run: pip install -r kfz_schnaeppchen/requirements.txt
       - name: Kompilieren
         run: python -m compileall -q kfz_schnaeppchen/kfz_crawler
+      - name: Regressionstests
+        run: |
+          pip install pytest==8.4.2 httpx==0.28.1
+          python -m pytest -q
       - name: Import-Test
         working-directory: kfz_schnaeppchen
         run: python -c "import kfz_crawler.main, kfz_crawler.ha_run; from kfz_crawler.portals import REGISTRY; print(list(REGISTRY))"

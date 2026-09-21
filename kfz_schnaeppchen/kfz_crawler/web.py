@@ -258,10 +258,24 @@ async def lifespan(app: FastAPI):
         _reevaluate_beim_start(app)
     )
     app.state.scheduler = asyncio.create_task(_scheduler(app))
+    async def session_cleanup():
+        from .portal_accounts import reap_expired_sessions
+        while True:
+            await asyncio.sleep(30)
+            try:
+                await asyncio.to_thread(reap_expired_sessions)
+            except Exception:
+                logger.warning("Abgelaufene Portalansicht konnte nicht geschlossen werden")
+    app.state.session_cleanup = asyncio.create_task(session_cleanup())
     try:
         yield
     finally:
         app.state.closing = True
+        app.state.session_cleanup.cancel()
+        try:
+            await app.state.session_cleanup
+        except asyncio.CancelledError:
+            pass
         # Never cancel a task in the middle of to_thread: its SQLite writes
         # continue even after cancellation. A running scheduler exits below.
         if not app.state.running:
@@ -282,6 +296,8 @@ async def lifespan(app: FastAPI):
                     pass
         from .mobile_runtime import close_mobile_browser
         await asyncio.to_thread(close_mobile_browser)
+        from .portal_accounts import close_account_browsers
+        await asyncio.to_thread(close_account_browsers)
         app.state.store.close()
 
 
@@ -295,6 +311,8 @@ class NoCacheStaticFiles(StaticFiles):
 
 
 app = FastAPI(title="KFZ Schnäppchen Crawler", version=__version__, lifespan=lifespan)
+from .accounts_api import router as accounts_router, trusted_ingress
+app.include_router(accounts_router)
 
 if WEB_DIR.exists():
     app.mount("/static", NoCacheStaticFiles(directory=WEB_DIR), name="static")
@@ -310,7 +328,7 @@ _GESCHUETZTE_METHODEN = {"POST", "PUT", "PATCH", "DELETE"}
 
 @app.middleware("http")
 async def token_bei_direktzugriff(request: Request, call_next):
-    if request.method in _GESCHUETZTE_METHODEN and not request.headers.get("X-Ingress-Path"):
+    if request.method in _GESCHUETZTE_METHODEN and not trusted_ingress(request):
         try:
             erwartet = app.state.store.ingest_token()
         except Exception:
@@ -345,6 +363,7 @@ async def meta():
 @app.get("/api/status")
 async def status():
     from .mobile_runtime import mobile_status
+    from .crawl_progress import progress_status
     cfg: Config = app.state.cfg
     per = app.state.last_report.get("per_search", {})
     searches = []
@@ -367,6 +386,7 @@ async def status():
         "searches": searches,
         "last_report": app.state.last_report,
         "mobile_runtime": mobile_status(app.state.store),
+        "crawl_progress": progress_status(app.state.store),
         # Legacy metadata only; the autonomous worker owns its own session.
         "mobile_cookies": _mobile_cookie_status(),
     }

@@ -1,108 +1,73 @@
 <#
 .SYNOPSIS
-    Überträgt das lokale KFZ-Schnäppchen-Add-on nach Home Assistant OS.
-
+    Deployt den committeten Release direkt als lokale HAOS-App.
 .DESCRIPTION
-    Kopiert den geprüften Build-Kontext nach /addons/kfz_schnaeppchen und
-    aktualisiert anschließend den lokalen Supervisor-App-Eintrag. GitHub wird
-    dabei weder als Quelle noch als Transportweg verwendet.
+    Version und Quellstand bleiben unverändert. Keine Browserprofile im Paket.
+    Synchronisiert /addons und den tatsächlichen Supervisor-Buildkontext.
+    Vorheriger Quellstand und Transportarchiv bleiben unter /tmp erhalten.
 #>
 param(
     [string]$HomeAssistantHost = "192.168.178.77",
     [string]$SshUser = "homeassistant",
     [string]$KeyPath = "$env:USERPROFILE\.ssh\id_ed25519_lumi"
 )
-
 $ErrorActionPreference = "Stop"
-
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
-$source = (Resolve-Path (Join-Path $repoRoot "kfz_schnaeppchen")).Path
-$configPath = Join-Path $source "config.yaml"
-$configContent = [System.IO.File]::ReadAllText($configPath, [System.Text.Encoding]::UTF8)
-
-if ($configContent -match 'version:\s*"(\d+)\.(\d+)\.(\d+)"') {
-    $major = $matches[1]
-    $minor = $matches[2]
-    $patch = [int]$matches[3] + 1
-    $version = "$major.$minor.$patch"
-    
-    # 1. config.yaml aktualisieren
-    $configContent = $configContent -replace 'version:\s*"\d+\.\d+\.\d+"', "version: `"$version`""
-    [System.IO.File]::WriteAllText($configPath, $configContent, [System.Text.Encoding]::UTF8)
-    
-    # 2. kfz_crawler/__init__.py aktualisieren
-    $initPyPath = Join-Path $source "kfz_crawler/__init__.py"
-    if (Test-Path -LiteralPath $initPyPath) {
-        $initContent = [System.IO.File]::ReadAllText($initPyPath, [System.Text.Encoding]::UTF8)
-        $initContent = $initContent -replace '__version__\s*=\s*"\d+\.\d+\.\d+"', "__version__ = `"$version`""
-        [System.IO.File]::WriteAllText($initPyPath, $initContent, [System.Text.Encoding]::UTF8)
-    }
-
-    # 3. index.html Cache-Buster aktualisieren
-    $indexPath = Join-Path $source "kfz_crawler/web/index.html"
-    if (Test-Path -LiteralPath $indexPath) {
-        $indexContent = [System.IO.File]::ReadAllText($indexPath, [System.Text.Encoding]::UTF8)
-        $indexContent = $indexContent -replace '\?v=\d+\.\d+\.\d+', "?v=$version"
-        [System.IO.File]::WriteAllText($indexPath, $indexContent, [System.Text.Encoding]::UTF8)
-    }
-    
-    Write-Host "Inkrementiere Version auf: $version" -ForegroundColor Cyan
-} else {
-    throw "Version im Format 'X.Y.Z' in config.yaml nicht gefunden."
-}
-
-if (-not (Test-Path -LiteralPath $KeyPath -PathType Leaf)) {
-    throw "SSH-Key nicht gefunden: $KeyPath"
-}
-
-$target = "/addons/kfz_schnaeppchen"
+$configContent = Get-Content -Raw -LiteralPath (Join-Path $repoRoot "kfz_schnaeppchen/config.yaml")
+if ($configContent -notmatch 'version:\s*"(\d+\.\d+\.\d+)"') { throw "Ungültige Release-Version" }
+$version = $matches[1]
+$pending = & git -C $repoRoot status --porcelain -- kfz_schnaeppchen
+if ($LASTEXITCODE -ne 0 -or $pending) { throw "Add-on-Änderungen vor Deployment committen." }
+if (-not (Test-Path -LiteralPath $KeyPath -PathType Leaf)) { throw "SSH-Schlüssel fehlt" }
+$tarball = Join-Path ([IO.Path]::GetTempPath()) "kfz-release-$version.tar"
+& git -C $repoRoot archive --format=tar -o $tarball HEAD kfz_schnaeppchen
+if ($LASTEXITCODE -ne 0) { throw "Release-Archiv fehlgeschlagen" }
 $remote = "$SshUser@$HomeAssistantHost"
-$sshArgs = @(
-    "-i", $KeyPath, "-o", "BatchMode=yes", "-o", "ConnectTimeout=8",
-    "-o", "MACs=hmac-sha2-256", "-c", "aes256-gcm@openssh.com", $remote
-)
+$connection = @("-i", $KeyPath, "-o", "BatchMode=yes", "-o", "ConnectTimeout=8",
+    "-o", "MACs=hmac-sha2-256", "-c", "aes256-gcm@openssh.com")
+& scp -O @connection $tarball ("{0}:/tmp/kfz-release-{1}.tar" -f $remote, $version)
+if ($LASTEXITCODE -ne 0) { throw "Übertragung fehlgeschlagen" }
 
-# Windows PowerShell kann Binärdaten in einer Pipeline als Text umkodieren.
-# Deshalb zuerst ein lokales TAR, danach klassische SCP-Übertragung (-O).
-$tarball = Join-Path ([System.IO.Path]::GetTempPath()) "kfz_schnaeppchen_$version.tar"
-$remoteTarball = "/tmp/kfz_schnaeppchen_$version.tar"
-try {
-    & tar --exclude="__pycache__" --exclude="*.pyc" --exclude=".git" -cf $tarball -C $source .
-    if ($LASTEXITCODE -ne 0) { throw "Lokales TAR-Archiv konnte nicht erstellt werden." }
-
-    $scpArgs = @(
-        "-O", "-i", $KeyPath, "-o", "BatchMode=yes", "-o", "ConnectTimeout=8",
-        "-o", "MACs=hmac-sha2-256", "-c", "aes256-gcm@openssh.com",
-        $tarball, "${remote}:$remoteTarball"
-    )
-    & scp @scpArgs
-    if ($LASTEXITCODE -ne 0) { throw "Übertragung nach Home Assistant fehlgeschlagen." }
-
-    & ssh @sshArgs "sudo test -d $target && sudo test -f $target/config.yaml"
-    if ($LASTEXITCODE -ne 0) { throw "Remote-Ziel ist nicht vorhanden oder ungültig: $target" }
-
-    & ssh @sshArgs "sudo tar -xf $remoteTarball -C $target; sudo rm -f $remoteTarball; sudo grep '^version:' $target/config.yaml"
-    if ($LASTEXITCODE -ne 0) { throw "Remote-Archiv konnte nicht entpackt/verifiziert werden." }
-}
-finally {
-    if (Test-Path -LiteralPath $tarball) { Remove-Item -LiteralPath $tarball -Force }
-}
-
-$supervisorCommand = @'
-set -e
-T=$(sudo docker exec app_a0d7b954_ssh cat /run/s6/container_environment/SUPERVISOR_TOKEN)
-sudo docker exec app_a0d7b954_ssh curl -s -X POST -H "Authorization: Bearer $T" http://supervisor/store/reload >/dev/null 2>&1 || true
-sleep 2
-sudo docker exec app_a0d7b954_ssh curl -s -X POST -H "Authorization: Bearer $T" http://supervisor/addons/local_kfz_schnaeppchen/update >/dev/null 2>&1 || sudo docker exec app_a0d7b954_ssh curl -s -X POST -H "Authorization: Bearer $T" http://supervisor/addons/local_kfz_schnaeppchen/rebuild
-echo "DEPLOYMENT_DONE"
+$remoteScript = @'
+set -eu
+test -d /addons/kfz_schnaeppchen
+docker exec hassio_supervisor test -d /data/apps/local/kfz_schnaeppchen
+tar -cf /tmp/kfz-before-__VERSION__.tar -C /addons kfz_schnaeppchen
+docker exec hassio_supervisor tar -cf /tmp/kfz-before-__VERSION__.tar -C /data/apps/local kfz_schnaeppchen
+tar -xf /tmp/kfz-release-__VERSION__.tar -C /addons
+docker cp /tmp/kfz-release-__VERSION__.tar hassio_supervisor:/tmp/kfz-release-__VERSION__.tar
+docker exec hassio_supervisor tar -xf /tmp/kfz-release-__VERSION__.tar -C /data/apps/local
+docker exec -i hassio_supervisor python3 - <<'PY'
+import json, urllib.request
+token = json.load(open('/data/cli.json'))['access_token']
+def call(path, method='GET'):
+    request = urllib.request.Request('http://supervisor'+path, method=method,
+        headers={'Authorization':'Bearer '+token})
+    with urllib.request.urlopen(request, timeout=600) as response:
+        data=json.load(response)
+    if data.get('result') != 'ok':
+        raise RuntimeError('Supervisor-Aktion fehlgeschlagen: '+path)
+    return data.get('data', {})
+call('/store/reload','POST')
+print('Lokaler Store neu geladen; Build startet.', flush=True)
+call('/addons/local_kfz_schnaeppchen/rebuild','POST')
+info=call('/addons/local_kfz_schnaeppchen/info')
+if info.get('state') != 'started':
+    call('/addons/local_kfz_schnaeppchen/start','POST')
+print('Build und Start abgeschlossen.', flush=True)
+PY
+for n in $(seq 1 30); do
+  if curl -fsS --max-time 5 http://127.0.0.1:8099/api/status | python3 -c 'import sys,json; d=json.load(sys.stdin); assert d["version"]=="__VERSION__"; print("Live-Version:",d["version"])'; then
+    docker ps --filter name=app_local_kfz_schnaeppchen --format '{{.Names}} {{.Image}} {{.Status}}'
+    exit 0
+  fi
+  sleep 2
+done
+echo 'Live-Versionsprüfung fehlgeschlagen' >&2
+exit 1
 '@
-
-# Nicht ueber stdin: Windows PowerShell haengt beim Pipen an ein natives
-# Programm eine BOM an, die vor "set -e" landete und bash abbrechen liess.
-# Als Base64-Argument geht der Text unveraendert durch.
-$befehlBytes = [System.Text.Encoding]::UTF8.GetBytes($supervisorCommand.Replace("`r`n", "`n"))
-$befehlB64 = [Convert]::ToBase64String($befehlBytes)
-& ssh @sshArgs "echo $befehlB64 | base64 -d | sudo bash"
-if ($LASTEXITCODE -ne 0) { throw "Supervisor Deployment fehlgeschlagen." }
-
-Write-Host "KFZ Schnäppchen $version wurde lokal nach $target übertragen und aktualisiert."
+$remoteScript = $remoteScript.Replace("__VERSION__", $version)
+$encoded = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($remoteScript.Replace([string][char]13, "")))
+& ssh @connection $remote "echo $encoded | base64 -d | sudo bash"
+if ($LASTEXITCODE -ne 0) { throw "Deployment oder Live-Prüfung fehlgeschlagen" }
+Write-Host "KFZ Schnäppchen $version läuft aus dem lokalen HAOS-Build."

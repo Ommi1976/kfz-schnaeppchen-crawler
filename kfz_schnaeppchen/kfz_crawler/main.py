@@ -13,6 +13,7 @@ from typing import Dict, List, Set
 from rich.console import Console
 
 from .config import Config
+from .crawl_progress import CrawlProgress
 from .dealfinder import dedupe, find_deals
 from .models import (
     Listing,
@@ -40,42 +41,85 @@ class PortalSearchResult:
     status: str = "ok"
     error: str = ""
     exclusions: Dict[str, int] = field(default_factory=dict)
-    complete: bool = True
+    complete: bool = False
     active_fingerprints: Set[str] | None = None
     coverage: dict = field(default_factory=dict)
     checkpoint_key: str = ""
     checkpoint: dict | None = None
+    observed_unique: int | None = None
+    filtered_count: int | None = None
 
 
-def _search_one_portal(cfg: Config, key: str, query: SearchQuery, store=None) -> PortalSearchResult:
+def _crawl_with_progress(portal, query, progress):
+    """Count legacy search fetches and retain even internally swallowed errors.
+
+    Browser workers bypassing _get retain unknown pages unless they publish their
+    own coverage. The wrapper is removed before any detail enrichment runs.
+    """
+    if portal.name == "mobile.de" or not hasattr(portal, "_get"):
+        return portal.search(query)
+    from .browser import BrowserBlocked
+    from .mobile_runtime import MobileDeferred
+    original_get = portal._get
+    portal.coverage = getattr(portal, "coverage", {})
+
+    def tracked_get(*args, **kwargs):
+        portal.coverage.setdefault("pages", 0)
+        progress.coverage(portal.coverage)
+        try:
+            response = original_get(*args, **kwargs)
+        except Exception as exc:
+            reason = "deferred" if isinstance(exc, MobileDeferred) else "blocked" if isinstance(exc, BrowserBlocked) else "error"
+            portal.coverage.update(reason=reason, fetch_error=str(exc))
+            progress.coverage(portal.coverage)
+            raise
+        portal.coverage["pages"] += 1
+        progress.coverage(portal.coverage)
+        return response
+
+    portal._get = tracked_get
+    try:
+        return portal.search(query)
+    finally:
+        portal._get = original_get
+
+
+def _search_one_portal(cfg: Config, key: str, query: SearchQuery, store=None, progress=None) -> PortalSearchResult:
     """Ein Portal abfragen (+ ggf. anreichern). Läuft in eigenem Thread."""
     portal_cls = REGISTRY.get(key)
-    if portal_cls is None:
-        console.print(f"[yellow]Unbekanntes Portal in config: {key}[/yellow]")
-        return PortalSearchResult(key, status="error", error="Unbekanntes Portal")
-    portal = portal_cls(
-        request_delay=cfg.settings.request_delay,
-        max_pages=cfg.settings.max_pages,
-        proxy=cfg.settings.proxy or None,
-        render=cfg.settings.use_browser,
-    )
-    if key == "mobile_de":
-        portal.store = store
+    portal_name = getattr(portal_cls, "name", key)
+    progress = progress or CrawlProgress(store, query, portal_name, key)
+    portal = None
     from .mobile_runtime import MobileDeferred
     try:
+        if portal_cls is None:
+            raise ValueError(f"Unbekanntes Portal: {key}")
+        portal = portal_cls(
+            request_delay=cfg.settings.request_delay,
+            max_pages=cfg.settings.max_pages,
+            proxy=cfg.settings.proxy or None,
+            render=cfg.settings.use_browser,
+        )
+        portal.store = store  # All portals may use a connected account session.
+        portal.progress = progress
+        progress.update(phase="crawling")
         result_status = "ok"
         result_error = ""
         try:
-            found = portal.search(query)
+            found = _crawl_with_progress(portal, query, progress)
         except PortalPartialError as exc:
             found = exc.listings
             result_status = "partial"
             result_error = str(exc)
             console.print(f"  [yellow]{exc}[/yellow]")
         coverage = getattr(portal, "coverage", {})
-        complete = getattr(portal, "complete_sweep", result_status == "ok")
+        if coverage.get("fetch_error"):
+            result_error = coverage["fetch_error"]
+            result_status = "partial" if found else "cooldown" if coverage.get("reason") == "deferred" else "error"
+        # A successful return can still hide a page cap or swallowed fetch error.
+        complete = result_status == "ok" and bool(getattr(portal, "complete_sweep", False))
         if key == "mobile_de" and result_status == "ok" and not complete:
-            result_status = "incremental" if coverage.get("mode") == "delta" else "partial"
+            result_status = "incremental" if coverage.get("reason") == "delta" else "partial"
             result_error = (f"{coverage.get('pages', 0)} Seiten gelesen; "
                             f"{coverage.get('unique_seen', 0)} eindeutige Inserate; "
                             f"Fortsetzung automatisch ({coverage.get('reason', 'budget')})")
@@ -83,6 +127,10 @@ def _search_one_portal(cfg: Config, key: str, query: SearchQuery, store=None) ->
         # WICHTIG: hier NUR Text-Auswertung (billig). Die teure Bild-OCR läuft
         # asynchron im Hintergrund-Daemon (run_background_image_enrichment) und
         # blockiert damit weder den Suchlauf noch die CPU während der Suche.
+        progress.coverage(coverage, phase="filtering")
+        identities = {id(listing): listing.fingerprint for listing in found}
+        observed = set(identities.values())
+        progress.update(observed_unique=len(observed))
         matching = []
         exclusions: Counter = Counter()
         home_zip = getattr(cfg.settings, "home_zip", "") or None
@@ -136,9 +184,19 @@ def _search_one_portal(cfg: Config, key: str, query: SearchQuery, store=None) ->
         # die abgeschnittene Vorschau aus der Trefferkarte. Genau dort fehlten
         # die Hinweise auf Leasing oder Beschädigung.
         if (matching or key == "mobile_de") and hasattr(portal, "enrich") and (result_status == "ok" or key == "mobile_de"):
+            progress.update(phase="enriching")
             matching = _mit_detailtext_nachpruefen(
                 portal, matching, query, cfg, home_zip, exclusions, store
             )
+
+        if getattr(portal, "detail_error", ""):
+            result_status, complete = "partial", False
+            result_error = portal.detail_error
+            coverage = {**coverage, "reason": portal.detail_reason}
+        kept = {identities[id(listing)] for listing in matching}
+        filtered_count = len(observed - kept)
+        progress.coverage(coverage, phase="persisting")
+        progress.update(kept=len(kept), filtered_count=filtered_count, error=result_error)
 
         console.print(f"  [dim]{portal.name}: {len(matching)}/{len(found)} Treffer (passend/Roh)[/dim]")
         return PortalSearchResult(
@@ -153,18 +211,28 @@ def _search_one_portal(cfg: Config, key: str, query: SearchQuery, store=None) ->
             coverage=coverage,
             checkpoint_key=getattr(portal, "checkpoint_key", ""),
             checkpoint=getattr(portal, "pending_checkpoint", None),
+            observed_unique=len(observed),
+            filtered_count=filtered_count,
         )
     except MobileDeferred as e:
-        return PortalSearchResult(portal.name, status="cooldown", error=str(e), complete=False)
+        coverage = {**getattr(portal, "coverage", {}), "reason": "deferred"}
+        progress.coverage(coverage, phase="deferred")
+        progress.update(error=str(e))
+        return PortalSearchResult(portal_name, status="cooldown", error=str(e), coverage=coverage)
     except PortalError as e:
         console.print(f"  [yellow]{e}[/yellow]")
         status = "blocked"
         if key == "mobile_de" and getattr(portal, "coverage", {}).get("reason") != "blocked":
             status = "error"
-        return PortalSearchResult(portal.name, status=status, error=str(e), complete=False)
+        coverage = {**getattr(portal, "coverage", {}), "reason": "blocked" if status == "blocked" else "error"}
+        progress.coverage(coverage, phase=status)
+        progress.update(error=str(e), completeness="blocked" if status == "blocked" else "partial")
+        return PortalSearchResult(portal_name, status=status, error=str(e), coverage=coverage)
     except Exception as e:  # pragma: no cover - robuster Lauf trotz Portalfehler
-        console.print(f"  [red]{portal.name}: Fehler – {e}[/red]")
-        return PortalSearchResult(portal.name, status="error", error=str(e), complete=False)
+        console.print(f"  [red]{portal_name}: Fehler – {e}[/red]")
+        progress.fail(e)
+        return PortalSearchResult(portal_name, status="error", error=str(e),
+                                  coverage={**getattr(portal, "coverage", {}), "reason": "error"})
 
 
 def _mit_detailtext_nachpruefen(portal, matching, query, cfg, home_zip,
@@ -192,13 +260,18 @@ def _mit_detailtext_nachpruefen(portal, matching, query, cfg, home_zip,
         else:
             offen.append(listing)
 
+    from .mobile_runtime import MobileDeferred
     try:
         # enrich() aendert die uebergebenen Inserate an Ort und Stelle; der
         # Rueckgabewert ist dieselbe Liste.
         portal.enrich(offen, query, force=cfg.settings.verify_details)
-    except Exception:
+    except MobileDeferred as exc:
+        portal.detail_error = str(exc)
+        portal.detail_reason = "deferred"
+    except Exception as exc:
+        portal.detail_error = str(exc)
+        portal.detail_reason = "error"
         logger.exception("Detailabruf bei %s fehlgeschlagen", portal.name)
-        return matching
 
     geprueft = []
     for listing in matching:
@@ -224,20 +297,39 @@ def _mit_detailtext_nachpruefen(portal, matching, query, cfg, home_zip,
 
 
 def run_search(cfg: Config, query: SearchQuery, store: SeenStore, *, include_seen=False) -> List[Listing]:
+    """Run portals and finalize progress only after all required writes succeed."""
+    progress_runs = {}
+    try:
+        for key, enabled in cfg.portals.items():
+            if enabled and REGISTRY.get(key):
+                progress_runs[key] = CrawlProgress(store, query, REGISTRY[key].name, key)
+        return _run_search(cfg, query, store, progress_runs, include_seen=include_seen)
+    except Exception as exc:
+        for progress in progress_runs.values():
+            if progress.row.get("finished_at") is None:
+                try:
+                    progress.fail(exc)
+                except Exception:
+                    logger.exception("Suchfortschritt konnte nicht gespeichert werden")
+        raise
+
+
+def _run_search(cfg, query, store, progress_runs, *, include_seen=False):
     """Führt eine Suche auf allen aktiven Portalen aus und liefert neue Deals.
 
     Die Portale laufen PARALLEL (verschiedene Hosts) – das halbiert die Laufzeit,
     ohne einen einzelnen Host stärker zu belasten. Jedes Portal behält seine
     eigene höfliche Anfrage-Drosselung.
     """
-    active = [k for k, on in cfg.portals.items() if on and REGISTRY.get(k)]
+    active = list(progress_runs)
+    progress_by_portal = {REGISTRY[key].name: progress for key, progress in progress_runs.items()}
     all_listings: List[Listing] = []
     portal_results: Dict[str, PortalSearchResult] = {}
     if not active:
         return []
 
     with ThreadPoolExecutor(max_workers=len(active)) as ex:
-        futures = {ex.submit(_search_one_portal, cfg, k, query, store): k for k in active}
+        futures = {ex.submit(_search_one_portal, cfg, k, query, store, progress_runs[k]): k for k in active}
         for fut in as_completed(futures):
             portal_result = fut.result()
             portal_results[portal_result.portal_name] = portal_result
@@ -281,6 +373,16 @@ def run_search(cfg: Config, query: SearchQuery, store: SeenStore, *, include_see
                     f"Parser/Block prüfen.[/yellow]"
                 )
     all_listings = [l for l in all_listings if evaluate_query(l, query).passed]
+    for portal_name, portal_result in portal_results.items():
+        kept = {l.fingerprint for l in all_listings if l.portal == portal_name}
+        previously_kept = {l.fingerprint for l in portal_result.listings}
+        if portal_result.filtered_count is not None:
+            portal_result.filtered_count += len(previously_kept - kept)
+        counts = {}
+        if portal_result.observed_unique is not None:
+            counts = dict(observed_unique=portal_result.observed_unique, kept=len(kept),
+                          filtered_count=portal_result.filtered_count)
+        progress_by_portal[portal_name].update(phase="persisting", **counts)
     after_filter = Counter(l.portal for l in all_listings)
     if before_filter:
         portal_counts = ", ".join(
@@ -336,10 +438,8 @@ def run_search(cfg: Config, query: SearchQuery, store: SeenStore, *, include_see
 
     if hasattr(store, "sync_active_deals"):
         store.sync_active_deals(query.name, portal_active_fps)
-    for portal_name, portal_result in portal_results.items():
-        if portal_name != "mobile.de" and portal_result.status in {"blocked", "error"}:
-            if hasattr(store, "mark_portal_stale"):
-                store.mark_portal_stale(query.name, portal_name)
+    # A blocked portal proves nothing about a listing's availability. Local
+    # re-evaluation/age retention still runs without requiring a full network scan.
     if hasattr(store, "purge_unmatching_deals"):
         store.purge_unmatching_deals(query.name, query)
     if hasattr(store, "prune"):
@@ -351,6 +451,11 @@ def run_search(cfg: Config, query: SearchQuery, store: SeenStore, *, include_see
     for portal_result in portal_results.values():
         if portal_result.checkpoint_key and portal_result.checkpoint is not None:
             save_state(store, portal_result.checkpoint_key, portal_result.checkpoint)
+
+    persisted_counts = Counter(listing.portal for listing in result.priced)
+    for portal_result in portal_results.values():
+        progress_by_portal[portal_result.portal_name].finish(
+            portal_result, persisted_count=persisted_counts[portal_result.portal_name])
 
     return new_deals
 

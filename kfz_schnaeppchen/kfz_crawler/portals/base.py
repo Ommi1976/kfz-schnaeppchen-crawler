@@ -111,6 +111,17 @@ class BasePortal:
         }
 
     def _get(self, url: str, **kwargs):
+        from ..portal_accounts import connected_fetch
+        from ..mobile_runtime import MobileDeferred
+        from ..browser import BrowserBlocked, BrowserUnavailable
+        try:
+            html = connected_fetch(self.name, url, getattr(self, "store", None), self.proxy)
+        except MobileDeferred:
+            raise
+        except (BrowserBlocked, BrowserUnavailable) as exc:
+            raise PortalError(f"{self.name}: {exc}") from exc
+        if html is not None:
+            return _Rendered(html)
         time.sleep(self.request_delay + random.uniform(0, 1.0))
         # Render-Pfad: JS-lastige/geschützte Portale über echten Browser laden.
         if self._use_browser:

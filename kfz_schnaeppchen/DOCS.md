@@ -188,6 +188,56 @@ nicht nötig – das Add-on ruft die Dienste direkt auf.
   Nutzungsbedingungen der Portale beachten. Für den privaten Gebrauch gedacht.
 
 ## Fehlersuche
+### Portalkonten (ab 1.3.0)
+
+Im Kopfbereich **Portalkonten** öffnen. Für mobile.de, Kleinanzeigen, AutoScout24
+und AutoUncle gibt es getrennte Profile. **Verbinden** zeigt den auf HAOS
+laufenden Browser direkt in der Add-on-Oberfläche. Ein separater Desktop-Browser
+oder Cookie-Export ist nicht erforderlich.
+
+1. Im angezeigten Portal auf Anmelden klicken. Das gewünschte Feld in der
+   Browseransicht anklicken, Eingabe im verdeckten Eingabefeld eingeben und senden.
+   Tab/Enter und Scroll-Tasten stehen daneben bereit. Eingaben werden unmittelbar
+   danach aus dem lokalen Eingabefeld entfernt.
+2. Die reguläre E-Mail-/Passwort-Anmeldung und gegebenenfalls 2FA selbst abschließen.
+   Anmeldungen über fremde Anbieter (Google/Facebook) sind in dieser begrenzten
+   Browseransicht nicht vorgesehen. Es werden keine CAPTCHAs automatisch gelöst.
+3. Gegebenenfalls das Kontomenü öffnen, bis ein sichtbarer Abmelden-Befehl erscheint,
+   und **Verbindung prüfen** wählen. Nur ein sichtbarer Nachweis bestätigt die
+   Anmeldung; ein gespeicherter Cookie oder unbekanntes Layout tut dies nicht.
+4. **Anmeldefenster schließen** speichert das Browserprofil und gibt den Browser
+   für die Suche frei. Die Suchschaltflächen verwenden anschließend dieses Profil.
+
+Während einer offenen Anmeldeansicht pausiert der automatische Zugriff auf dieses
+Portal. Die Ansicht läuft nach 20 Minuten ab. Die laufenden Suchpausen und Budgets
+bleiben auch nach erfolgreicher Anmeldung bestehen. Bei einer abgelaufenen
+Portalanmeldung muss erneut verbunden werden. Ohne aktuelles Prüfzeichen zeigt
+das Add-on den Anmeldestatus als unbestätigt an, statt Erfolg anzunehmen.
+
+**Abmelden/Trennen** entfernt ausschließlich das lokale Portalprofil einschließlich
+Sitzungscookies. Gefundene Fahrzeuge und Schutzpausen bleiben erhalten; bestehende
+Sitzungen auf anderen Geräten werden dadurch nicht beim Anbieter widerrufen.
+
+Zugang: Über Home-Assistant-Ingress sind angemeldete HA-Nutzer zugelassen; dessen
+tatsächliche Quelladresse wird geprüft. Beim direkten LAN-Zugriff ist für sämtliche
+Kontofunktionen ein gültiges X-KFZ-Token nötig (Eingabe nur im Arbeitsspeicher der
+Oberfläche). Passwörter werden nicht in Add-on-Optionen, Datenbank, Logs oder Git
+gespeichert. Firefox speichert die Sitzung selbst unter /data mit restriktiven
+Dateirechten. Diese Profile sind Zugangsdaten: HA-Backups entsprechend schützen.
+Die Browseransicht wird ausschließlich im Speicher übertragen und nicht gecacht.
+
+**Anmeldung und Suche sind getrennt:** Ein Login bestätigt keine Aufhebung von
+Akamai-Sperren. Der Suchfortschritt zeigt gemeldete und tatsächlich eingelesene
+Inserate sowie lokale Ausschlüsse. Bei Teilabrufen bleiben vorhandene Ergebnisse
+erhalten. Ergänzende Suchvarianten können sich überschneiden; deren Portaltreffer
+werden nicht zu einer scheinbaren Gesamtzahl addiert. Die ersten Ergebnisse können
+früher erscheinen als der vollständige Abgleich. SOH, Akku, Reichweite und
+Erstzulassung werden weiterhin mit der vorhandenen Detail-/Fahrzeugakte geprüft.
+
+Gespeicherte Suchaufträge und E-Mail-Benachrichtigungen können im jeweiligen
+Portalkonto zusätzlich eingerichtet werden. Ein automatischer Postfachimport ist
+nicht Bestandteil dieser Version und ersetzt keine vollständige Bestandssuche.
+
 - Log ansehen: Add-on-Seite → Tab **Log**.
 - „Keine neuen Schnäppchen": normal, wenn nichts unter dem Marktpreis liegt
   oder alles schon gemeldet wurde.

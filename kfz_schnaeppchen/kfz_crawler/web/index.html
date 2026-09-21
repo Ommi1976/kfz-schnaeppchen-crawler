@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>KFZ Schnäppchen Crawler</title>
-  <link rel="stylesheet" href="static/style.css?v=1.2.28">
+  <link rel="stylesheet" href="static/style.css?v=1.3.0">
 </head>
 <body>
   <header>
@@ -16,10 +16,89 @@
       </div>
     </div>
     <div class="actions">
+      <button id="accounts-toggle" class="btn external" type="button" aria-controls="accounts-panel" aria-expanded="false">Portalkonten</button>
       <button id="run" class="btn primary">Alle jetzt suchen</button>
       <button id="refresh" class="btn">Aktualisieren</button>
     </div>
   </header>
+
+  <section id="accounts-panel" class="accounts-panel" aria-labelledby="accounts-title" hidden>
+    <div class="accounts-heading">
+      <div>
+        <p class="accounts-eyebrow">Deine Verbindungen</p>
+        <h2 id="accounts-title" tabindex="-1">Portalkonten</h2>
+        <p class="accounts-intro">Anmeldungen verwalten. Sucherfolg separat im Blick behalten.</p>
+      </div>
+      <button id="accounts-refresh" type="button" class="btn">Status aktualisieren</button>
+    </div>
+    <p class="accounts-note">Eine Anmeldung wird anhand der geöffneten Portalseite geprüft. Vorhandene Cookies allein sind kein Anmeldenachweis; auch ein angemeldetes Konto garantiert keine erfolgreiche Suche.</p>
+    <details class="accounts-access">
+      <summary>Direktzugriff mit Token <span id="accounts-token-state">optional</span></summary>
+      <form id="accounts-token-form" class="accounts-token-form" autocomplete="off">
+        <label for="accounts-token">KFZ-Zugriffstoken</label>
+        <div class="accounts-token-row">
+          <input id="accounts-token" type="password" autocomplete="off" spellcheck="false" autocapitalize="off" aria-describedby="accounts-token-hint">
+          <button class="btn" type="submit">Token verwenden</button>
+          <button class="btn" id="accounts-token-clear" type="button">Vergessen</button>
+        </div>
+        <p id="accounts-token-hint">Nur für den direkten Zugriff, falls erforderlich. Bleibt ausschließlich im Arbeitsspeicher dieser Seite und wird beim Verlassen gelöscht.</p>
+      </form>
+    </details>
+    <p id="accounts-access-note" class="accounts-note" hidden></p>
+    <p id="accounts-notice" class="accounts-notice" role="status" aria-live="polite" hidden></p>
+    <div id="accounts-grid" class="accounts-grid" aria-label="Vier Portalkonten"></div>
+    <p id="accounts-updated" class="accounts-updated">Noch nicht aktualisiert.</p>
+  </section>
+
+  <dialog id="accounts-session" class="accounts-session" aria-labelledby="accounts-session-title" aria-describedby="accounts-session-help">
+    <div class="accounts-session-heading">
+      <div>
+        <p class="accounts-eyebrow">Manuelle Anmeldung</p>
+        <h2 id="accounts-session-title">Portal verbinden</h2>
+      </div>
+      <button id="accounts-session-close" type="button" class="btn" autofocus>Schließen &amp; Profil behalten</button>
+    </div>
+    <p id="accounts-session-help" class="accounts-note">1. Eingabefeld im Portalbild anklicken. 2. Text unten eingeben und senden. 3. Nach der Anmeldung das Kontomenü öffnen und „Anmeldung prüfen“ wählen. Du meldest dich selbst an, einschließlich möglicher Bestätigungen oder Captchas.</p>
+    <div class="accounts-session-meta">
+      <span>Portalhost: <strong id="accounts-session-host">Wird ermittelt…</strong></span>
+      <span id="accounts-session-auth" class="accounts-badge">Anmeldung ungeprüft</span>
+      <span id="accounts-session-expiry">Sitzung wird gestartet…</span>
+    </div>
+    <p id="accounts-session-notice" class="accounts-notice" role="status" aria-live="polite" hidden></p>
+    <div id="accounts-screen-wrap" class="accounts-screen-wrap">
+      <p id="accounts-screen-placeholder">Das Portal wird geöffnet…</p>
+      <img id="accounts-screen" class="accounts-screen" alt="Interaktive Ansicht der Portalseite. Zum Auswählen eines Feldes auf das Bild klicken." tabindex="0" draggable="false" aria-describedby="accounts-screen-help" hidden>
+    </div>
+    <p id="accounts-screen-help" class="accounts-note">Das Bild wird etwa alle 2 Sekunden aktualisiert. Texte über das maskierte Feld senden; die Schaltflächen steuern die Portalseite. Die Sitzung endet automatisch zur angezeigten Frist.</p>
+    <form id="accounts-text-form" class="accounts-text-form" autocomplete="off">
+      <label for="accounts-text">Text für das ausgewählte Portalfeld</label>
+      <div class="accounts-token-row">
+        <input id="accounts-text" type="password" autocomplete="new-password" spellcheck="false" autocapitalize="off" maxlength="2048" aria-describedby="accounts-text-hint" disabled>
+        <button id="accounts-text-send" class="btn primary" type="submit" disabled>Text senden</button>
+      </div>
+      <p id="accounts-text-hint" class="accounts-note">Für E-Mail, Passwort oder Bestätigungscode. Das Eingabefeld wird beim Senden sofort geleert. Es wird nichts aus der Zwischenablage gelesen.</p>
+    </form>
+    <div id="accounts-remote-controls" class="accounts-remote-controls" role="group" aria-label="Portalseite bedienen">
+      <button type="button" class="btn small" data-accounts-key="Tab" disabled>Tab</button>
+      <button type="button" class="btn small" data-accounts-key="Enter" disabled>Enter</button>
+      <button type="button" class="btn small" data-accounts-key="Backspace" disabled>Backspace</button>
+      <button type="button" class="btn small" data-accounts-key="Control+A" disabled>Alles auswählen</button>
+      <button type="button" class="btn small" data-accounts-key="ArrowLeft" aria-label="Pfeil links" disabled>←</button>
+      <button type="button" class="btn small" data-accounts-key="ArrowUp" aria-label="Pfeil aufwärts" disabled>↑</button>
+      <button type="button" class="btn small" data-accounts-key="ArrowDown" aria-label="Pfeil abwärts" disabled>↓</button>
+      <button type="button" class="btn small" data-accounts-key="ArrowRight" aria-label="Pfeil rechts" disabled>→</button>
+      <button type="button" class="btn small" data-accounts-scroll="-550" disabled>Hoch scrollen</button>
+      <button type="button" class="btn small" data-accounts-scroll="550" disabled>Runter scrollen</button>
+    </div>
+    <div class="accounts-session-footer">
+      <span id="accounts-session-work" role="status" aria-live="polite"></span>
+      <div class="accounts-session-actions">
+        <button id="accounts-session-refresh" type="button" class="btn" disabled>Bild aktualisieren</button>
+        <button id="accounts-session-check" type="button" class="btn primary" disabled>Anmeldung prüfen</button>
+      </div>
+    </div>
+    <p class="accounts-note">„Anmeldung prüfen“ prüft nur die aktuell geöffnete Seite. Beim Schließen bleibt das lokale Portalprofil erhalten. „Trennen“ in der Kontoübersicht entfernt seine lokale Zuordnung.</p>
+  </dialog>
 
 
   <section class="stats" id="stats"></section>
@@ -200,6 +279,7 @@
     </div>
   </div>
 
-  <script src="static/app.js?v=1.2.28"></script>
+  <script src="static/app.js?v=1.3.0"></script>
+  <script src="static/accounts.js?v=1.3.0" defer></script>
 </body>
 </html>

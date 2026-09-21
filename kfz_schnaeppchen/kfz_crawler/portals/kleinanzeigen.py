@@ -265,7 +265,13 @@ class Kleinanzeigen(BasePortal):
         targets = listings[:DETAIL_LIMIT]
 
         def work(l: Listing) -> None:
-            html = _fetch_html(l.url, self._headers(), self.proxy)
+            from ..portal_accounts import account_enabled
+            if account_enabled(getattr(self, "store", None), "kleinanzeigen"):
+                # The shared account worker owns and serializes the profile.
+                # AccountsBusy/MobileDeferred must reach the orchestration.
+                html = self._get(l.url).text
+            else:
+                html = _fetch_html(l.url, self._headers(), self.proxy)
             if html:
                 self._parse_detail(html, l)
 
