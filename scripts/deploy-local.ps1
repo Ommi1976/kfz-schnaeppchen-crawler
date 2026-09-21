@@ -32,8 +32,8 @@ $remoteScript = @'
 set -eu
 test -d /addons/kfz_schnaeppchen
 docker exec hassio_supervisor test -d /data/apps/local/kfz_schnaeppchen
-tar -cf /tmp/kfz-before-__VERSION__.tar -C /addons kfz_schnaeppchen
-docker exec hassio_supervisor tar -cf /tmp/kfz-before-__VERSION__.tar -C /data/apps/local kfz_schnaeppchen
+test -f /tmp/kfz-before-__VERSION__.tar || tar -cf /tmp/kfz-before-__VERSION__.tar -C /addons kfz_schnaeppchen
+docker exec hassio_supervisor sh -c 'test -f /tmp/kfz-before-__VERSION__.tar || tar -cf /tmp/kfz-before-__VERSION__.tar -C /data/apps/local kfz_schnaeppchen'
 tar -xf /tmp/kfz-release-__VERSION__.tar -C /addons
 docker cp /tmp/kfz-release-__VERSION__.tar hassio_supervisor:/tmp/kfz-release-__VERSION__.tar
 docker exec hassio_supervisor tar -xf /tmp/kfz-release-__VERSION__.tar -C /data/apps/local
@@ -50,7 +50,9 @@ def call(path, method='GET'):
     return data.get('data', {})
 call('/store/reload','POST')
 print('Lokaler Store neu geladen; Build startet.', flush=True)
-call('/addons/local_kfz_schnaeppchen/rebuild','POST')
+info=call('/addons/local_kfz_schnaeppchen/info')
+operation='update' if info.get('version') != '__VERSION__' else 'rebuild'
+call('/addons/local_kfz_schnaeppchen/'+operation,'POST')
 info=call('/addons/local_kfz_schnaeppchen/info')
 if info.get('state') != 'started':
     call('/addons/local_kfz_schnaeppchen/start','POST')
