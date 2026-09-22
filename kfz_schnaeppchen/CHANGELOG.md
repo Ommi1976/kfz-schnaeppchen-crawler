@@ -1,3 +1,9 @@
+# 1.3.3
+
+- Texteingabe im Anmeldefenster verliert bei automatischen Bildschirmaktualisierungen nicht mehr den Fokus.
+- Noch nicht gesendeter Text bleibt bei einem Sendeversuch während der Bildaktualisierung erhalten. Portalaktionen werden weiterhin nacheinander ausgeführt.
+- Browser-Regression prüft langsames Tippen über mehrere Aktualisierungen und einen Sendeversuch während eines verzögerten Bildabrufs.
+
 # 1.3.2
 
 - mobile.de-Verbindung startet über den offiziellen Käufer-Login auf www.mobile.de mit Weiterleitung zu id.mobile.de, nicht mehr über die Suchverwaltung auf suchen.mobile.de.

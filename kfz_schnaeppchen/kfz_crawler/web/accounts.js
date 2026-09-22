@@ -315,7 +315,10 @@
     byId("accounts-screen-help").textContent = session.blocked
       ? "Bild aktualisieren liest nur den aktuellen Browserinhalt; die Portalseite wird dadurch nicht neu aufgerufen. Schließen & Profil behalten beendet die Ansicht ohne das Profil zu löschen."
       : screenHelp;
-    textInput.disabled = !canInput;
+    // A screenshot only reads the remote page. Disabling the local draft field
+    // on each poll blurs it and drops subsequent keystrokes in the browser.
+    textInput.disabled = !(live && session.hasImage && !session.blocked && !session.paused
+      && (!session.busy || session.readOnly) && !document.hidden);
     byId("accounts-text-send").disabled = !canInput;
     for (const button of byId("accounts-remote-controls").querySelectorAll("button")) button.disabled = !canInput;
     byId("accounts-session-refresh").disabled = !live || session.busy || document.hidden;
@@ -359,7 +362,7 @@
     stopPoll(session);
     if (!visible(session) || !session.id || session.expired || session.paused || session.busy) return;
     session.pollTimer = window.setTimeout(() => {
-      if (visible(session)) enqueue(session, () => refreshImage(session));
+      if (visible(session)) enqueue(session, () => refreshImage(session), { readOnly: true });
     }, 2000);
   }
 
@@ -376,10 +379,11 @@
   }
 
   // All interactive operations, including refresh and close, share one queue.
-  function enqueue(session, operation) {
+  function enqueue(session, operation, { readOnly = false } = {}) {
     if (!visible(session) || session.expired || session.busy) return Promise.resolve();
     stopPoll(session);
     session.busy = true;
+    session.readOnly = readOnly;
     updateControls(session);
     session.queue = session.queue.then(async () => {
       if (!visible(session) || session.expired) return;
@@ -387,6 +391,7 @@
       await operation();
     }).catch((error) => handleSessionError(session, error)).finally(() => {
       session.busy = false;
+      session.readOnly = false;
       updateControls(session);
       schedulePoll(session);
     });
@@ -447,7 +452,7 @@
     const card = cards.get(key);
     const session = {
       key, id: null, expiresAt: null, pollTimer: null, expiryTimer: null,
-      blobUrl: null, hasImage: false, busy: false, paused: false, blocked: false,
+      blobUrl: null, hasImage: false, busy: false, readOnly: false, paused: false, blocked: false,
       expired: false, closing: false, closed: false, queue: Promise.resolve(),
       opener: document.activeElement,
     };
@@ -564,7 +569,7 @@
   dialog.addEventListener("cancel", (event) => { event.preventDefault(); closeSession(); });
   dialog.addEventListener("close", () => { if (current && !current.closing) closeSession(); });
   byId("accounts-session-refresh").addEventListener("click", () => {
-    if (current) enqueue(current, () => refreshImage(current));
+    if (current) enqueue(current, () => refreshImage(current), { readOnly: true });
   });
   byId("accounts-session-check").addEventListener("click", () => {
     const session = current;
@@ -583,6 +588,9 @@
   });
   byId("accounts-text-form").addEventListener("submit", (event) => {
     event.preventDefault();
+    // Enter/programmatic submit during an in-flight screenshot must not erase
+    // unsent text. Remote actions remain serialized and cannot be duplicated.
+    if (!canSend(current)) return;
     const text = textInput.value;
     textInput.value = ""; // Clear before any asynchronous work, even on failure.
     if (text && canSend(current)) sendInput({ action: "text", text });
@@ -617,7 +625,7 @@
       textInput.value = "";
       tokenInput.value = "";
     } else if (session.expiresAt && session.expiresAt <= Date.now()) expire(session);
-    else if (!session.paused) enqueue(session, () => refreshImage(session));
+    else if (!session.paused) enqueue(session, () => refreshImage(session), { readOnly: true });
     updateControls(session);
   });
   window.addEventListener("pagehide", () => {

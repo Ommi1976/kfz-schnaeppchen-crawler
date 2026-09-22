@@ -102,7 +102,36 @@ def test_interactive_login_ui_and_shared_profile(tmp_path, monkeypatch, denied_f
                 playwright.expect(screen).to_have_attribute("aria-disabled", "false", timeout=10000)
 
             click_remote(100,100)
-            page.locator("#accounts-text").fill("synthetic@example.test")
+            text_field = page.locator("#accounts-text")
+            # Type through several automatic screenshots; previously every poll
+            # disabled the field and permanently removed keyboard focus.
+            polls = []
+            page.on("response", lambda response: polls.append(response.url)
+                    if "/api/accounts/mobile_de/session?" in response.url else None)
+            text_field.focus()
+            text_field.press_sequentially("synthetic@example.test", delay=230)
+            assert len(polls) >= 2
+            playwright.expect(text_field).to_be_focused()
+            playwright.expect(text_field).to_have_value("synthetic@example.test")
+            # Hold one read-only screenshot response deterministically. The local
+            # draft stays editable, while submission cannot race the remote page.
+            page.evaluate("""() => {
+                const original = window.fetch;
+                window.fetch = async function(...args) {
+                    const response = await original.apply(this, args);
+                    if (String(args[0]).includes('/mobile_de/session?')) {
+                        window.fetch = original;
+                        await new Promise(resolve => { window.releaseTestSnapshot = resolve; });
+                    }
+                    return response;
+                };
+            }""")
+            page.wait_for_function("typeof window.releaseTestSnapshot === 'function'", timeout=10000)
+            playwright.expect(text_field).to_be_enabled()
+            playwright.expect(text_field).to_be_focused()
+            page.evaluate("document.getElementById('accounts-text-form').requestSubmit()")
+            playwright.expect(text_field).to_have_value("synthetic@example.test")
+            page.evaluate("window.releaseTestSnapshot()")
             page.get_by_role("button", name="Text senden", exact=True).click()
             playwright.expect(page.locator("#accounts-text")).to_have_value("")
             click_remote(100,160)
