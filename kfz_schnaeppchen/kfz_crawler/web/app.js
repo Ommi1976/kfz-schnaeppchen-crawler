@@ -40,12 +40,16 @@ function fmtClock(iso) {
   return new Date(iso).toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" });
 }
 function escapeHtml(s) {
-  return (s || "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+  return String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 }
 async function getJSON(path) {
-  const r = await fetch(path, { headers: { Accept: "application/json" } });
-  if (!r.ok) throw new Error(r.status);
-  return r.json();
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 20000);
+  try {
+    const r = await fetch(path, { headers: { Accept: "application/json" }, signal: controller.signal });
+    if (!r.ok) throw new Error(r.status);
+    return await r.json();
+  } finally { clearTimeout(timeout); }
 }
 function discountClass(d) {
   if (d == null) return "d-lo";
@@ -419,6 +423,8 @@ function renderDealsRows(deals) {
 
     const pcls = "portal-" + (d.portal || "").toLowerCase().replace(/[^a-z0-9]/g, "");
     const evidence = d.field_evidence || {};
+    const ausKatalog = (feld) => (evidence[feld] || {}).source === "ev_database";
+    const ausAkte = (feld) => (evidence[feld] || {}).source === "fahrzeugakte";
     const sourceTitle = (field, fallback) => {
       const item = evidence[field];
       if (!item) return fallback;
@@ -445,8 +451,6 @@ function renderDealsRows(deals) {
     // genannte nicht. Zuvor trug die Reichweite immer eine Tilde - auch wenn
     // sie woertlich im Text stand -, die Akkugroesse dagegen nie, obwohl sie
     // oft nur aus Modell und Leistung abgeleitet ist.
-    const ausKatalog = (feld) => (evidence[feld] || {}).source === "ev_database";
-    const ausAkte = (feld) => (evidence[feld] || {}).source === "fahrzeugakte";
     const battTilde = ausKatalog("battery_kwh") ? "~"
                     : (ausAkte("battery_gross_kwh") || ausAkte("battery_net_kwh")) ? "↔ " : "";
     const battInfo = batteryText != null
@@ -489,7 +493,8 @@ function renderDealsRows(deals) {
 
     return `<tr class="${rowcls}${d.is_stale ? " row-stale" : ""}">
       <td class="markcell">${mark}</td>
-      <td><span class="portal-badge ${pcls}">${escapeHtml(d.portal || "")}</span></td>
+      <td><span class="portal-badge ${pcls}">${escapeHtml(d.portal || "")}</span>${d.portal === "AutoUncle" && d.origin_portal
+        ? `<br><small class="muted" title="Herkunft laut AutoUncle; nicht direkt beim Ursprungsportal abgerufen">${escapeHtml(d.origin_portal)} via AutoUncle</small>` : ""}</td>
       <td class="title">
         <div class="t-main">${escapeHtml(d.title || "")}</div>
         ${subInfo}<div class="data-quality">${staleBadge}</div>
@@ -542,7 +547,28 @@ function applyQuickFilters() {
   }
 }
 
+let dealsRequestNumber = 0;
+let dealsRendered = false;
 async function loadDeals() {
+  const request = ++dealsRequestNumber;
+  try {
+    await updateDeals(request);
+  } catch (error) {
+    if (request !== dealsRequestNumber) return;
+    console.error("Treffer konnten nicht dargestellt werden:", error);
+    const notice = document.getElementById("deals-error");
+    notice.textContent = "Treffer konnten nicht aktualisiert werden. "
+      + (dealsRendered ? "Der zuletzt geladene Stand bleibt sichtbar. " : "")
+      + "Bitte auf Aktualisieren klicken; der nächste automatische Versuch folgt in 20 Sekunden.";
+    notice.hidden = false;
+    if (!dealsRendered) {
+      document.getElementById("deals-body").innerHTML =
+        '<tr><td colspan="11" class="empty">Trefferliste momentan nicht verfügbar.</td></tr>';
+    }
+  }
+}
+
+async function updateDeals(request) {
   const sel = document.getElementById("searchFilter");
   const dealsOnly = document.getElementById("dealsOnly").checked;
   const params = [];
@@ -553,10 +579,13 @@ async function loadDeals() {
   if (showStale) params.push("include_stale=true");
   if (currentPortalFilter) params.push(`portal=${encodeURIComponent(currentPortalFilter)}`);
   const data = await getJSON(`${API}/deals${params.length ? "?" + params.join("&") : ""}`);
+  if (request !== dealsRequestNumber) return;
+  if (!Array.isArray(data.deals)) throw new Error("Ungültige Trefferantwort");
   
   allLoadedDeals = data.deals || [];
   const apiDealCount = data.total_deals ?? allLoadedDeals.filter(x => x.is_deal).length;
-  renderPortalFilters(data.portal_counts || {}, apiDealCount);
+  renderPortalFilters(data.portal_counts || {}, apiDealCount, data.mobile_coverage);
+  renderMobileCoverage(data.mobile_coverage);
 
   // Kachel synchron halten
   const cDealsV = document.querySelector("#card-deals .v");
@@ -565,12 +594,26 @@ async function loadDeals() {
   if (cAllV) cAllV.textContent = data.count;
 
   applyQuickFilters();
+  dealsRendered = true;
+  document.getElementById("deals-error").hidden = true;
 
   document.getElementById("footer-info").textContent =
-    `${data.count} Treffer im Speicher${data.stale_hidden ? ` · ${data.stale_hidden} veraltete ausgeblendet` : ""}${data.stale_count ? ` · ${data.stale_count} veraltet` : ""}${dealsOnly ? " (nur Schnäppchen)" : ""}${currentPortalFilter ? ` · Filter: ${currentPortalFilter}` : ""} · Auto-Aktualisierung alle 20 s`;
+    `${data.count} Treffer angezeigt${data.truncated ? ` von ${data.available_count} (Anzeigelimit)` : ""}${data.stale_hidden ? ` · ${data.stale_hidden} veraltete ausgeblendet` : ""}${data.stale_count ? ` · ${data.stale_count} veraltet` : ""}${dealsOnly ? " (nur Schnäppchen)" : ""}${currentPortalFilter ? ` · Filter: ${currentPortalFilter}` : ""} · Auto-Aktualisierung alle 20 s`;
 }
 
-function renderPortalFilters(counts, dealCount) {
+function renderMobileCoverage(coverage) {
+  const note = document.getElementById("mobile-coverage");
+  note.hidden = !coverage;
+  if (!coverage) return;
+  const paused = (coverage.blocked_until || 0) > Date.now() / 1000;
+  const direct = paused
+    ? `Direktabruf pausiert bis ${new Date(coverage.blocked_until * 1000).toLocaleString("de-DE")}.`
+    : coverage.direct_status === "blocked" ? "Direktabruf zuletzt blockiert." : "Direktabruf und AutoUncle sind getrennte Datenwege.";
+  note.textContent = `mobile.de: ${coverage.direct || 0} direkte Treffer · ${coverage.via_autouncle || 0} via AutoUncle. ${direct} `
+    + "Der mobile.de-Filter umfasst beide Wege; „Alle Portale“ zählt jedes Inserat nur einmal. AutoUncle ist kein vollständiger Spiegel von mobile.de.";
+}
+
+function renderPortalFilters(counts, dealCount, mobileCoverage) {
   const box = document.getElementById("portal-filters");
   if (!box) return;
   // Die Konfiguration liefert technische Schlüssel (z. B. "autouncle"),
@@ -585,6 +628,7 @@ function renderPortalFilters(counts, dealCount) {
   const portals = [...new Set([
     ...configured,
     ...Object.keys(counts || {}),
+    ...(mobileCoverage?.via_autouncle ? ["mobile.de"] : []),
   ])];
   let totalAll = 0;
   for (const k in counts) totalAll += counts[k];
@@ -599,10 +643,12 @@ function renderPortalFilters(counts, dealCount) {
   for (const p of portals) {
     const healthRows = (statusCache?.portal_health || []).filter((h) => h.portal === p);
     const unhealthy = healthRows.some((h) => h.status && !["ok", "incremental"].includes(h.status));
-    const healthTitle = unhealthy
+    let healthTitle = unhealthy
       ? healthRows.filter((h) => h.status !== "ok").map((h) => `${h.search_name}: ${h.status}${h.error ? ` – ${h.error}` : ""}`).join(" | ")
       : "Letzter Abruf erfolgreich";
-    items.push({ id: p, label: p, count: counts[p] || 0, unhealthy, healthTitle });
+    const indirect = p === "mobile.de" ? (mobileCoverage?.via_autouncle || 0) : 0;
+    if (p === "mobile.de") healthTitle = `${counts[p] || 0} direkt · ${indirect} via AutoUncle. ${healthTitle}`;
+    items.push({ id: p, label: p, count: (counts[p] || 0) + indirect, unhealthy, healthTitle });
   }
 
   box.innerHTML = items.map((it) => {
@@ -786,10 +832,11 @@ document.getElementById("clear").addEventListener("click", async () => {
 });
 
 async function refresh() {
-  try {
-    await loadStatus();
-    await loadDeals();
-  } catch (e) { console.error(e); }
+  // Ein Fehler im Status darf den unabhängigen Trefferabruf nicht verhindern.
+  await Promise.all([
+    loadStatus().catch(e => console.error("Status konnte nicht geladen werden:", e)),
+    loadDeals(),
+  ]);
 }
 function poll() {
   refresh().then(() => { if (statusCache && statusCache.running) setTimeout(poll, 2000); });

@@ -31,6 +31,38 @@ def test_api_meta(client):
     assert "autoscout24" in meta["portals"]
 
 
+def test_mobile_filter_includes_evidenced_autouncle_without_double_count(client, monkeypatch):
+    store = client.app.state.store
+    monkeypatch.setattr(store, "list_searches", lambda: [{"name": "EV"}])
+    samples = [
+        ("mobile.de", "https://suchen.mobile.de/fahrzeuge/details.html?id=11"),
+        ("AutoUncle", "https://www.autouncle.de/de/das_wiedersehen/mobile/123/456"),
+        ("AutoUncle", "https://www.autouncle.de/de/d/124-another"),
+    ]
+    def listings(**kwargs):
+        assert not kwargs.get("portal")  # SQL must not discard the indirect record.
+        return [{"portal": portal, "url": url, "title": "Test EV", "search_name": "EV",
+                 "price": 25000, "year": 2023, "mileage": 40000,
+                 "body": "auch bei mobile.de"} for portal, url in samples]
+    monkeypatch.setattr(store, "list_deals", listings)
+    all_rows = client.get("/api/deals").json()
+    assert all_rows["count"] == 3
+    assert sum(all_rows["portal_counts"].values()) == 3
+    mobile = client.get("/api/deals?portal=mobile.de").json()
+    assert mobile["count"] == 2
+    assert mobile["portal_counts"] == all_rows["portal_counts"]
+    assert mobile["mobile_coverage"]["direct"] == 1
+    assert mobile["mobile_coverage"]["via_autouncle"] == 1
+    assert not mobile["mobile_coverage"]["complete"]
+    indirect = next(r for r in mobile["deals"] if r["portal"] == "AutoUncle")
+    assert indirect["url"] == samples[1][1]
+    assert indirect["origin_portal"] == "mobile.de"
+    assert indirect["acquired_via"] == "AutoUncle"
+    limited = client.get("/api/deals?portal=mobile.de&limit=1").json()
+    assert limited["count"] == 1 and limited["available_count"] == 2 and limited["truncated"]
+    assert client.get("/api/deals?portal=AutoUncle").json()["count"] == 2
+
+
 def test_api_status(client):
     r = client.get("/api/status")
     assert r.status_code == 200

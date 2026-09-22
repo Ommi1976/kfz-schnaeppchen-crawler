@@ -10,17 +10,27 @@ darunter liegen. Bereits gemeldete Fahrzeuge werden gemerkt – jedes Auto also
 nur **einmal**.
 
 ## Portale
-Stand aus echten Testläufen (2026-08):
+Stand aus echten Testläufen (2026-09-22):
 
 | Portal | Status & Modus | Besonderheiten |
 |---|---|---|
 | **AutoScout24** | ✅ Voll funktionsfähig | Next.js JSON + server-seitige Filter (kW, Getriebe, Ausstattung, PLZ) |
 | **Kleinanzeigen** | ✅ Voll funktionsfähig | HTML-Karten + parallele Detail-Anreicherung (Kraftstoff, Leistung, Akku) |
-| **mobile.de** | ✅ 100% Autark | Server-seitig via Playwright Firefox Headless (kein PC/Browser nötig) |
-| AutoUncle | ⚠️ Optional | Lädt vorgerenderte Angebote |
+| **mobile.de** | ⚠️ Direktabruf derzeit blockiert | Nachgewiesene mobile.de-Angebote aus AutoUncle erscheinen zusätzlich im mobile.de-Filter; keine Vollständigkeitsgarantie |
+| AutoUncle | ✅ Automatischer Abruf auf HAOS | Eigene Sitzung, Herkunftshinweise und lokale Nachfilterung |
 | heycar | ⚠️ Optional | SPA-Struktur |
 
-**Empfehlung:** AutoScout24, Kleinanzeigen und mobile.de arbeiten vollkommen autark und ohne manuelle Interaktion direkt auf Home Assistant OS. Ein geblocktes Portal stoppt die anderen **nicht**.
+AutoScout24, Kleinanzeigen und AutoUncle werden auf Home Assistant OS abgefragt.
+Auch der mobile.de-Browser läuft im Add-on, sein erfolgreicher Direktzugriff ist
+aber bisher nicht bestätigt. Ein Käuferkonto oder eine gespeicherte Sitzung
+garantiert keinen Zugriff. Ein geblocktes Portal stoppt die anderen **nicht**.
+
+Der mobile.de-Filter enthält direkte Angebote und ausdrücklich belegte
+mobile.de-Angebote aus AutoUncle. Letztere behalten die AutoUncle-URL und werden
+als „mobile.de via AutoUncle“ gekennzeichnet. Die Gesamtzahl zählt den Datensatz
+nur einmal; Portalfilter überschneiden sich dadurch bewusst. Nicht belegte
+Herkunft wird nicht aus Fahrzeugtexten geraten. SoH, Akku, Reichweite und Jahr
+bleiben an ihre jeweiligen Feldbelege gebunden.
 
 ## So werden Schnäppchen erkannt
 - **Erwarteter Preis statt Median (#3):** Aus allen Treffern wird per robuster
@@ -40,6 +50,16 @@ Stand aus echten Testläufen (2026-08):
 
 ## Als Home Assistant Add-on installieren
 
+### Lokale Installation auf HAOS (dieses Projekt)
+
+Das Add-on wird direkt nach `/addons/kfz_schnaeppchen` auf HAOS kopiert und
+über den lokalen App-Store gebaut/installiert, nicht aus GitHub installiert.
+`scripts/deploy-local.ps1` überträgt den committeten Stand, synchronisiert den
+lokalen Supervisor-Buildkontext, lädt den Store neu und führt bei einer neuen
+Version ein Update aus. Browserprofile und Datenbank liegen weiterhin in `/data`.
+
+### Alternative: GitHub-Repository
+
 [![Add-Repository zu Home Assistant hinzufügen](https://my.home-assistant.io/badges/supervisor_add_addon_repository.svg)](https://my.home-assistant.io/redirect/supervisor_add_addon_repository/?repository_url=https%3A%2F%2Fgithub.com%2FOmmi1976%2Fkfz-schnaeppchen-crawler)
 
 **Ein-Klick:** Auf den Button oben klicken → HA-Adresse bestätigen → **Hinzufügen**.
@@ -54,8 +74,7 @@ installieren.
 
 Details und alle Optionen: [kfz_schnaeppchen/DOCS.md](kfz_schnaeppchen/DOCS.md)
 
-> Hinweis: Ein eigenes Add-on muss **einmalig** als Repository hinzugefügt
-> werden – das ist bei Home Assistant für alle Nicht-Standard-Add-ons so.
+> Für die lokale Installation ist kein GitHub-Repository im HA-App-Store nötig.
 
 ## Ohne Home Assistant (Standalone-CLI)
 Der Crawler läuft auch eigenständig auf jedem Rechner mit Python:

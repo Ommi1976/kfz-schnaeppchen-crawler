@@ -23,6 +23,10 @@ jobs:
         run: |
           pip install pytest==8.4.2 httpx==0.28.1
           python -m pytest -q
+      - name: Browser-Regression (Trefferliste inklusive SoH)
+        run: |
+          python -m playwright install --with-deps chromium
+          python -m pytest tests/test_results_browser.py -q
       - name: Import-Test
         working-directory: kfz_schnaeppchen
         run: python -c "import kfz_crawler.main, kfz_crawler.ha_run; from kfz_crawler.portals import REGISTRY; print(list(REGISTRY))"

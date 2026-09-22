@@ -1,3 +1,14 @@
+# 1.3.1
+
+- Trefferliste repariert: Ein Inserat mit SoH-Wert konnte die gesamte Darstellung abbrechen.
+- Fehler werden sichtbar angezeigt; vorhandene Treffer bleiben bei Abruffehlern erhalten. Statusfehler verhindern den Trefferabruf nicht mehr.
+- Nachgewiesene mobile.de-Angebote aus AutoUncle sind über den mobile.de-Filter erreichbar, mit Herkunftshinweis und unveränderter AutoUncle-URL.
+- Direkter Abruf und indirekte Angebote werden getrennt gezählt; in „Alle Portale“ wird kein zusätzlicher Datensatz erzeugt.
+- Bereits gespeicherte AutoUncle-Weiterleitungen werden ohne neue Portalabrufe zugeordnet; neue Karten speichern ihren ausdrücklichen Quellenhinweis.
+- Browser-Regressionstests für SoH, Filter und Fehlerbehandlung werden auch in CI ausgeführt.
+
+Der mobile.de-Direktabruf kann weiterhin blockiert sein. Die AutoUncle-Erfassung ist unabhängig davon automatisiert, aber kein vollständiger Spiegel des mobile.de-Bestands.
+
 # 1.3.0
 
 - Portalkonten für mobile.de, AutoScout24, Kleinanzeigen und AutoUncle in der Add-on-Oberfläche.

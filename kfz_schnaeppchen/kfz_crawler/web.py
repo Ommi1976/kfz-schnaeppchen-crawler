@@ -511,8 +511,12 @@ def _ergaenze_aus_fahrzeugakte(store, rows: list) -> None:
 @app.get("/api/deals")
 async def deals(search: str | None = None, limit: int = 400, deals_only: bool = False,
                 portal: str | None = None, include_stale: bool = False):
+    from .listing_sources import listing_origin
+    from .mobile_runtime import mobile_status
+    # Source filters must be applied after attribution: an AutoUncle record can
+    # be a mobile.de offer without becoming a successful mobile.de direct fetch.
     rows = app.state.store.list_deals(
-        limit=min(limit, 2000), search_name=search, deals_only=deals_only, portal=portal,
+        limit=2000, search_name=search, deals_only=deals_only,
         include_stale=include_stale
     )
     # Fehlende Felder aus der gemeinsamen Fahrzeugakte auffuellen, BEVOR
@@ -587,6 +591,26 @@ async def deals(search: str | None = None, limit: int = 400, deals_only: bool = 
         filtered.append(row)
     rows = filtered
 
+    portal_counts = {}
+    for row in rows:
+        p = row.get("portal") or "Unbekannt"
+        portal_counts[p] = portal_counts.get(p, 0) + 1
+        row["origin_portal"] = listing_origin(p, row.get("url"), row.get("field_evidence"))
+        row["acquired_via"] = p
+    runtime = mobile_status(app.state.store)
+    mobile_coverage = {
+        "direct": portal_counts.get("mobile.de", 0),
+        "via_autouncle": sum(r.get("portal") == "AutoUncle" and r.get("origin_portal") == "mobile.de" for r in rows),
+        "direct_status": runtime["status"], "blocked_until": runtime["blocked_until"],
+        "complete": False,
+    }
+    total_deals = sum(1 for r in rows if r.get("is_deal"))
+    if portal:
+        rows = [r for r in rows if r.get("portal") == portal or (
+            portal == "mobile.de" and r.get("portal") == "AutoUncle" and r.get("origin_portal") == "mobile.de")]
+    available_count = len(rows)
+    rows = rows[:max(1, min(limit, 2000))]
+
     # Dasselbe Auto steht oft auf mehreren Portalen. Die Zuordnung liegt in
     # vehicle_links bereit, wurde aber nirgends gezeigt - der guenstigere
     # Preis fiel damit nicht auf.
@@ -599,12 +623,6 @@ async def deals(search: str | None = None, limit: int = 400, deals_only: bool = 
         for row in rows:
             row["andere_portale"] = []
 
-    # Portal-Aufteilung für die aktuelle Suche & Deals-Filterung berechnen
-    portal_counts = {}
-    for r in rows:
-        p = r.get("portal") or "Unbekannt"
-        portal_counts[p] = portal_counts.get(p, 0) + 1
-
     # Wie viele Inserate wurden ausgeblendet, weil sie auf dem Portal nicht
     # mehr auffindbar sind. Die Oberfläche kann das anbieten, statt tote
     # Einträge stillschweigend wegzulassen.
@@ -616,7 +634,10 @@ async def deals(search: str | None = None, limit: int = 400, deals_only: bool = 
         "count": len(rows),
         "deals": rows,
         "portal_counts": portal_counts,
-        "total_deals": sum(1 for r in rows if r.get("is_deal")),
+        "mobile_coverage": mobile_coverage,
+        "available_count": available_count,
+        "truncated": available_count > len(rows),
+        "total_deals": total_deals,
         "stale_count": sum(1 for r in rows if r.get("is_stale")),
         "stale_hidden": ausgeblendet,
         "portal_health": app.state.store.list_portal_health(search),

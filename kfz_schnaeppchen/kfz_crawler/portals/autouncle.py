@@ -326,6 +326,17 @@ class AutoUncle(BasePortal):
                     body=text,
                     raw_id=self._id_from_href(href),
                 )
+            # Read only the source control belonging to this card, never a
+            # mobile.de mention in the description or a neighbouring listing.
+            from ..listing_sources import normalize_source_label
+            source_label = art.select_one("[data-testid='source-label']")
+            origin = normalize_source_label(source_label.get_text(" ", strip=True)) if source_label else None
+            if origin:
+                listing.field_evidence["origin_portal"] = {
+                    "value": origin, "source": "autouncle_source_label",
+                    "confidence": 1.0, "url": offer_url,
+                    "evidence": source_label.get_text(" ", strip=True),
+                }
             from ..models import infer_listing_details
             infer_listing_details(listing)
             listings.append(listing)
