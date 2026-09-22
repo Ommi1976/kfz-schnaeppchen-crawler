@@ -30,12 +30,29 @@ def test_login_domains_are_scoped_to_the_selected_portal():
     assert not accounts.allowed_navigation("mobile_de", "https://www.autouncle.de/")
 
 
+def test_mobile_uses_official_buyer_login_not_search_management():
+    from urllib.parse import urlparse, parse_qs
+    url = accounts.PORTALS["mobile_de"]["url"]
+    parsed = urlparse(url)
+    assert parsed.hostname == "www.mobile.de"
+    assert parsed.path == "/api/auth/login"
+    assert parse_qs(parsed.query)["source_uri"] == ["https://www.mobile.de/"]
+    assert "state" not in parse_qs(parsed.query) and "nonce" not in parse_qs(parsed.query)
+    assert accounts.allowed_navigation("mobile_de", "https://id.mobile.de/login")
+
+
 @pytest.mark.parametrize("html,expected", [
     ("<script>Abmelden</script><p>Cookie gespeichert</p>", "unverified"),
     ("<div hidden><button>Abmelden</button></div><button>Anmelden</button>", "anonymous"),
     ("<p>Zum Beenden auf Abmelden klicken.</p>", "unverified"),
     ("<button>Abmelden</button>", "authenticated"),
     ("<input type='password'>", "anonymous"),
+    ("<h1>Zugriff verweigert</h1><p>Bitte anmelden</p>", "blocked"),
+    ("<h1>Access denied</h1><p>CAPTCHA</p>", "blocked"),
+    ("<h1>Bitte CAPTCHA bestätigen</h1>", "verification_required"),
+    ("<h1>Unusual traffic</h1><p>Complete CAPTCHA</p>", "verification_required"),
+    ("<div hidden>Zugriff verweigert</div><input type='password'>", "anonymous"),
+    ("<script>captcha</script><input type='password'>", "anonymous"),
 ])
 def test_login_requires_explicit_evidence(html, expected):
     assert accounts.auth_evidence(html) == expected
@@ -89,6 +106,36 @@ def test_outdated_login_not_claimed_as_current(store):
     save_state(store, accounts.account_key("mobile_de"), {
         "enabled": True, "auth_state": "authenticated", "checked_at": 1})
     assert accounts.account_status(store, "mobile_de")["auth_state"] == "unverified"
+
+
+def test_hard_denial_snapshot_and_status_never_claim_verification(store):
+    save_state(store, accounts.account_key("mobile_de"), {"enabled": True})
+    page = Mock()
+    page.is_closed.return_value = False
+    page.url = "https://id.mobile.de/login"
+    page.locator.return_value.evaluate_all.return_value = []
+    page.content.return_value = "<h1>Zugriff verweigert</h1>"
+    page.screenshot.return_value = b"synthetic-image"
+    worker = SimpleNamespace(_account_session={"id": "s", "owner": "o", "expires_at": time.time()+60},
+                             _context=SimpleNamespace(pages=[page]))
+    snapshot = accounts._snapshot(worker, "mobile_de", store, "s", "o")
+    assert snapshot["auth_state"] == "blocked"
+    assert snapshot["message"] == accounts.BLOCKED_LOGIN_MESSAGE
+    assert accounts.account_status(store, "mobile_de")["auth_state"] == "blocked"
+    assert accounts.account_status(store, "mobile_de")["message"] == accounts.BLOCKED_LOGIN_MESSAGE
+
+
+@pytest.mark.parametrize("action", ["text", "key", "click", "scroll"])
+def test_denied_page_never_receives_credentials_or_input(store, action):
+    page = Mock()
+    page.is_closed.return_value = False
+    page.url = "https://id.mobile.de/login"
+    page.content.return_value = "<h1>Zugriff verweigert</h1>"
+    worker = SimpleNamespace(_account_session={"id": "s", "owner": "o", "expires_at": time.time()+60},
+                             _context=SimpleNamespace(pages=[page]))
+    with pytest.raises(accounts.AccountError):
+        accounts._input(worker, "mobile_de", store, {"session_id": "s", "action": action, "text": "private-value"}, "o")
+    assert not page.keyboard.mock_calls and not page.mouse.mock_calls
 
 
 def test_disconnect_removes_only_profile_and_keeps_pause(store, tmp_path, monkeypatch):

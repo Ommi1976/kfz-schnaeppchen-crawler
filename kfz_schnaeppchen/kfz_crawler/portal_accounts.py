@@ -25,7 +25,10 @@ from .mobile_runtime import (MobileBrowser, MobileDeferred, MobilePageError,
                              retry_after_seconds)
 
 PORTALS = {
-    "mobile_de": {"label": "mobile.de", "url": "https://suchen.mobile.de/fahrzeuge/mymobile/searchOverview.html", "domains": ("mobile.de",)},
+    # Official buyer-login entry observed via www.mobile.de -> Anmelden.
+    # Let the portal generate its OIDC state/nonce and redirect to id.mobile.de;
+    # the search-management page is not the login entry.
+    "mobile_de": {"label": "mobile.de", "url": "https://www.mobile.de/api/auth/login?cf_template=OTP&source_uri=https%3A%2F%2Fwww.mobile.de%2F", "domains": ("mobile.de",)},
     "kleinanzeigen": {"label": "Kleinanzeigen", "url": "https://www.kleinanzeigen.de/m-einloggen.html", "domains": ("kleinanzeigen.de",)},
     "autoscout24": {"label": "AutoScout24", "url": "https://www.autoscout24.de/", "domains": ("autoscout24.de", "autoscout24.com")},
     "autouncle": {"label": "AutoUncle", "url": "https://www.autouncle.de/de/mein-autouncle/suchanfragen", "domains": ("autouncle.de", "autouncle.com")},
@@ -76,14 +79,34 @@ def allowed_navigation(key, url):
         return False
 
 
+BLOCKED_LOGIN_MESSAGE = (
+    "Das Portal verweigert diesem Add-on-Browser den Zugriff. Hier ist keine Anmeldung möglich. "
+    "Bitte keine Zugangsdaten eingeben. Eine Anmeldung oder das Ende der Suchpause garantiert keine Freigabe."
+)
+
+
+def _access_state(html):
+    """A hard denial is not an interactive verification or a login form."""
+    soup = BeautifulSoup(html or "", "lxml")
+    for node in soup.select("script, style, noscript, template, [hidden], [aria-hidden='true']"):
+        node.decompose()
+    text = soup.get_text(" ", strip=True).lower()
+    if any(marker in text for marker in ("zugriff verweigert", "access denied")):
+        return "blocked"
+    if _is_block_page(str(soup)):
+        return "verification_required"
+    return None
+
+
 def auth_evidence(html):
     """Only explicit visible-page logout/login controls are evidence, not cookies."""
     soup = BeautifulSoup(html, "lxml")
     for el in soup.select("script, style, noscript, template, [hidden], [aria-hidden='true']"):
         el.decompose()
     controls = " ".join(el.get_text(" ", strip=True) for el in soup.select("a, button, [role='button']"))
-    if _is_block_page(str(soup)):
-        return "verification_required"
+    access = _access_state(str(soup))
+    if access:
+        return access
     if re.search(r"\b(?:abmelden|ausloggen|log\s*out|sign\s*out)\b", controls, re.I):
         return "authenticated"
     if soup.select_one("input[type='password']") or re.search(r"\b(?:anmelden|einloggen|log\s*in|sign\s*in)\b", controls, re.I):
@@ -99,7 +122,7 @@ def _observe(store, key, page):
         .filter(e => e.getClientRects().length && getComputedStyle(e).visibility !== 'hidden')
         .map(e => ({text: e.innerText || e.getAttribute('aria-label') || '', password: e.type === 'password'}))""")
     markup = " ".join("<input type='password'>" if c["password"] else "<button>" + escape(c["text"]) + "</button>" for c in controls)
-    observation = "verification_required" if _is_block_page(page.content()) else auth_evidence(markup)
+    observation = _access_state(page.content()) or auth_evidence(markup)
     data = load_state(store, account_key(key))
     data.update(auth_state=observation, checked_at=time.time())
     if observation == "authenticated":
@@ -242,7 +265,7 @@ def account_status(store, key, enabled=True):
             "session_active": bool(session and session["expires_at"] > time.time()),
             "search_status": "blocked" if runtime.get("blocked_until", 0) > time.time() else latest.get("status", "untested"),
             "last_search_success": last_success, "blocked_until": runtime.get("blocked_until", 0),
-            "message": "Die Anmeldung bestätigt keinen erfolgreichen Suchabruf."}
+            "message": BLOCKED_LOGIN_MESSAGE if auth == "blocked" else "Die Anmeldung bestätigt keinen erfolgreichen Suchabruf."}
 
 
 def _require_session(worker, session_id, owner):
@@ -316,7 +339,7 @@ def _snapshot(worker, key, store, session_id, owner):
     return {"image": image, "width": 1440, "height": 900,
             "auth_state": state, "host": urlparse(page.url).hostname,
             "expires_at": session["expires_at"],
-            "message": "Die Suche dieses Portals pausiert, solange dieses Anmeldefenster geöffnet ist."}
+            "message": BLOCKED_LOGIN_MESSAGE if state == "blocked" else "Die Suche dieses Portals pausiert, solange dieses Anmeldefenster geöffnet ist."}
 
 
 def _input(worker, key, store, payload, owner):
@@ -326,6 +349,10 @@ def _input(worker, key, store, payload, owner):
         raise AccountError("Bitte kurz warten.", 429)
     session["last_input"] = now
     page = _login_page(worker, key)
+    # Check the current page, not just the last screenshot. A redirect may have
+    # replaced a form with a denial between rendering and submitting input.
+    if _access_state(page.content()) == "blocked":
+        raise AccountError("Portalzugriff blockiert. Auf dieser Seite ist keine Anmeldung möglich.")
     action = payload.get("action")
     if action == "click":
         x, y = payload.get("x"), payload.get("y")

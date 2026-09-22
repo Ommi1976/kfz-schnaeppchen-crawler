@@ -12,7 +12,8 @@ from pathlib import Path
 import pytest
 
 
-def test_interactive_login_ui_and_shared_profile(tmp_path, monkeypatch):
+@pytest.mark.parametrize("denied_first", [False, True])
+def test_interactive_login_ui_and_shared_profile(tmp_path, monkeypatch, denied_first):
     playwright = pytest.importorskip("playwright.sync_api")
     import uvicorn
     from kfz_crawler import portal_accounts as accounts, mobile_runtime
@@ -33,10 +34,15 @@ def test_interactive_login_ui_and_shared_profile(tmp_path, monkeypatch):
           <button id='login' style='position:absolute;left:20px;top:210px;width:160px;height:40px'
             onclick="document.cookie='test_session=synthetic; Max-Age=3600; Secure; SameSite=Lax'; document.body.innerHTML='<button>Abmelden</button><h1>Angemeldet</h1>'">Anmelden</button>
           </body></html>"""
+        navigations = []
         def synthetic_routes(worker, key):
             if getattr(worker, "_guarded_context", None) is worker._context:
                 return
-            worker._context.route("**/*", lambda route: route.fulfill(status=200, content_type="text/html", body=html))
+            def respond(route):
+                navigations.append(route.request.url)
+                route.fulfill(status=403 if denied_first else 200, content_type="text/html",
+                              body="<h1>Zugriff verweigert</h1>" if denied_first else html)
+            worker._context.route("**/*", respond)
             worker._guarded_context = worker._context
         monkeypatch.setattr(accounts, "_guard_context", synthetic_routes)
         with socket.socket() as sock:
@@ -65,6 +71,28 @@ def test_interactive_login_ui_and_shared_profile(tmp_path, monkeypatch):
             connect.click()
             screen = page.locator("#accounts-screen")
             playwright.expect(screen).to_be_visible(timeout=30000)
+            assert accounts.PORTALS["mobile_de"]["url"] in navigations
+            if denied_first:
+                playwright.expect(page.locator("#accounts-session-auth")).to_have_text("Zugriff blockiert")
+                playwright.expect(page.locator("#accounts-text-form")).not_to_be_visible()
+                playwright.expect(page.locator("#accounts-text")).to_be_disabled()
+                playwright.expect(page.locator("#accounts-remote-controls")).not_to_be_visible()
+                playwright.expect(page.locator("#accounts-session-check")).to_be_disabled()
+                playwright.expect(page.locator("#accounts-session-notice")).to_contain_text("keine Anmeldung möglich")
+                playwright.expect(page.locator("#accounts-session-notice")).to_have_attribute("data-tone", "bad")
+                playwright.expect(page.locator("#accounts-session-help")).to_contain_text("kein Anmeldeformular")
+                count = len(navigations)
+                page.get_by_role("button", name="Bild aktualisieren", exact=True).click()
+                playwright.expect(page.locator("#accounts-session-refresh")).to_be_enabled()
+                assert len(navigations) == count  # Screenshot, not another portal request.
+                screenshot = tmp_path / "accounts-blocked.png"
+                page.screenshot(path=str(screenshot))
+                print(f"BLOCKED_UI_SCREENSHOT: {screenshot}")
+                # A later form must re-enable the UI, without reopening the dialog.
+                worker = mobile_runtime.mobile_browser()
+                worker._executor.submit(lambda: worker._page.set_content(html)).result()
+                page.get_by_role("button", name="Bild aktualisieren", exact=True).click()
+                playwright.expect(page.locator("#accounts-text-form")).to_be_visible()
             playwright.expect(screen).to_have_attribute("aria-disabled", "false", timeout=10000)
 
             def click_remote(x, y):

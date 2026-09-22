@@ -1,3 +1,12 @@
+# 1.3.2
+
+- mobile.de-Verbindung startet über den offiziellen Käufer-Login auf www.mobile.de mit Weiterleitung zu id.mobile.de, nicht mehr über die Suchverwaltung auf suchen.mobile.de.
+- Harte Zugriffsverweigerungen werden als „Zugriff blockiert“ angezeigt und nicht mehr als lösbare Bestätigungsaufgabe.
+- Auf einer Sperrseite werden Zugangsdaten-Eingabe und Bedienhinweise ausgeblendet; der Server verhindert ebenfalls die Weitergabe von Eingaben an diese Seite.
+- Tests prüfen Anmeldeeinstieg, Sperrerkennung, Eingabeschutz und Wiederherstellung der Bedienung nach einem Seitenwechsel. Browserprofile und Suchpausen bleiben unverändert.
+
+Eine erreichbare Anmeldung bestätigt noch keinen erfolgreichen Suchabruf. Der Portalbetreiber kann auch den neuen Anmeldeweg oder die anschließende Suche blockieren.
+
 # 1.3.1
 
 - Trefferliste repariert: Ein Inserat mit SoH-Wert konnte die gesamte Darstellung abbrechen.

@@ -8,6 +8,8 @@
   const screen = byId("accounts-screen");
   const textInput = byId("accounts-text");
   const tokenInput = byId("accounts-token");
+  const loginHelp = byId("accounts-session-help").textContent;
+  const screenHelp = byId("accounts-screen-help").textContent;
   const portals = [
     { key: "mobile_de", label: "mobile.de", monogram: "m" },
     { key: "autoscout24", label: "AutoScout24", monogram: "24" },
@@ -304,7 +306,15 @@
   function updateControls(session) {
     if (current !== session) return;
     const live = !!session.id && !session.expired && !session.closing;
-    const canInput = live && session.hasImage && !session.paused && !session.busy && !document.hidden;
+    const canInput = live && session.hasImage && !session.blocked && !session.paused && !session.busy && !document.hidden;
+    byId("accounts-text-form").hidden = session.blocked;
+    byId("accounts-remote-controls").hidden = session.blocked;
+    byId("accounts-session-help").textContent = session.blocked
+      ? "Dies ist eine Sperrseite des Portals, kein Anmeldeformular und keine lösbare Bestätigungsaufgabe. Zugangsdaten können hier nicht eingegeben werden."
+      : loginHelp;
+    byId("accounts-screen-help").textContent = session.blocked
+      ? "Bild aktualisieren liest nur den aktuellen Browserinhalt; die Portalseite wird dadurch nicht neu aufgerufen. Schließen & Profil behalten beendet die Ansicht ohne das Profil zu löschen."
+      : screenHelp;
     textInput.disabled = !canInput;
     byId("accounts-text-send").disabled = !canInput;
     for (const button of byId("accounts-remote-controls").querySelectorAll("button")) button.disabled = !canInput;
@@ -390,6 +400,8 @@
     if (data.expires_at !== undefined) setExpiry(session, data.expires_at);
     if (session.expired) return;
     badge(byId("accounts-session-auth"), data.auth_state, authStates, "Anmeldung ungeprüft");
+    session.blocked = data.auth_state === "blocked";
+    if (session.blocked) textInput.value = "";
     byId("accounts-session-host").textContent = safeText(data.host) || "Nicht gemeldet";
     const width = Number(data.width);
     const height = Number(data.height);
@@ -427,7 +439,7 @@
     screen.hidden = false;
     if (oldUrl) URL.revokeObjectURL(oldUrl);
     byId("accounts-screen-placeholder").hidden = true;
-    notice("accounts-session-notice", data.message);
+    notice("accounts-session-notice", data.message, session.blocked ? "bad" : "neutral");
   }
 
   function openSession(key) {
@@ -435,7 +447,7 @@
     const card = cards.get(key);
     const session = {
       key, id: null, expiresAt: null, pollTimer: null, expiryTimer: null,
-      blobUrl: null, hasImage: false, busy: false, paused: false,
+      blobUrl: null, hasImage: false, busy: false, paused: false, blocked: false,
       expired: false, closing: false, closed: false, queue: Promise.resolve(),
       opener: document.activeElement,
     };
@@ -467,7 +479,7 @@
   }
 
   function canSend(session) {
-    return session && visible(session) && !!session.id && session.hasImage && !session.busy && !session.paused && !session.expired;
+    return session && visible(session) && !!session.id && session.hasImage && !session.blocked && !session.busy && !session.paused && !session.expired;
   }
 
   function sendInput(payload) {
