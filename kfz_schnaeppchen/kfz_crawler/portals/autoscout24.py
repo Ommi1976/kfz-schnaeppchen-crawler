@@ -8,6 +8,7 @@ JSON (stabiler als HTML-Selektoren) und fallen bei Bedarf auf HTML zurück.
 from __future__ import annotations
 
 import json
+import logging
 import re
 from typing import List, Optional
 
@@ -23,6 +24,8 @@ FUEL_MAP = {
 GEAR_MAP = {"schaltgetriebe": "M", "automatik": "A"}
 SELLER_MAP = {"haendler": "D", "händler": "D", "privat": "P"}
 PS_TO_KW = 1.35962
+
+logger = logging.getLogger(__name__)
 
 from .as24_taxonomy import BODY_TYPE_TO_AS24, DOORS_TO_AS24, VALID_EQUIPMENT_IDS
 
@@ -137,6 +140,11 @@ class AutoScout24(BasePortal):
             try:
                 resp = self._get(url)
             except Exception as e:
+                # Scheitert schon die erste Seite, ist das ein Portalfehler und
+                # gehoert in den Suchfortschritt - ein stilles "0 Treffer" saehe
+                # aus wie eine leere Suche. Spaetere Seiten: behalten, was da ist.
+                if page == 1:
+                    raise
                 logger.warning("AutoScout24: Fehler beim Abruf von Seite %d: %s", page, e)
                 break
             page_items = self._parse(resp.text)

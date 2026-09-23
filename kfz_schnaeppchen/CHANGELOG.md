@@ -1,3 +1,9 @@
+# 1.3.4
+
+- AutoScout24 lieferte keine Treffer mehr: Beim Abruffehler brach die Suche mit „name 'logger' is not defined“ ab und verdeckte den eigentlichen Fehler. Scheitert jetzt schon die erste Seite, erscheint der echte Abruffehler im Suchfortschritt; bei späteren Seiten bleiben die bis dahin gefundenen Treffer erhalten.
+- Suchfortschritt: Die Spalte „Anbieter gemeldet“ erscheint nur, wenn ein Portal diese Zahl liefert. Fehlende Werte stehen als „–“ statt „unbekannt“.
+- Optionen: Der Telegram-Bot-Token ist jetzt ein verdecktes Passwortfeld; die Chat-ID ist ein normales Textfeld (die Typen waren vertauscht).
+
 # 1.3.3
 
 - Texteingabe im Anmeldefenster verliert bei automatischen Bildschirmaktualisierungen nicht mehr den Fokus.
