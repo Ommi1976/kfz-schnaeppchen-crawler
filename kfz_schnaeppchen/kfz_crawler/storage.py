@@ -820,6 +820,16 @@ class SeenStore:
                 self.conn.commit()
         return stale_count
 
+    def known_urls(self, fingerprints: list) -> dict:
+        """Zuletzt gespeicherte URL je Fingerprint (z. B. nachgeladene Direktlinks)."""
+        if not fingerprints:
+            return {}
+        placeholders = ",".join("?" * len(fingerprints))
+        with self._lock:
+            return {r["fingerprint"]: r["url"] for r in self.conn.execute(
+                f"SELECT fingerprint, url FROM deals WHERE fingerprint IN ({placeholders})",
+                list(fingerprints))}
+
     def unseen_candidates(self, search_name: str, seen_before: float, checked_before: float,
                           portals, per_portal: int) -> List[dict]:
         """Im Lauf nicht gesehene Inserate, die länger nicht geprüft wurden."""

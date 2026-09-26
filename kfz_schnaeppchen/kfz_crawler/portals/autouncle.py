@@ -11,7 +11,9 @@ from __future__ import annotations
 import json
 import logging
 import os
+import random
 import re
+import time
 from dataclasses import replace
 from pathlib import Path
 from typing import List, Optional
@@ -140,15 +142,65 @@ class AutoUncle(BasePortal):
                 def fetch(url, **kwargs):
                     return portal_browser("autouncle").fetch(
                         url, store=getattr(self, "store", None), proxy=self.proxy, **kwargs)
-                return self._search_variants(query, fetch)
+                results = self._search_variants(query, fetch)
             except MobileDeferred:
                 raise
-            except PortalPartialError:
+            except PortalPartialError as exc:
+                self._resolve_direct_links(exc.listings)
                 raise
             except Exception as exc:
                 raise PortalError(f"AutoUncle: Browserabruf fehlgeschlagen – {exc}") from exc
+        else:
+            results = self._search_variants(query, lambda url: self._get(url).text)
+        self._resolve_direct_links(results)
+        return results
 
-        return self._search_variants(query, lambda url: self._get(url).text)
+    # Rund ein Drittel der Ergebniskarten enthält keinen Link zum Händler, nur
+    # AutoUncles eigene Fahrzeugseite (/de/d/<id>). Dort steht er hinter
+    # "Zum Angebot" als /de/das_wiedersehen/<quelle>/<id>/<n> – mit derselben
+    # ID; andere Links dieser Art gehören zu "Ähnliche Fahrzeuge".
+    LINK_BUDGET = 15  # Fahrzeugseiten je Lauf; Bekanntes kommt aus der Datenbank
+
+    def _direct_link(self, raw_id: str, fetch) -> Optional[str]:
+        html = fetch(f"{self.BASE}/de/d/{raw_id}")
+        m = re.search(r'href="(/de/das_wiedersehen/[^"/]+/%s/\d+)"' % re.escape(raw_id), html or "")
+        return self.BASE + m.group(1) if m else None
+
+    def _http_text(self, url: str) -> str:
+        from curl_cffi import requests
+        proxies = {"http": self.proxy, "https": self.proxy} if self.proxy else None
+        response = requests.get(url, impersonate="chrome", timeout=25, proxies=proxies,
+                                headers={"Accept-Language": "de-DE,de;q=0.9"})
+        return response.text if response.status_code == 200 else ""
+
+    def _resolve_direct_links(self, listings, fetch=None, sleep=time.sleep) -> None:
+        pending = [l for l in listings if "/de/d/" in (l.url or "") and (l.raw_id or "").isdigit()]
+        if not pending:
+            return
+        store = getattr(self, "store", None)
+        try:
+            known = store.known_urls([l.fingerprint for l in pending]) if store is not None else {}
+        except Exception:
+            known = {}
+        fetch = fetch or self._http_text
+        budget = self.LINK_BUDGET
+        for listing in pending:
+            cached = known.get(listing.fingerprint) or ""
+            if "/das_wiedersehen/" in cached:
+                listing.url = cached
+                continue
+            if budget <= 0:
+                continue
+            if budget < self.LINK_BUDGET:
+                sleep(random.uniform(2, 4))
+            budget -= 1
+            try:
+                direct = self._direct_link(listing.raw_id, fetch)
+            except Exception as exc:
+                logger.debug("AutoUncle-Direktlink für %s nicht ermittelbar: %s", listing.raw_id, type(exc).__name__)
+                direct = None
+            if direct:
+                listing.url = direct
 
     def _search_variants(self, query: SearchQuery, fetcher) -> List[Listing]:
         results: List[Listing] = []

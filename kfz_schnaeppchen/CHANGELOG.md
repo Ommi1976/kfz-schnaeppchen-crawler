@@ -1,3 +1,7 @@
+# 1.5.1
+
+- AutoUncle-Treffer führen wieder direkt zum Inserat beim Händler bzw. Ursprungsportal. Rund ein Drittel der Ergebniskarten enthält diesen Link nicht; das Add-on holt ihn jetzt von AutoUncles Fahrzeugseite („Zum Angebot“, höchstens 15 Seiten je Lauf) und merkt ihn sich.
+
 # 1.5.0
 
 - Gelöschte Inserate verschwinden zuverlässig aus allen Trefferlisten. Bisher markierte nur mobile.de verschwundene Inserate; bei AutoScout24, AutoUncle und Kleinanzeigen blieben sie für immer stehen.
