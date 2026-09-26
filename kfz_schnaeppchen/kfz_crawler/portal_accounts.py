@@ -58,8 +58,10 @@ def account_enabled(store, key):
 def profile_path(key):
     account_key(key)
     if key == "mobile_de":
-        from .mobile_runtime import PROFILE_DIR
-        return Path(PROFILE_DIR)
+        from . import mobile_runtime
+        if mobile_runtime._instance is not None:
+            return mobile_runtime._instance._profile_dir
+        return mobile_runtime.mobile_profile_dir()
     if key == "autouncle":
         return Path(os.environ.get("AUTO_UNCLE_PROFILE") or (
             "/data/autouncle_profile" if Path("/data").exists()
@@ -334,9 +336,12 @@ def _snapshot(worker, key, store, session_id, owner):
     session = _require_session(worker, session_id, owner)
     page = _login_page(worker, key)
     state = _observe(store, key, page)
+    # Chrome on the GPU compositor has no emulated viewport; report the real size.
+    size = page.viewport_size or page.evaluate("({width: innerWidth, height: innerHeight})")
+    session["size"] = (int(size["width"]), int(size["height"]))
     # Sensitive pixels stay in memory and are never logged, cached or written to disk.
     image = base64.b64encode(page.screenshot(type="jpeg", quality=70, timeout=7000)).decode("ascii")
-    return {"image": image, "width": 1440, "height": 900,
+    return {"image": image, "width": session["size"][0], "height": session["size"][1],
             "auth_state": state, "host": urlparse(page.url).hostname,
             "expires_at": session["expires_at"],
             "message": BLOCKED_LOGIN_MESSAGE if state == "blocked" else "Die Suche dieses Portals pausiert, solange dieses Anmeldefenster geöffnet ist."}
@@ -356,7 +361,8 @@ def _input(worker, key, store, payload, owner):
     action = payload.get("action")
     if action == "click":
         x, y = payload.get("x"), payload.get("y")
-        if not isinstance(x, (int, float)) or not isinstance(y, (int, float)) or not (0 <= x < 1440 and 0 <= y < 900):
+        width, height = session.get("size", (1440, 900))
+        if not isinstance(x, (int, float)) or not isinstance(y, (int, float)) or not (0 <= x < width and 0 <= y < height):
             raise AccountError("Ungültige Position", 400)
         page.mouse.click(x, y)
     elif action == "text":
@@ -415,7 +421,7 @@ def _disconnect(worker, key, store):
     worker._close()
     target = worker._profile_dir
     expected = profile_path(key)
-    valid_names = {"mobile_de": {"firefox_profile"}, "autouncle": {"autouncle_profile"},
+    valid_names = {"mobile_de": {"firefox_profile", "chrome_profile"}, "autouncle": {"autouncle_profile"},
                    "kleinanzeigen": {"kleinanzeigen"}, "autoscout24": {"autoscout24"}}
     if (target != expected or target.name not in valid_names[key] or target.is_symlink()
             or target.resolve() != target.absolute() or target.parent.resolve() == target.resolve()):

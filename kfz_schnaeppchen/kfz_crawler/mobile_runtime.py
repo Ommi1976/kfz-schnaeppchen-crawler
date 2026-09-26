@@ -10,6 +10,7 @@ from __future__ import annotations
 import atexit
 import json
 import logging
+import os
 import re
 import threading
 import time
@@ -24,6 +25,25 @@ from .browser import BrowserBlocked, BrowserUnavailable, PROFILE_DIR, _is_block_
 
 STATE_KEY = "mobile.runtime.v1"
 logger = logging.getLogger(__name__)
+
+# Chrome auf der Intel-GPU (run.sh startet dafür cage statt Xvfb). Gemessen:
+# webdriver=false, WebGL-Renderer der echten GPU statt SwiftShader. Nur für
+# mobile.de; die übrigen Portale bleiben bei Firefox auf Xvfb.
+CHROME_BINARY = Path("/opt/google/chrome/chrome")
+CHROME_PROFILE_DIR = PROFILE_DIR.parent / "chrome_profile"
+
+
+def wayland_socket() -> Path | None:
+    """Socket des GPU-Compositors oder None, wenn er nicht läuft."""
+    runtime = os.environ.get("KFZ_WAYLAND_RUNTIME")
+    if not runtime or not CHROME_BINARY.exists():
+        return None
+    sockets = sorted(p for p in Path(runtime).glob("wayland-*") if not p.name.endswith(".lock"))
+    return sockets[0] if sockets else None
+
+
+def mobile_profile_dir() -> Path:
+    return CHROME_PROFILE_DIR if wayland_socket() else PROFILE_DIR
 CARD_LINKS = "a[href*='details.html?id='], a[href*='/auto-inserat/']"
 
 
@@ -213,8 +233,14 @@ class MobileBrowser:
         self._control = RequestControl()
         self._lock = threading.Lock()
         self._closed = False
-        self._profile_dir = Path(profile_dir) if profile_dir else PROFILE_DIR
+        # Portalkonten übergeben ein eigenes Profil und bleiben bei Firefox.
+        self._wayland = None if profile_dir else wayland_socket()
+        self._profile_dir = Path(profile_dir) if profile_dir else mobile_profile_dir()
         self._account_session = None
+
+    @property
+    def engine(self) -> str:
+        return "chrome-gpu" if self._wayland else "firefox"
 
     def _defer_during_login(self):
         session = self._account_session
@@ -268,26 +294,46 @@ class MobileBrowser:
             if proxy != self._proxy:
                 raise MobilePageError("Proxy-Wechsel erfordert einen Add-on-Neustart")
             return
-        import os
         try:
-            from playwright.sync_api import sync_playwright
-            self._playwright = sync_playwright().start()
             self._profile_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
             if os.name != "nt":
                 self._profile_dir.chmod(0o700)
-            kwargs = dict(headless=not bool(os.environ.get("DISPLAY")),
-                          locale="de-DE", timezone_id="Europe/Berlin",
-                          viewport={"width": 1440, "height": 900},
-                          accept_downloads=False,
-                          firefox_user_prefs={"signon.rememberSignons": False})
-            if proxy:
-                kwargs["proxy"] = {"server": proxy}
-            self._context = self._playwright.firefox.launch_persistent_context(str(self._profile_dir), **kwargs)
+            if self._wayland:
+                self._context = self._launch_chrome(proxy)
+            else:
+                from playwright.sync_api import sync_playwright
+                self._playwright = sync_playwright().start()
+                kwargs = dict(headless=not bool(os.environ.get("DISPLAY")),
+                              locale="de-DE", timezone_id="Europe/Berlin",
+                              viewport={"width": 1440, "height": 900},
+                              accept_downloads=False,
+                              firefox_user_prefs={"signon.rememberSignons": False})
+                if proxy:
+                    kwargs["proxy"] = {"server": proxy}
+                self._context = self._playwright.firefox.launch_persistent_context(str(self._profile_dir), **kwargs)
             self._page = self._context.pages[0] if self._context.pages else self._context.new_page()
             self._proxy = proxy
         except Exception as exc:
             self._close()
             raise BrowserUnavailable("mobile.de-Browser konnte nicht gestartet werden") from exc
+
+    def _launch_chrome(self, proxy):
+        # patchright statt playwright: ohne --enable-automation und ohne
+        # Runtime.enable. Bewusst keine locale-/timezone-/viewport-Emulation –
+        # die liefe über CDP und wäre selbst ein Merkmal. Sprache kommt über
+        # --lang, Zeitzone über TZ, Fenstergröße vom Compositor.
+        from patchright.sync_api import sync_playwright
+        self._playwright = sync_playwright().start()
+        env = dict(os.environ, XDG_RUNTIME_DIR=str(self._wayland.parent),
+                   WAYLAND_DISPLAY=self._wayland.name)
+        # DISPLAY (Xvfb) bleibt gesetzt: Playwright prüft es für sichtbare
+        # Browser, Chrome nutzt wegen --ozone-platform trotzdem Wayland.
+        kwargs = dict(channel="chrome", headless=False, no_viewport=True,
+                      accept_downloads=False, env=env,
+                      args=["--ozone-platform=wayland", "--lang=de-DE"])
+        if proxy:
+            kwargs["proxy"] = {"server": proxy}
+        return self._playwright.chromium.launch_persistent_context(str(self._profile_dir), **kwargs)
 
     def _fetch(self, url, store, proxy, kind):
         # Only this worker accesses the gate and browser; no check/submit races.
@@ -419,6 +465,7 @@ def mobile_status(store) -> dict:
             "requests": counts,
             "limits": RequestControl.LIMITS.copy(),
             "last_error": state.get("last_error", ""),
+            "engine": _instance.engine if _instance else ("chrome-gpu" if wayland_socket() else "firefox"),
             "desktop_required": False}
 
 

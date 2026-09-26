@@ -20,6 +20,32 @@ if [ "$(id -u)" = "0" ]; then
     echo "[KFZ Schnäppchen] Starte virtuellen Browser-Bildschirm..."
     gosu crawler Xvfb :99 -screen 0 1440x900x24 -nolisten tcp >/tmp/kfz-xvfb.log 2>&1 &
     export DISPLAY=:99
+
+    # mobile.de: Chrome auf der echten GPU. Xvfb rendert prinzipbedingt in
+    # Software (SwiftShader) – dieses Merkmal hat Akamai gesehen. cage rendert
+    # ohne Bildschirm über das Render-Device. Fehlt es, bleibt mobile.de bei
+    # Firefox auf Xvfb.
+    gpu_option=$(python3 -c 'import json; o = json.load(open("/data/options.json")); print(0 if o.get("mobile_gpu_browser") is False else 1)' 2>/dev/null || echo 1)
+    if [ "$gpu_option" = "1" ] && [ -e /dev/dri/renderD128 ] && [ -x /opt/google/chrome/chrome ]; then
+        echo "[KFZ Schnäppchen] Starte GPU-Anzeige für mobile.de..."
+        runtime=/tmp/kfz-wayland
+        mkdir -p "$runtime"
+        chown crawler:crawler "$runtime"
+        chmod 700 "$runtime"
+        gosu crawler env XDG_RUNTIME_DIR="$runtime" WLR_BACKENDS=headless \
+            WLR_RENDERER=gles2 WLR_RENDER_DRM_DEVICE=/dev/dri/renderD128 \
+            WLR_LIBINPUT_NO_DEVICES=1 cage -- sleep infinity >/tmp/kfz-cage.log 2>&1 &
+        for _ in $(seq 1 20); do
+            ls "$runtime"/wayland-[0-9] >/dev/null 2>&1 && break
+            sleep 0.5
+        done
+        if ls "$runtime"/wayland-[0-9] >/dev/null 2>&1; then
+            export KFZ_WAYLAND_RUNTIME="$runtime"
+        else
+            echo "[KFZ Schnäppchen] GPU-Anzeige nicht gestartet; mobile.de nutzt Firefox." >&2
+            tail -n 5 /tmp/kfz-cage.log >&2 || true
+        fi
+    fi
     exec gosu crawler /run.sh
 fi
 

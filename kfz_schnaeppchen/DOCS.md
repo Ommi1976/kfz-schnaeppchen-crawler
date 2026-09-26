@@ -25,7 +25,8 @@ gemerkt – so bekommst du jedes Auto nur **einmal** gemeldet.
 | `max_pages` | Ergebnisseiten pro Portal & Suche. |
 | `suspicious_discount` | Ab wie viel **%** unter erwartetem Preis ein Inserat als verdächtig gilt und **nicht** gemeldet wird (z. B. `60`). |
 | `verify_details` | Kleinanzeigen-Detailseiten nachladen für exakte Kraftstoff/Getriebe/Leistung (genauer, mehr Requests). |
-| `use_browser` | Browser-Modus für Portale, die ihn unterstützen. AutoUncle nutzt den Browser unabhängig von dieser Option; mobile.de nutzt seine eigene Firefox-Session. |
+| `use_browser` | Browser-Modus für Portale, die ihn unterstützen. AutoUncle nutzt den Browser unabhängig von dieser Option; mobile.de nutzt seine eigene Browser-Session. |
+| `mobile_gpu_browser` | Standard `true`. mobile.de läuft in Google Chrome auf der Intel-GPU des Servers (`/dev/dri/renderD128`) statt in Firefox auf einem Software-Bildschirm. Ohne Render-Device oder mit `false` bleibt es bei Firefox. |
 | `portals` | Aktive Portale: `autoscout24`, `kleinanzeigen`, `autouncle`, `mobile_de`, `heycar`. |
 | `searches` | Deine Suchen (siehe unten). |
 | `notify_persistent` | Persistente HA-Benachrichtigung bei neuen Schnäppchen. |
@@ -172,6 +173,14 @@ nicht nötig – das Add-on ruft die Dienste direkt auf.
   erhält eine Schutzpause. `autouncle` wird bei einem Block ebenfalls isoliert;
   die übrigen Portale laufen weiter. `heycar` zeigt unter hey.car inzwischen
   britische Inhalte und ist für DE nicht nutzbar.
+- **mobile.de auf der GPU (`mobile_gpu_browser`):** Xvfb rendert prinzipbedingt in
+  Software; der Browser meldet dann SwiftShader bzw. llvmpipe statt einer echten
+  Grafikkarte. Das Add-on startet deshalb zusätzlich den Compositor `cage` ohne
+  Bildschirm, der über `/dev/dri/renderD128` in Hardware rendert, und steuert darin
+  Google Chrome über patchright (ohne Automatisierungsmerkmale). Das Profil liegt
+  in `/data/chrome_profile`; eine bestehende mobile.de-Anmeldung aus dem
+  Firefox-Profil wird nicht übernommen. Sitzungstiefe und Suchpausen gelten
+  unverändert – eine Freigabe durch den Portalbetreiber ist damit nicht garantiert.
 - **Browser-Modus (`use_browser`, #1):** Das Add-on-Image enthält Playwright
   sowie Chromium und Firefox. Eine AutoUncle-/mobile.de-Anmeldung aus einem
   anderen Browser wird nicht automatisch übernommen. Das mobile.de-Profil

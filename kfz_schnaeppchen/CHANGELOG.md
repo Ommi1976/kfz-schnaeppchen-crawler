@@ -1,3 +1,11 @@
+# 1.4.0
+
+- mobile.de läuft jetzt in Google Chrome auf der Intel-GPU des Servers statt in Firefox auf Xvfb. Xvfb rendert in Software, was Akamai als Merkmal erkennen kann. Gemessen im Container: `navigator.webdriver=false`, WebGL meldet die echte Intel-GPU, kein CDP-Leck; ein Probeabruf lieferte eine vollständige Trefferliste.
+- Neue Option `mobile_gpu_browser` (Standard an). Ohne `/dev/dri/renderD128` oder bei ausgeschaltetem Schalter bleibt mobile.de bei Firefox. Die übrigen Portale nutzen weiterhin Firefox.
+- Neues Browserprofil `/data/chrome_profile`: Eine mobile.de-Anmeldung muss im Add-on einmal neu hergestellt werden.
+- Das Anmeldefenster übernimmt die tatsächliche Fenstergröße des Browsers.
+- Sitzungstiefe, Seitenbudget und Suchpausen sind unverändert.
+
 # 1.3.4
 
 - AutoScout24 lieferte keine Treffer mehr: Beim Abruffehler brach die Suche mit „name 'logger' is not defined“ ab und verdeckte den eigentlichen Fehler. Scheitert jetzt schon die erste Seite, erscheint der echte Abruffehler im Suchfortschritt; bei späteren Seiten bleiben die bis dahin gefundenen Treffer erhalten.

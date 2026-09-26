@@ -34,6 +34,17 @@ RUN apt-get update \
         xvfb \
         netbase \
         ca-certificates \
+        cage \
+        xwayland \
+        libgl1-mesa-dri \
+        libegl1 \
+        libegl-mesa0 \
+        libgbm1 \
+        mesa-vulkan-drivers \
+    && curl -fsSL -o /tmp/chrome.deb \
+        https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb \
+    && apt-get install -y --no-install-recommends /tmp/chrome.deb \
+    && rm /tmp/chrome.deb \
     && python3 -m pip install --no-cache-dir --break-system-packages -r /tmp/requirements.txt \
     && mkdir -p /opt/playwright-browsers \
     && playwright install --with-deps chromium firefox \

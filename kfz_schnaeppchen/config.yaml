@@ -1,5 +1,5 @@
 ﻿name: KFZ Schnäppchen Crawler
-version: "1.3.4"
+version: "1.4.0"
 slug: kfz_schnaeppchen
 description: Findet Auto-Schnäppchen über deutsche Fahrzeugportale und meldet Treffer an Home Assistant.
 url: https://github.com/Ommi1976/kfz-schnaeppchen-crawler
@@ -17,6 +17,9 @@ panel_icon: mdi:car-search
 panel_title: KFZ Schnäppchen
 # Für Benachrichtigungen über http://supervisor/core/api
 homeassistant_api: true
+# Intel-GPU für den mobile.de-Browser (Chrome rendert dann in Hardware).
+devices:
+  - /dev/dri/renderD128
 options:
   interval_minutes: 30
   deal_threshold: 15
@@ -29,6 +32,7 @@ options:
   max_parallel_searches: 2
   verify_details: false
   use_browser: false
+  mobile_gpu_browser: true
   portals:
     - autoscout24
     - kleinanzeigen
@@ -72,6 +76,7 @@ schema:
   max_parallel_searches: int(1,6)
   verify_details: bool
   use_browser: bool
+  mobile_gpu_browser: bool?
   portals:
     - list(autoscout24|kleinanzeigen|autouncle|mobile_de|heycar)
   searches:

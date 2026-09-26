@@ -116,6 +116,7 @@ def test_hard_denial_snapshot_and_status_never_claim_verification(store):
     page.locator.return_value.evaluate_all.return_value = []
     page.content.return_value = "<h1>Zugriff verweigert</h1>"
     page.screenshot.return_value = b"synthetic-image"
+    page.viewport_size = {"width": 1440, "height": 900}  # Firefox: emulated viewport
     worker = SimpleNamespace(_account_session={"id": "s", "owner": "o", "expires_at": time.time()+60},
                              _context=SimpleNamespace(pages=[page]))
     snapshot = accounts._snapshot(worker, "mobile_de", store, "s", "o")
@@ -190,3 +191,24 @@ def test_browser_errors_do_not_echo_credentials(store, monkeypatch):
         assert "private-value" not in str(e.value)
     finally:
         worker.close()
+
+
+def test_login_view_reports_real_browser_size(store):
+    # Chrome on the GPU compositor has no emulated viewport.
+    worker = SimpleNamespace(_account_session={"id": "s", "owner": "alice", "expires_at": time.time()+60})
+    page = Mock(url="https://www.mobile.de/", viewport_size=None)
+    page.evaluate.return_value = {"width": 1280, "height": 577}
+    page.screenshot.return_value = b"jpeg"
+    page.locator.return_value.evaluate_all.return_value = []
+    page.content.return_value = "<p>Start</p>"
+    worker._context = SimpleNamespace(pages=[page])
+    worker._page = page
+    view = accounts._snapshot(worker, "mobile_de", store, "s", "alice")
+    assert (view["width"], view["height"]) == (1280, 577)
+    page.keyboard = Mock()
+    page.mouse = Mock()
+    with pytest.raises(accounts.AccountError):
+        accounts._input(worker, "mobile_de", store, {"session_id": "s", "action": "click", "x": 1300, "y": 10}, "alice")
+    worker._account_session["last_input"] = 0  # input throttle
+    accounts._input(worker, "mobile_de", store, {"session_id": "s", "action": "click", "x": 1279, "y": 576}, "alice")
+    page.mouse.click.assert_called_once_with(1279, 576)

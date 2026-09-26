@@ -305,3 +305,44 @@ def test_record_card_does_not_mix_dealer_recommendations():
     car = MobileDe()._parse_cards(html)[0]
     assert car.title == 'Test EV Long Range' and car.price == 25000
     assert 'Anderes Auto' not in car.body and car.battery_soh is None
+
+
+def test_gpu_browser_only_with_compositor_socket(tmp_path, monkeypatch):
+    from kfz_crawler import mobile_runtime
+    chrome = tmp_path / "chrome"
+    chrome.touch()
+    runtime = tmp_path / "wayland"
+    runtime.mkdir()
+    monkeypatch.setattr(mobile_runtime, "CHROME_BINARY", chrome)
+    monkeypatch.setattr(mobile_runtime, "PROFILE_DIR", tmp_path / "firefox_profile")
+    monkeypatch.setattr(mobile_runtime, "CHROME_PROFILE_DIR", tmp_path / "chrome_profile")
+    monkeypatch.setenv("KFZ_WAYLAND_RUNTIME", str(runtime))
+    # Lock file alone means the compositor is not ready.
+    (runtime / "wayland-0.lock").touch()
+    assert mobile_runtime.wayland_socket() is None
+    assert mobile_runtime.mobile_profile_dir() == tmp_path / "firefox_profile"
+
+    (runtime / "wayland-0").touch()
+    worker = MobileBrowser()
+    portal = MobileBrowser(tmp_path / "autouncle_profile")
+    try:
+        assert worker.engine == "chrome-gpu"
+        assert worker._profile_dir == tmp_path / "chrome_profile"
+        # Other portals keep their own Firefox profile.
+        assert portal.engine == "firefox"
+    finally:
+        worker.close()
+        portal.close()
+
+    chrome.unlink()
+    assert mobile_runtime.wayland_socket() is None
+
+
+def test_gpu_browser_disabled_without_runtime(monkeypatch):
+    from kfz_crawler import mobile_runtime
+    monkeypatch.delenv("KFZ_WAYLAND_RUNTIME", raising=False)
+    worker = MobileBrowser()
+    try:
+        assert worker.engine == "firefox"
+    finally:
+        worker.close()
