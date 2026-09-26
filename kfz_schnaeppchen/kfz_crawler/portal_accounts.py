@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import base64
 import ipaddress
+import logging
 import os
 import re
 import secrets
@@ -23,6 +24,8 @@ from .browser import BrowserBlocked, BrowserUnavailable, _is_block_page
 from .mobile_runtime import (MobileBrowser, MobileDeferred, MobilePageError,
                              load_state, save_state, mobile_browser, mobile_status,
                              retry_after_seconds)
+
+logger = logging.getLogger(__name__)
 
 PORTALS = {
     # Official buyer-login entry observed via www.mobile.de -> Anmelden.
@@ -224,8 +227,19 @@ class PortalBrowser(MobileBrowser):
             return html
         except (MobileDeferred, BrowserBlocked, MobilePageError):
             raise
-        except Exception:
-            raise MobilePageError("Portal-Browserabruf unterbrochen") from None
+        except Exception as exc:
+            # Search navigation only, no login input: the type and first line
+            # (e.g. a timeout) carry no credentials but name the cause.
+            kind = type(exc).__name__
+            detail = (str(exc).splitlines() or [""])[0][:200]
+            logger.warning("%s: Portal-Browserabruf unterbrochen (%s: %s)", self.key, kind, detail)
+            # Like the mobile.de worker: keep the profile, restart a stuck or
+            # bloated browser on the next request instead of reusing it.
+            try:
+                self._close()
+            except Exception:
+                pass  # _close has already dropped its references
+            raise MobilePageError(f"Portal-Browserabruf unterbrochen ({kind})") from None
 
 
 def portal_browser(key):

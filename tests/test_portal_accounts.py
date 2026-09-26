@@ -212,3 +212,24 @@ def test_login_view_reports_real_browser_size(store):
     worker._account_session["last_input"] = 0  # input throttle
     accounts._input(worker, "mobile_de", store, {"session_id": "s", "action": "click", "x": 1279, "y": 576}, "alice")
     page.mouse.click.assert_called_once_with(1279, 576)
+
+
+def test_portal_fetch_error_names_cause_and_restarts_browser(store, caplog):
+    worker = accounts.PortalBrowser("autoscout24")
+    try:
+        page = Mock()
+        page.goto.side_effect = TimeoutError("Timeout 30000ms exceeded.\ncall log: navigating")
+        worker._open = Mock()
+        worker._page = page
+        worker._context = SimpleNamespace(route=Mock())
+        closed = Mock()
+        worker._close = closed
+        with caplog.at_level("WARNING"):
+            with pytest.raises(accounts.MobilePageError) as e:
+                worker.fetch("https://www.autoscout24.de/lst?atype=C", store=store)
+        assert "TimeoutError" in str(e.value)
+        assert "Timeout 30000ms exceeded." in caplog.text and "call log" not in caplog.text
+        closed.assert_called_once()
+    finally:
+        worker._close = lambda: None
+        worker.close()

@@ -1,3 +1,8 @@
+# 1.4.2
+
+- Verbundene Portale (z. B. AutoScout24): „Portal-Browserabruf unterbrochen“ nennt jetzt die Fehlerart, das Log zusätzlich die erste Zeile der Ursache. Bisher wurde sie verschluckt.
+- Nach einem solchen Fehler wird der Portal-Browser geschlossen und beim nächsten Abruf neu gestartet, wie beim mobile.de-Browser. Das Profil und die Anmeldung bleiben erhalten.
+
 # 1.4.1
 
 - mobile.de-Chrome meldet jetzt Deutsch (`de-DE`) als Sprache statt `en-US`. Unter Linux ignoriert Chrome `--lang`; die Sprache kommt aus `LANG`, das im Add-on nicht gesetzt war.
