@@ -192,7 +192,7 @@ def test_persisted_gate_covers_search_detail_images_and_restarts(store):
 
 def test_hourly_attempt_limit_does_not_increase_block_counter(store):
     now = [10000.0]; gate = RequestControl(store, clock=lambda: now[0], interval=0)
-    for _ in range(10):
+    for _ in range(RequestControl.LIMITS['detail']):
         gate.reserve('detail')
     with pytest.raises(MobileDeferred, match='Stundenbudget'):
         gate.reserve('detail')
@@ -346,3 +346,59 @@ def test_gpu_browser_disabled_without_runtime(monkeypatch):
         assert worker.engine == "firefox"
     finally:
         worker.close()
+
+
+def test_chrome_path_enters_via_start_page_with_referer(store, monkeypatch):
+    from pathlib import Path
+    browser = MobileBrowser(); page = Mock()
+    target = 'https://suchen.mobile.de/fahrzeuge/search.html?pageNumber=1'
+    page.url = target
+    page.goto.return_value = SimpleNamespace(status=200, headers={})
+    page.get_by_text.return_value.count.return_value = 0
+    page.evaluate.return_value = [1280, 577]
+    page.content.side_effect = ['<p>Start</p>'] + [page_html(1)] * 5
+    browser._page = page; browser._open = Mock(); browser._close = Mock()
+    browser._wayland = Path('/tmp/wayland-0')  # Chrome-GPU-Weg
+    monkeypatch.setattr('kfz_crawler.mobile_runtime.time.sleep', lambda _: None)
+    try:
+        browser.fetch(target, store=store)
+        first, second = page.goto.call_args_list
+        assert first.args[0] == MobileBrowser.START_PAGE
+        assert second.args[0] == target and second.kwargs['referer'] == MobileBrowser.START_PAGE
+        assert page.mouse.wheel.called  # Lesebewegung
+        # Unmittelbar folgende Seite: keine erneute Startseite, Referer = vorige Seite.
+        page.content.side_effect = [page_html(1)] * 5
+        browser.fetch(target, store=store)
+        assert page.goto.call_count == 3
+        assert page.goto.call_args.kwargs['referer'] == target
+    finally:
+        browser.close()
+
+
+def test_blocked_start_page_pauses_everything(store, monkeypatch):
+    from pathlib import Path
+    browser = MobileBrowser(); page = Mock()
+    page.goto.return_value = SimpleNamespace(status=403, headers={})
+    page.content.return_value = '<p>x</p>'
+    browser._page = page; browser._open = Mock(); browser._close = Mock()
+    browser._wayland = Path('/tmp/wayland-0')
+    monkeypatch.setattr('kfz_crawler.mobile_runtime.time.sleep', lambda _: None)
+    try:
+        with pytest.raises(BrowserBlocked):
+            browser.fetch('https://suchen.mobile.de/fahrzeuge/search.html', store=store)
+        assert page.goto.call_count == 1
+        assert load_state(store, STATE_KEY)['status'] == 'blocked'
+    finally:
+        browser.close()
+
+
+def test_mobile_search_waits_a_random_gap_between_runs(store, monkeypatch):
+    p = MobileDe(); p.store = store
+    calls = []
+    monkeypatch.setattr(p, '_crawl_pages', lambda q, f: calls.append(q) or [])
+    p.search(SearchQuery(name='EV'))
+    with pytest.raises(MobileDeferred, match='nächste Suche'):
+        p.search(SearchQuery(name='EV'))
+    assert len(calls) == 1
+    gap = load_state(store, 'mobile.schedule.v1.EV')['next_search_at'] - __import__('time').time()
+    assert MobileDe.SEARCH_GAP[0] - 5 <= gap <= MobileDe.SEARCH_GAP[1]

@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import hashlib
 import json
+import random
 import re
 import time
 from dataclasses import replace
@@ -105,8 +106,24 @@ class MobileDe(BasePortal):
         from ..mobile_runtime import mobile_browser
         return mobile_browser().fetch(url, store=self.store, proxy=self.proxy)
 
+    # Kein fester Takt: Die erste Chrome-Sperre kam nach ~10 Läufen im exakten
+    # 30-Minuten-Raster. Zwischen zwei Suchen liegt deshalb eine zufällige Pause;
+    # ein übersprungener Lauf ist kein Fehler (Status "cooldown", kein Health-Eintrag).
+    SEARCH_GAP = (40 * 60, 100 * 60)
+
     def search(self, query: SearchQuery) -> List[Listing]:
-        return self._crawl_pages(query, self._fetch)
+        from ..mobile_runtime import MobileDeferred, load_state, save_state
+        key = f"mobile.schedule.v1.{query.name}"
+        state = load_state(self.store, key)
+        now = time.time()
+        if now < state.get("next_search_at", 0):
+            nxt = time.strftime("%H:%M", time.localtime(state["next_search_at"]))
+            raise MobileDeferred(f"mobile.de: nächste Suche frühestens {nxt} (unregelmäßiger Takt)")
+        try:
+            return self._crawl_pages(query, self._fetch)
+        finally:
+            if self.store is not None:
+                save_state(self.store, key, {"next_search_at": time.time() + random.uniform(*self.SEARCH_GAP)})
 
     def _publish_progress(self):
         progress = getattr(self, "progress", None)

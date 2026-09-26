@@ -199,6 +199,9 @@ class PortalBrowser(MobileBrowser):
                 state.update(blocked_until=time.time() + max(2 * 3600, retry), status="blocked")
                 save_state(store, state_key, state)
                 raise BrowserBlocked("Portal verlangt eine Verifikation; Abrufe pausiert")
+            if status == 404:
+                from .mobile_runtime import PortalPageMissing
+                raise PortalPageMissing("Portalseite existiert nicht (404)")
             if status >= 400 or not allowed_navigation(self.key, page.url):
                 raise MobilePageError("Portalseite nicht verfügbar")
             # Account pages/login prompts are not empty search result pages.

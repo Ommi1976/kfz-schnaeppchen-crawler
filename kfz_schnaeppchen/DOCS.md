@@ -207,6 +207,12 @@ nachdem eine Prüfung kein eindeutiges Ergebnis brachte.
   in `/data/chrome_profile`; eine bestehende mobile.de-Anmeldung aus dem
   Firefox-Profil wird nicht übernommen. Sitzungstiefe und Suchpausen gelten
   unverändert – eine Freigabe durch den Portalbetreiber ist damit nicht garantiert.
+- **Verhalten im mobile.de-Browser (ab 1.6.0):** Im Chrome-GPU-Weg beginnt eine
+  Sitzung nach mehr als 20 Minuten Pause auf der Startseite, lädt jede Seite mit
+  Referer der vorigen und scrollt bzw. bewegt die Maus über echte
+  Eingabeereignisse. Zwischen zwei mobile.de-Suchen liegen zufällig 40 bis 100
+  Minuten; ein übersprungener Lauf ist kein Fehler. Eine Sperre schließt das
+  nicht aus – die Schutzpause greift weiterhin.
 - **Browser-Modus (`use_browser`, #1):** Das Add-on-Image enthält Playwright
   sowie Chromium und Firefox. Eine AutoUncle-/mobile.de-Anmeldung aus einem
   anderen Browser wird nicht automatisch übernommen. Das mobile.de-Profil

@@ -176,6 +176,7 @@ class AutoUncle(BasePortal):
     def _resolve_direct_links(self, listings, fetch=None, sleep=time.sleep) -> None:
         pending = [l for l in listings if "/de/d/" in (l.url or "") and (l.raw_id or "").isdigit()]
         if not pending:
+            logger.info("AutoUncle-Direktlinks: alle %d Karten mit Link", len(listings))
             return
         store = getattr(self, "store", None)
         try:
@@ -184,10 +185,12 @@ class AutoUncle(BasePortal):
             known = {}
         fetch = fetch or self._http_text
         budget = self.LINK_BUDGET
+        counts = {"datenbank": 0, "nachgeladen": 0, "ohne Link": 0, "Fehler": 0}
         for listing in pending:
             cached = known.get(listing.fingerprint) or ""
             if "/das_wiedersehen/" in cached:
                 listing.url = cached
+                counts["datenbank"] += 1
                 continue
             if budget <= 0:
                 continue
@@ -198,9 +201,15 @@ class AutoUncle(BasePortal):
                 direct = self._direct_link(listing.raw_id, fetch)
             except Exception as exc:
                 logger.debug("AutoUncle-Direktlink für %s nicht ermittelbar: %s", listing.raw_id, type(exc).__name__)
-                direct = None
+                counts["Fehler"] += 1
+                continue
             if direct:
                 listing.url = direct
+                counts["nachgeladen"] += 1
+            else:
+                counts["ohne Link"] += 1
+        logger.info("AutoUncle-Direktlinks: %d fehlten in der Karte – %s", len(pending),
+                    ", ".join(f"{v} {k}" for k, v in counts.items()))
 
     def _search_variants(self, query: SearchQuery, fetcher) -> List[Listing]:
         results: List[Listing] = []
@@ -253,6 +262,10 @@ class AutoUncle(BasePortal):
                     max_retries=0,
                 )
             except Exception as exc:
+                from ..mobile_runtime import PortalPageMissing
+                if page > 1 and isinstance(exc, PortalPageMissing):
+                    # Gemessen: 459 Angebote enden auf Seite 19, Seite 20 liefert 404.
+                    break
                 if results:
                     raise PortalPartialError(
                         f"AutoUncle: {len(results)} Treffer bis Seite {page - 1}; "

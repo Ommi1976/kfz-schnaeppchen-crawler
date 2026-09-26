@@ -69,3 +69,34 @@ def test_fetch_error_keeps_listing():
 
     portal._resolve_direct_links([item], fetch=boom, sleep=lambda s: None)
     assert "/de/d/223462080" in item.url
+
+
+def test_404_behind_last_page_ends_list_without_error(monkeypatch):
+    from kfz_crawler.mobile_runtime import PortalPageMissing
+    from kfz_crawler.models import SearchQuery
+    portal = AutoUncle()
+    monkeypatch.setattr(portal, "_parse", lambda html: [listing("1", f"{BASE}/de/das_wiedersehen/x/1/2")])
+
+    def fetch(url, **kwargs):
+        if "page=2" in url or "page%5D=2" in url or url.endswith("2"):
+            raise PortalPageMissing("Portalseite existiert nicht (404)")
+        return "<html></html>"
+
+    urls = []
+    monkeypatch.setattr(portal, "_build_url", lambda q, page: urls.append(page) or f"{BASE}/x?page={page}")
+    items = portal._crawl_pages(SearchQuery(name="E-Autos"), fetch, max_pages=5)
+    assert len(items) == 1 and urls == [1, 2]
+
+
+def test_404_on_first_page_is_still_an_error(monkeypatch):
+    import pytest
+    from kfz_crawler.mobile_runtime import PortalPageMissing
+    from kfz_crawler.models import SearchQuery
+    portal = AutoUncle()
+    monkeypatch.setattr(portal, "_build_url", lambda q, page: f"{BASE}/x?page={page}")
+
+    def fetch(url, **kwargs):
+        raise PortalPageMissing("Portalseite existiert nicht (404)")
+
+    with pytest.raises(PortalPageMissing):
+        portal._crawl_pages(SearchQuery(name="E-Autos"), fetch, max_pages=5)

@@ -1,3 +1,11 @@
+# 1.6.0
+
+- mobile.de verhält sich menschlicher (nur im Chrome-GPU-Weg): Nach mehr als 20 Minuten Pause beginnt der Browser auf der Startseite, jede Seite wird mit Referer der vorigen geladen, und auf jeder Seite gibt es Maus- und Scrollbewegungen über echte Eingabeereignisse. Die erste Chrome-Sperre kam nach rund sechs Stunden – die Browsermerkmale waren sauber, das Verhalten nicht.
+- mobile.de hat keinen festen Takt mehr: Zwischen zwei Suchen liegen zufällig 40 bis 100 Minuten. Übersprungene Läufe gelten nicht als Fehler.
+- mobile.de-Detailseiten: höchstens 6 statt 10 pro Stunde.
+- AutoUncle: Eine Ergebnisseite hinter dem Listenende (HTTP 404) ist kein Fehler mehr. Gemessen: 459 Angebote enden auf Seite 19, Seite 20 liefert 404. Das Warnzeichen am Portalfilter verschwindet damit.
+- AutoUncle-Direktlinks: Das Log meldet je Lauf, wie viele Links fehlten, aus der Datenbank kamen, nachgeladen wurden oder nicht zu finden waren.
+
 # 1.5.1
 
 - AutoUncle-Treffer führen wieder direkt zum Inserat beim Händler bzw. Ursprungsportal. Rund ein Drittel der Ergebniskarten enthält diesen Link nicht; das Add-on holt ihn jetzt von AutoUncles Fahrzeugseite („Zum Angebot“, höchstens 15 Seiten je Lauf) und merkt ihn sich.

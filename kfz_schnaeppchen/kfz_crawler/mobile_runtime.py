@@ -11,6 +11,7 @@ import atexit
 import json
 import logging
 import os
+import random
 import re
 import threading
 import time
@@ -53,6 +54,10 @@ class MobileDeferred(RuntimeError):
 
 class MobilePageError(RuntimeError):
     """Page could not be verified; keep existing listings and retry later."""
+
+
+class PortalPageMissing(MobilePageError):
+    """HTTP 404: e.g. a result page behind the end of the list, not a failure."""
 
 
 def load_state(store, key: str) -> dict:
@@ -169,7 +174,8 @@ def retry_after_seconds(value: str, now=None) -> float:
 
 class RequestControl:
     """One persistent portal-wide gate; defaults are budgets, not safe-limit claims."""
-    LIMITS = {"search": 30, "detail": 10, "image": 20}
+    # Detailseiten gesenkt (10 -> 6): weniger Aufrufe pro Tag, gleichmäßiger verteilt.
+    LIMITS = {"search": 30, "detail": 6, "image": 20}
     PAUSES = (2 * 3600, 6 * 3600, 24 * 3600)
 
     def __init__(self, store=None, *, clock=time.time, interval=12.0):
@@ -237,6 +243,8 @@ class MobileBrowser:
         self._wayland = None if profile_dir else wayland_socket()
         self._profile_dir = Path(profile_dir) if profile_dir else mobile_profile_dir()
         self._account_session = None
+        self._last_navigation = 0.0
+        self._referer = None
 
     @property
     def engine(self) -> str:
@@ -346,6 +354,45 @@ class MobileBrowser:
             time.sleep(.15)
         return context
 
+    # Verhalten wie ein Mensch – nur im Chrome-GPU-Weg. Die Merkmale des Browsers
+    # sind dort sauber; was bis zur ersten Sperre noch nach Automat aussah, war
+    # das Verhalten: Seiten ohne jede Maus- und Scrollbewegung und der direkte
+    # Sprung auf tiefe Such-URLs ohne Startseite. Eingaben laufen über echte
+    # Eingabeereignisse (CDP), nicht über JavaScript im Seitenkontext.
+    START_PAGE = "https://www.mobile.de/"
+    ENTRY_AFTER = 20 * 60  # so lange ohne Aufruf -> wieder über die Startseite
+
+    def _humanize(self, page, rounds=(2, 4)):
+        try:
+            width, height = page.evaluate("[innerWidth, innerHeight]")
+            for _ in range(random.randint(*rounds)):
+                page.mouse.move(random.uniform(.2, .8) * width, random.uniform(.2, .8) * height,
+                                steps=random.randint(8, 20))
+                page.mouse.wheel(0, random.randint(250, 700))
+                time.sleep(random.uniform(.6, 1.8))
+        except Exception:
+            logger.debug("Lesebewegung übersprungen", exc_info=True)
+
+    def _reject_consent(self, page):
+        consent = page.get_by_text("Ablehnen", exact=True)
+        if consent.count() == 1 and consent.is_visible():
+            consent.click(timeout=3000)
+
+    def _enter_via_start_page(self, page, control):
+        delay = control.reserve("search")
+        if delay:
+            time.sleep(delay)
+        response = page.goto(self.START_PAGE, wait_until="domcontentloaded", timeout=30000)
+        status = response.status if response else 0
+        if status in (403, 429) or _is_block_page(page.content()):
+            retry = ((response.headers or {}).get("retry-after", "0")) if response else "0"
+            control.blocked(retry_after_seconds(retry))
+            raise BrowserBlocked("mobile.de: Startseite abgewiesen – alle Abrufe pausiert")
+        self._reject_consent(page)
+        self._humanize(page, rounds=(1, 3))
+        time.sleep(random.uniform(2, 5))
+        self._referer = self.START_PAGE
+
     def _fetch(self, url, store, proxy, kind):
         # Only this worker accesses the gate and browser; no check/submit races.
         self._defer_during_login()
@@ -358,7 +405,14 @@ class MobileBrowser:
         try:
             self._open(proxy)
             page = self._page
-            response = page.goto(url, wait_until="domcontentloaded", timeout=30000)
+            human = bool(self._wayland)
+            if human and kind == "search" and time.time() - self._last_navigation > self.ENTRY_AFTER:
+                self._enter_via_start_page(page, control)
+            goto = dict(wait_until="domcontentloaded", timeout=30000)
+            if human and self._referer:
+                goto["referer"] = self._referer
+            response = page.goto(url, **goto)
+            self._last_navigation = time.time()
             status = response.status if response else 0
             if status in (403, 429):
                 retry = (response.headers or {}).get("retry-after", "0")
@@ -369,9 +423,10 @@ class MobileBrowser:
             if not is_mobile_url(page.url):
                 raise MobilePageError("mobile.de: Unerwartete Weiterleitung")
             # Consent is not an anti-bot challenge. Reject optional cookies.
-            consent = page.get_by_text("Ablehnen", exact=True)
-            if consent.count() == 1 and consent.is_visible():
-                consent.click(timeout=3000)
+            self._reject_consent(page)
+            if human:
+                self._humanize(page)
+                self._referer = page.url
             deadline = time.monotonic() + 25
             previous = None
             stable = 0
@@ -428,6 +483,8 @@ class MobileBrowser:
                 self._context.close()
         finally:
             self._context = self._page = None
+            # A fresh browser enters via the start page again.
+            self._last_navigation, self._referer = 0.0, None
             if self._playwright:
                 self._playwright.stop()
                 self._playwright = None
