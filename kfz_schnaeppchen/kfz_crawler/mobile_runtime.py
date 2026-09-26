@@ -324,8 +324,11 @@ class MobileBrowser:
         # --lang, Zeitzone über TZ, Fenstergröße vom Compositor.
         from patchright.sync_api import sync_playwright
         self._playwright = sync_playwright().start()
+        # Unter Linux ignoriert Chrome --lang für navigator.languages und
+        # Accept-Language; maßgeblich ist LANG (im Add-on sonst unset -> en-US).
         env = dict(os.environ, XDG_RUNTIME_DIR=str(self._wayland.parent),
-                   WAYLAND_DISPLAY=self._wayland.name)
+                   WAYLAND_DISPLAY=self._wayland.name,
+                   LANG="de_DE.UTF-8", LANGUAGE="de_DE:de")
         # DISPLAY (Xvfb) bleibt gesetzt: Playwright prüft es für sichtbare
         # Browser, Chrome nutzt wegen --ozone-platform trotzdem Wayland.
         kwargs = dict(channel="chrome", headless=False, no_viewport=True,
@@ -333,7 +336,15 @@ class MobileBrowser:
                       args=["--ozone-platform=wayland", "--lang=de-DE"])
         if proxy:
             kwargs["proxy"] = {"server": proxy}
-        return self._playwright.chromium.launch_persistent_context(str(self._profile_dir), **kwargs)
+        context = self._playwright.chromium.launch_persistent_context(str(self._profile_dir), **kwargs)
+        # cage maximiert das Fenster erst kurz nach dem Start. Die erste Seite
+        # soll nicht im Zwischenformat (1018×515) geladen werden.
+        page = context.pages[0] if context.pages else context.new_page()
+        for _ in range(20):
+            if page.evaluate("outerWidth >= screen.width"):
+                break
+            time.sleep(.15)
+        return context
 
     def _fetch(self, url, store, proxy, kind):
         # Only this worker accesses the gate and browser; no check/submit races.

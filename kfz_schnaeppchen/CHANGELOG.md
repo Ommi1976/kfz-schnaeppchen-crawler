@@ -1,3 +1,8 @@
+# 1.4.1
+
+- mobile.de-Chrome meldet jetzt Deutsch (`de-DE`) als Sprache statt `en-US`. Unter Linux ignoriert Chrome `--lang`; die Sprache kommt aus `LANG`, das im Add-on nicht gesetzt war.
+- Der erste Seitenabruf wartet, bis der Compositor das Chrome-Fenster maximiert hat (1280×577 statt kurzzeitig 1018×515).
+
 # 1.4.0
 
 - mobile.de läuft jetzt in Google Chrome auf der Intel-GPU des Servers statt in Firefox auf Xvfb. Xvfb rendert in Software, was Akamai als Merkmal erkennen kann. Gemessen im Container: `navigator.webdriver=false`, WebGL meldet die echte Intel-GPU, kein CDP-Leck; ein Probeabruf lieferte eine vollständige Trefferliste.
