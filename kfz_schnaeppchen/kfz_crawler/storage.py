@@ -98,6 +98,11 @@ class SeenStore:
             "ALTER TABLE deals ADD COLUMN is_stale INTEGER DEFAULT 0",
             "ALTER TABLE deals ADD COLUMN stale_since REAL",
             "ALTER TABLE deals ADD COLUMN detector_version TEXT",
+            # Verfügbarkeitsprüfung (availability.py): gone_at = auf dem Portal
+            # nachweislich gelöscht, alive_at = zuletzt als vorhanden bestätigt.
+            "ALTER TABLE deals ADD COLUMN gone_at REAL",
+            "ALTER TABLE deals ADD COLUMN checked_at REAL",
+            "ALTER TABLE deals ADD COLUMN alive_at REAL",
         ]:
             try:
                 self.conn.execute(ddl)
@@ -383,7 +388,7 @@ class SeenStore:
                 "distance_km=COALESCE(excluded.distance_km, deals.distance_km), "
                 "country=COALESCE(excluded.country, deals.country), "
                 "evidence_json=excluded.evidence_json, quality_score=excluded.quality_score, "
-                "unknown_fields=excluded.unknown_fields, is_stale=0, stale_since=NULL, "
+                "unknown_fields=excluded.unknown_fields, is_stale=0, stale_since=NULL, gone_at=NULL, "
                 "detector_version=excluded.detector_version, "
                 "last_seen=excluded.last_seen",
                 (
@@ -533,7 +538,7 @@ class SeenStore:
     def count_stale(self, search_name: str | None = None,
                     portal: str | None = None) -> int:
         """Zählt Inserate, die auf dem Portal nicht mehr auffindbar sind."""
-        where = ["COALESCE(is_stale, 0) = 1"]
+        where = ["COALESCE(is_stale, 0) = 1", "gone_at IS NULL"]
         params: list = []
         if search_name:
             where.append("search_name = ?")
@@ -571,6 +576,9 @@ class SeenStore:
                 params.append(portal)
             if not include_stale:
                 where.append("COALESCE(is_stale, 0) = 0")
+            # Nachweislich gelöschte Inserate erscheinen in keiner Liste, auch
+            # nicht in der Ansicht mit veralteten Einträgen.
+            where.append("gone_at IS NULL")
             wsql = (" WHERE " + " AND ".join(where)) if where else ""
             # Deals zuerst, dann nach Rabatt, dann neueste.
             params.append(limit)
@@ -658,7 +666,10 @@ class SeenStore:
                     "JOIN offers o2 ON o2.offer_id = l2.offer_id "
                     f"WHERE o1.url IN ({platzhalter}) "
                     "  AND COALESCE(o2.status, 'aktiv') = 'aktiv' "
-                    "  AND o2.portal <> o1.portal",
+                    "  AND o2.portal <> o1.portal "
+                    # Kein Verweis auf verschwundene oder nicht mehr bestätigte Angebote.
+                    "  AND NOT EXISTS (SELECT 1 FROM deals d WHERE d.fingerprint = o2.offer_id "
+                    "                  AND (COALESCE(d.is_stale, 0) = 1 OR d.gone_at IS NOT NULL))",
                     list(urls),
                 ).fetchall()
             except sqlite3.Error:
@@ -808,6 +819,64 @@ class SeenStore:
             if stale_count > 0:
                 self.conn.commit()
         return stale_count
+
+    def unseen_candidates(self, search_name: str, seen_before: float, checked_before: float,
+                          portals, per_portal: int) -> List[dict]:
+        """Im Lauf nicht gesehene Inserate, die länger nicht geprüft wurden."""
+        rows: List[dict] = []
+        with self._lock:
+            for portal in portals:
+                rows += [dict(r) for r in self.conn.execute(
+                    "SELECT fingerprint, portal, url FROM deals "
+                    "WHERE search_name = ? AND portal = ? AND gone_at IS NULL AND url IS NOT NULL "
+                    "  AND last_seen < ? AND (checked_at IS NULL OR checked_at < ?) "
+                    "ORDER BY checked_at IS NOT NULL, checked_at, last_seen LIMIT ?",
+                    (search_name, portal, seen_before, checked_before, per_portal))]
+        return rows
+
+    def record_availability(self, fingerprint: str, verdict: str, now: float) -> None:
+        with self._lock:
+            if verdict == "gone":
+                self.conn.execute(
+                    "UPDATE deals SET gone_at = ?, checked_at = ?, is_stale = 1, "
+                    "stale_since = COALESCE(stale_since, ?) WHERE fingerprint = ?",
+                    (now, now, now, fingerprint))
+                try:
+                    self.conn.execute("UPDATE offers SET status = 'entfernt' WHERE offer_id = ?",
+                                      (fingerprint,))
+                except sqlite3.Error:
+                    pass  # alte Datenbank ohne Fahrzeugakte
+            elif verdict == "alive":
+                self.conn.execute("UPDATE deals SET checked_at = ?, alive_at = ? WHERE fingerprint = ?",
+                                  (now, now, fingerprint))
+            else:
+                self.conn.execute("UPDATE deals SET checked_at = ? WHERE fingerprint = ?",
+                                  (now, fingerprint))
+            self.conn.commit()
+
+    def apply_unseen_safety_net(self, search_name: str, seen_before: float, alive_before: float,
+                                min_gap: float, now: float, checkable=()) -> int:
+        """Blendet lange nicht gesehene Inserate aus, die niemand als vorhanden bestätigt.
+
+        Nur wenn das Portal danach nachweislich Treffer lieferte – ein gesperrtes
+        oder ausgefallenes Portal beweist nichts über ein Inserat. Bei einzeln
+        prüfbaren Portalen zusätzlich erst nach einer Prüfung: Ein noch nicht
+        abgearbeiteter Kandidat ist kein Beleg.
+        """
+        checkable = list(checkable)
+        placeholders = ",".join("?" * len(checkable)) or "''"
+        with self._lock:
+            cur = self.conn.execute(
+                "UPDATE deals SET is_stale = 1, stale_since = COALESCE(stale_since, ?) "
+                "WHERE search_name = ? AND COALESCE(is_stale, 0) = 0 AND gone_at IS NULL "
+                "  AND last_seen < ? AND (alive_at IS NULL OR alive_at < ?) "
+                f"  AND (portal NOT IN ({placeholders}) OR checked_at > last_seen) "
+                "  AND EXISTS (SELECT 1 FROM portal_health h WHERE h.search_name = deals.search_name "
+                "              AND h.portal = deals.portal AND h.raw_count > 0 "
+                "              AND h.last_run > deals.last_seen + ?)",
+                (now, search_name, seen_before, alive_before, *checkable, min_gap))
+            self.conn.commit()
+            return cur.rowcount
 
     def mark_portal_stale(self, search_name: str, portal: str) -> int:
         """Kennzeichnet Bestandsdaten nach einem fehlgeschlagenen Portalabruf."""

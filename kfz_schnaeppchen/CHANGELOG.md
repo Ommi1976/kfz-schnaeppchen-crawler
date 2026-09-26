@@ -1,3 +1,10 @@
+# 1.5.0
+
+- Gelöschte Inserate verschwinden zuverlässig aus allen Trefferlisten. Bisher markierte nur mobile.de verschwundene Inserate; bei AutoScout24, AutoUncle und Kleinanzeigen blieben sie für immer stehen.
+- Im Lauf nicht gesehene Inserate werden einzeln geprüft: HTTP 404/410 (AutoScout24, AutoUncle) bzw. Umleitung auf eine Suchseite (Kleinanzeigen) gelten als gelöscht. Gemessen an Produktionsdaten; Seitentexte wie „verkauft“ werden nicht ausgewertet.
+- Gelöschte Inserate erscheinen auch nicht mehr in der Ansicht mit veralteten Einträgen und nicht mehr als Angebot auf einem anderen Portal.
+- Sicherheitsnetz für mobile.de und nicht eindeutig prüfbare Inserate: 72 Stunden nicht gesehen, obwohl das Portal Treffer lieferte, und nicht als vorhanden bestätigt → ausgeblendet.
+
 # 1.4.2
 
 - Verbundene Portale (z. B. AutoScout24): „Portal-Browserabruf unterbrochen“ nennt jetzt die Fehlerart, das Log zusätzlich die erste Zeile der Ursache. Bisher wurde sie verschluckt.

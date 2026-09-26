@@ -162,6 +162,32 @@ nicht nötig – das Add-on ruft die Dienste direkt auf.
   der Hinweistext nennt den letzten Suchfortschritt. `/api/status` enthält
   zusätzlich `mobile_runtime` mit Budgetzählern und Pausenende.
 
+### Gelöschte Inserate
+
+Ein Suchlauf liest je Portal nur einen Ausschnitt der Ergebnisse. Ein Inserat,
+das im Lauf fehlt, kann deshalb noch existieren. Nach jedem Lauf ruft das Add-on
+solche Inserate einzeln auf (höchstens 10 je Portal und Lauf, dasselbe Inserat
+frühestens nach 12 Stunden erneut):
+
+| Portal | gilt als gelöscht bei |
+|---|---|
+| AutoScout24 | HTTP 404 oder 410 |
+| AutoUncle | HTTP 404 oder 410 |
+| Kleinanzeigen | Umleitung von der Anzeige auf eine Suchseite |
+
+Nachweislich gelöschte Inserate verschwinden aus allen Listen, auch aus der
+Ansicht mit veralteten Einträgen und aus den Verweisen „auch auf anderen
+Portalen“. Taucht ein Inserat später wieder auf, erscheint es wieder.
+Seitentexte wie „verkauft“ werden bewusst nicht ausgewertet – sie stehen auch in
+lebenden Inseraten.
+
+mobile.de wird wegen des Bot-Schutzes nicht einzeln abgerufen. Dort erkennt der
+vollständige Durchgang verschwundene Inserate. Zusätzlich gilt ein
+Sicherheitsnetz: Wurde ein Inserat 72 Stunden nicht gesehen, obwohl das Portal
+seitdem Treffer lieferte, und hat es niemand als vorhanden bestätigt, wird es als
+veraltet ausgeblendet. Bei den einzeln prüfbaren Portalen greift das Netz erst,
+nachdem eine Prüfung kein eindeutiges Ergebnis brachte.
+
 ### Grenzen der Quellen
 
 - **AutoUncle:** wird als zusätzlicher Discovery-Kanal über eine persistente

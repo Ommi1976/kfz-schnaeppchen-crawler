@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import logging
 import sys
+import time
 from collections import Counter
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
@@ -321,6 +322,7 @@ def _run_search(cfg, query, store, progress_runs, *, include_seen=False):
     ohne einen einzelnen Host stärker zu belasten. Jedes Portal behält seine
     eigene höfliche Anfrage-Drosselung.
     """
+    run_started = time.time()
     active = list(progress_runs)
     progress_by_portal = {REGISTRY[key].name: progress for key, progress in progress_runs.items()}
     all_listings: List[Listing] = []
@@ -456,6 +458,15 @@ def _run_search(cfg, query, store, progress_runs, *, include_seen=False):
     for portal_result in portal_results.values():
         progress_by_portal[portal_result.portal_name].finish(
             portal_result, persisted_count=persisted_counts[portal_result.portal_name])
+
+    # Inserate, die dieser Lauf nicht gesehen hat, einzeln auf Löschung prüfen.
+    # Nach dem Fortschritt, damit die Oberfläche das Laufende nicht verzögert sieht.
+    if hasattr(store, "unseen_candidates"):
+        from .availability import check_unseen
+        try:
+            check_unseen(store, query.name, run_started, proxy=cfg.settings.proxy or None)
+        except Exception:
+            logger.exception("Verfügbarkeitsprüfung fehlgeschlagen")
 
     return new_deals
 
