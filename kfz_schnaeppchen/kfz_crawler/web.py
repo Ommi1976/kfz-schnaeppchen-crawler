@@ -61,19 +61,6 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-def _interval_minutes() -> int:
-    """Intervall aus den Add-on-Optionen (mind. 5 Min), robust gegen Fehler."""
-    try:
-        return max(5, int(load_options().get("interval_minutes", 30)))
-    except Exception:
-        return 30
-
-
-def _schedule_next(app: FastAPI) -> None:
-    """Setzt den Zeitpunkt des nächsten geplanten Laufs (Epoch-Sekunden)."""
-    app.state.next_run_at = datetime.now(timezone.utc).timestamp() + _interval_minutes() * 60
-
-
 def _load_cfg() -> Config:
     """Optionen frisch laden, damit Änderungen ohne Neustart greifen."""
     return build_config(load_options())
@@ -186,26 +173,6 @@ async def _do_run(app: FastAPI, only_id: str | None = None) -> None:
         finally:
             app.state.running = False
             app.state.last_finished_at = _now_iso()
-            # Nach JEDEM Lauf (auch manuell) den nächsten Zeitpunkt fortschreiben,
-            # damit die UI „nächster Lauf" nie leer bleibt.
-            _schedule_next(app)
-
-
-async def _scheduler(app: FastAPI) -> None:
-    # Kleiner Vorlauf, damit der Server zuerst sauber hochkommt.
-    await asyncio.sleep(5)
-    while not getattr(app.state, "closing", False):
-        try:
-            await _do_run(app)
-        except asyncio.CancelledError:
-            raise
-        except Exception:
-            logger.exception("Scheduler-Durchlauf fehlgeschlagen")
-        if getattr(app.state, "closing", False):
-            return
-        interval = _interval_minutes()
-        _schedule_next(app)
-        await asyncio.sleep(interval * 60)
 
 
 async def _reevaluate_beim_start(app: FastAPI) -> None:
@@ -242,9 +209,9 @@ async def lifespan(app: FastAPI):
     app.state.running = False
     app.state.last_run_at = None
     app.state.last_finished_at = None
-    # Direkt einen Erst-Zeitpunkt setzen (Vorlauf 5 s + Intervall), damit die UI
-    # sofort „nächster Lauf" anzeigt und nicht erst nach dem ersten Durchlauf.
-    _schedule_next(app)
+    # Kein Zeitplan (ab 1.7.0): Suchen starten nur per Knopf (/api/run bzw.
+    # Einzelsuche). Auch beim Start des Add-ons läuft keine Suche.
+    app.state.next_run_at = None
     app.state.last_report = {}
     app.state.enrichment_task = None
     app.state.search_task = None
@@ -257,7 +224,6 @@ async def lifespan(app: FastAPI):
     app.state.startup_reevaluation = asyncio.create_task(
         _reevaluate_beim_start(app)
     )
-    app.state.scheduler = asyncio.create_task(_scheduler(app))
     async def session_cleanup():
         from .portal_accounts import reap_expired_sessions
         while True:
@@ -277,15 +243,9 @@ async def lifespan(app: FastAPI):
         except asyncio.CancelledError:
             pass
         # Never cancel a task in the middle of to_thread: its SQLite writes
-        # continue even after cancellation. A running scheduler exits below.
-        if not app.state.running:
-            app.state.scheduler.cancel()
-        try:
-            await app.state.scheduler
-        except asyncio.CancelledError:
-            pass
+        # continue even after cancellation.
         async with app.state.run_lock:
-            pass  # Also drain a manually started run, including post-processing.
+            pass  # Drain a manually started run, including post-processing.
         # Cancelling asyncio.to_thread does not stop its thread. Finish pending
         # writes before closing SQLite or the owning Playwright worker.
         for task in (app.state.search_task, app.state.enrichment_task, app.state.startup_reevaluation):

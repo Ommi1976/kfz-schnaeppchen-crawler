@@ -175,7 +175,8 @@ def retry_after_seconds(value: str, now=None) -> float:
 class RequestControl:
     """One persistent portal-wide gate; defaults are budgets, not safe-limit claims."""
     # Detailseiten gesenkt (10 -> 6): weniger Aufrufe pro Tag, gleichmäßiger verteilt.
-    LIMITS = {"search": 30, "detail": 6, "image": 20}
+    # "check": Verfügbarkeitsprüfung einzelner Inserate nach einem Suchlauf.
+    LIMITS = {"search": 30, "detail": 6, "image": 20, "check": 20}
     PAUSES = (2 * 3600, 6 * 3600, 24 * 3600)
 
     def __init__(self, store=None, *, clock=time.time, interval=12.0):
@@ -392,6 +393,42 @@ class MobileBrowser:
         self._humanize(page, rounds=(1, 3))
         time.sleep(random.uniform(2, 5))
         self._referer = self.START_PAGE
+
+    def check_listing(self, url: str, *, store=None, proxy=None) -> tuple:
+        """(HTTP-Status, Ziel-URL) eines einzelnen Inserats – für die Verfügbarkeitsprüfung."""
+        if not is_mobile_url(url):
+            raise ValueError("Nur explizite HTTPS-mobile.de-Adressen erlaubt")
+        return self._executor.submit(self._check_listing, url, store, proxy).result()
+
+    def _check_listing(self, url, store, proxy):
+        # Gemessen 27.09.2026: gelöschtes Inserat = HTTP 404, vorhandenes = 200 mit Titel.
+        self._defer_during_login()
+        if store is not None:
+            self._control = RequestControl(store)
+        control = self._control
+        delay = control.reserve("check")
+        if delay:
+            time.sleep(delay)
+        self._open(proxy)
+        page = self._page
+        human = bool(self._wayland)
+        if human and time.time() - self._last_navigation > self.ENTRY_AFTER:
+            self._enter_via_start_page(page, control)
+        goto = dict(wait_until="domcontentloaded", timeout=30000)
+        if human and self._referer:
+            goto["referer"] = self._referer
+        response = page.goto(url, **goto)
+        self._last_navigation = time.time()
+        status = response.status if response else 0
+        if status in (403, 429) or (status == 200 and _is_block_page(page.content())):
+            retry = (response.headers or {}).get("retry-after", "0") if response else "0"
+            control.blocked(retry_after_seconds(retry))
+            raise BrowserBlocked("mobile.de: Einzelprüfung abgewiesen – alle Abrufe pausiert")
+        if human:
+            self._reject_consent(page)
+            self._humanize(page, rounds=(1, 2))
+            self._referer = page.url
+        return status, page.url
 
     def _fetch(self, url, store, proxy, kind):
         # Only this worker accesses the gate and browser; no check/submit races.

@@ -89,8 +89,12 @@ def test_blocked_check_keeps_listing_and_waits_before_recheck(store):
 
     check_unseen(store, "E-Autos", now - 60, fetch=fetch, sleep=lambda s: None, now=now)
     assert visible(store) == {AS24}
-    check_unseen(store, "E-Autos", now - 60, fetch=fetch, sleep=lambda s: None, now=now + 3600)
+    check_unseen(store, "E-Autos", now - 60, fetch=fetch, sleep=lambda s: None,
+                 now=now + availability.RECHECK_AFTER / 2)
     assert len(calls) == 1  # frühestens nach RECHECK_AFTER erneut
+    check_unseen(store, "E-Autos", now - 60, fetch=fetch, sleep=lambda s: None,
+                 now=now + availability.RECHECK_AFTER + 1)
+    assert len(calls) == 2
 
 
 def test_listings_seen_in_this_run_are_not_checked(store):
@@ -101,13 +105,40 @@ def test_listings_seen_in_this_run_are_not_checked(store):
     assert visible(store) == {AS24}
 
 
-def test_mobile_is_never_fetched_but_safety_net_applies(store):
+def test_mobile_is_checked_through_the_browser(store):
+    now = 10 * DAY
+    record(store, "mobile.de", MOBILE, seen=now - 2 * DAY)
+    counts = check_unseen(store, "E-Autos", now - 60, fetch=lambda u: pytest.fail("mobile.de nie per HTTP"),
+                          browser_fetch=lambda u: (404, u), sleep=lambda s: None, now=now)
+    assert counts["gone"] == 1
+    assert visible(store, include_stale=True) == set()
+
+
+def test_mobile_block_defers_remaining_checks(store):
+    from kfz_crawler.browser import BrowserBlocked
+    now = 10 * DAY
+    for i in range(3):
+        record(store, "mobile.de", f"{MOBILE}{i}", seen=now - 2 * DAY)
+    calls = []
+
+    def blocked(url):
+        calls.append(url)
+        raise BrowserBlocked("403")
+
+    counts = check_unseen(store, "E-Autos", now - 60, browser_fetch=blocked, sleep=lambda s: None, now=now)
+    assert len(calls) == 1 and counts["deferred"] == 3
+    # Nichts als geprüft markiert: der nächste Klick versucht es erneut.
+    assert store.conn.execute("SELECT COUNT(*) FROM deals WHERE checked_at IS NOT NULL").fetchone()[0] == 0
+    assert len(visible(store)) == 3
+
+
+def test_mobile_safety_net_after_unclear_check(store):
     now = 10 * DAY
     record(store, "mobile.de", MOBILE, seen=now - 4 * DAY)
     store.record_portal_run("E-Autos", "mobile.de", "partial", raw_count=240)
     store.conn.execute("UPDATE portal_health SET last_run = ?", (now,))
     store.conn.commit()
-    counts = check_unseen(store, "E-Autos", now - 60, fetch=lambda u: pytest.fail("mobile.de nie einzeln"),
+    counts = check_unseen(store, "E-Autos", now - 60, browser_fetch=lambda u: (500, u),
                           sleep=lambda s: None, now=now)
     assert counts["stale"] == 1
     assert visible(store) == set()
@@ -121,7 +152,8 @@ def test_safety_net_needs_a_delivering_portal_run(store):
     store.record_portal_run("E-Autos", "mobile.de", "blocked", raw_count=0)
     store.conn.execute("UPDATE portal_health SET last_run = ?", (now,))
     store.conn.commit()
-    check_unseen(store, "E-Autos", now - 60, sleep=lambda s: None, now=now)
+    check_unseen(store, "E-Autos", now - 60, browser_fetch=lambda u: (500, u),
+                 sleep=lambda s: None, now=now)
     assert visible(store) == {MOBILE}
 
 
@@ -152,14 +184,21 @@ def test_cross_portal_link_hides_gone_offer(store):
     assert status == "entfernt"
 
 
-def test_check_budget_per_portal(store):
+def test_every_unseen_listing_is_checked_after_a_click(store):
     now = 10 * DAY
-    for i in range(availability.CHECKS_PER_PORTAL + 3):
+    for i in range(40):
         record(store, "AutoScout24", f"{AS24}-{i}", seen=now - 2 * DAY)
+        record(store, "Kleinanzeigen", f"{KA}-{i}", seen=now - 2 * DAY)
     calls = []
     check_unseen(store, "E-Autos", now - 60, fetch=lambda u: calls.append(u) or (200, u),
                  sleep=lambda s: None, now=now)
-    assert len(calls) == availability.CHECKS_PER_PORTAL
+    assert len(calls) == 80
+
+
+def test_mobile_redirect_to_other_listing_is_not_alive():
+    other = "https://suchen.mobile.de/fahrzeuge/details.html?id=2"
+    assert availability.classify("mobile.de", MOBILE, 200, other) == "unknown"
+    assert availability.classify("mobile.de", MOBILE, 200, MOBILE + "&ref=srp") == "alive"
 
 
 def test_safety_net_waits_for_check_on_checkable_portal(store):

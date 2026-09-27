@@ -129,13 +129,15 @@ async function loadStatus() {
     (running ? "Suche läuft…" : "bereit") +
     ` · v${s.version} · Portale: ${(s.portals_active || []).join(", ") || "–"}`;
 
+  // Seit 1.7.0 gibt es keinen Zeitplan mehr: Suchen starten nur per Knopf.
   const nextIn = s.next_run_at ? Math.max(0, Math.round((s.next_run_at - Date.now() / 1000) / 60)) : null;
   const cards = [
     { k: "Schnäppchen", v: s.total_deals ?? "–", id: "card-deals", cls: "card card-deals clickable" },
     { k: "Inserate gesamt", v: s.total_listings ?? "–", id: "card-all", cls: "card card-all clickable" },
     { k: "Suchen", v: (s.searches || []).length, cls: "card" },
     { k: "Letzter Lauf", v: fmtClock(s.last_finished_at || s.last_run_at), cls: "card" },
-    { k: "Nächster Lauf", v: nextIn == null ? "–" : `in ${nextIn} min`, cls: "card" },
+    { k: "Nächster Lauf", v: nextIn == null ? "manuell" : `in ${nextIn} min`, cls: "card",
+      title: nextIn == null ? "Suchen starten nur per Knopf „Alle jetzt suchen“ oder „Suchen“." : "" },
     { k: "Schwelle", v: Math.round((s.deal_threshold || 0) * 100) + " %", cls: "card" },
     { k: "mobile.de-Sitzung", v: mobileRuntimeText(s.mobile_runtime), cls: "card",
       title: mobileRuntimeHint(s.mobile_runtime, s) },

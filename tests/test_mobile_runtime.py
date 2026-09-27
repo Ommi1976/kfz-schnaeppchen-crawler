@@ -391,14 +391,3 @@ def test_blocked_start_page_pauses_everything(store, monkeypatch):
     finally:
         browser.close()
 
-
-def test_mobile_search_waits_a_random_gap_between_runs(store, monkeypatch):
-    p = MobileDe(); p.store = store
-    calls = []
-    monkeypatch.setattr(p, '_crawl_pages', lambda q, f: calls.append(q) or [])
-    p.search(SearchQuery(name='EV'))
-    with pytest.raises(MobileDeferred, match='nächste Suche'):
-        p.search(SearchQuery(name='EV'))
-    assert len(calls) == 1
-    gap = load_state(store, 'mobile.schedule.v1.EV')['next_search_at'] - __import__('time').time()
-    assert MobileDe.SEARCH_GAP[0] - 5 <= gap <= MobileDe.SEARCH_GAP[1]

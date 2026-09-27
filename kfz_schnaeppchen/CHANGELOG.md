@@ -1,3 +1,10 @@
+# 1.7.0
+
+- Keine automatische Suche mehr: Suchen starten nur per Knopf („Alle jetzt suchen“ oder „Suchen“ an einer einzelnen Suche), auch nicht beim Start des Add-ons. Die Option `interval_minutes` ist wirkungslos; die Kachel „Nächster Lauf“ zeigt „manuell“.
+- Nach jedem Klick wird die Trefferliste aufgeräumt: Jedes Inserat, das der Lauf nicht gesehen hat, wird einzeln aufgerufen – alle, nicht mehr höchstens 10 je Portal. Die Portale werden parallel geprüft.
+- Auch mobile.de-Inserate werden jetzt einzeln geprüft (gemessen: gelöscht = HTTP 404), über den Chrome-Browser mit Startseite, Referer und Pausen, höchstens 20 je Stunde. Bei einer Sperre wird der Rest beim nächsten Klick geprüft.
+- Die zufällige Pause zwischen mobile.de-Suchen aus 1.6.0 entfällt – den Zeitpunkt bestimmst du.
+
 # 1.6.0
 
 - mobile.de verhält sich menschlicher (nur im Chrome-GPU-Weg): Nach mehr als 20 Minuten Pause beginnt der Browser auf der Startseite, jede Seite wird mit Referer der vorigen geladen, und auf jeder Seite gibt es Maus- und Scrollbewegungen über echte Eingabeereignisse. Die erste Chrome-Sperre kam nach rund sechs Stunden – die Browsermerkmale waren sauber, das Verhalten nicht.

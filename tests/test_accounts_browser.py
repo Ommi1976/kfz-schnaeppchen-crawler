@@ -3,7 +3,6 @@
 Skipped when Playwright browser binaries are absent (the standard CI unit job).
 No real portal request, account or password is used.
 """
-import asyncio
 import socket
 import threading
 import time
@@ -25,9 +24,6 @@ def test_interactive_login_ui_and_shared_profile(tmp_path, monkeypatch, denied_f
         monkeypatch.delenv("DISPLAY", raising=False)
         monkeypatch.setenv("KFZ_DB_PATH", str(tmp_path / "ui.db"))
         monkeypatch.setattr(mobile_runtime, "PROFILE_DIR", tmp_path / "firefox_profile")
-        async def idle(_app):
-            await asyncio.Future()
-        monkeypatch.setattr("kfz_crawler.web._scheduler", idle)
         html = """<!doctype html><html><body style='margin:0;font:20px Arial'>
           <h1>Testportal</h1><input id='mail' style='position:absolute;left:20px;top:80px;width:300px;height:40px'>
           <input id='pass' type='password' style='position:absolute;left:20px;top:140px;width:300px;height:40px'>

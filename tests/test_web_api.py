@@ -177,3 +177,16 @@ def test_legacy_cookies_do_not_release_the_mobile_cooldown(client):
     import pytest
     with pytest.raises(MobileDeferred):
         RequestControl(store).reserve('search')
+
+
+def test_no_search_runs_without_a_click(tmp_path, monkeypatch):
+    import time
+    from fastapi.testclient import TestClient
+    from kfz_crawler import web
+    monkeypatch.setenv("KFZ_DB_PATH", str(tmp_path / "manual.db"))
+    runs = []
+    monkeypatch.setattr(web, "_run_all", lambda app, only_id=None: runs.append(only_id) or {})
+    with TestClient(web.app, client=("172.30.32.2", 1234)) as client:
+        time.sleep(1.5)
+        assert runs == []  # kein Lauf beim Start, kein Zeitplan
+        assert client.get("/api/status").json()["next_run_at"] is None

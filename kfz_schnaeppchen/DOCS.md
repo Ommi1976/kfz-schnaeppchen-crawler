@@ -18,7 +18,7 @@ gemerkt – so bekommst du jedes Auto nur **einmal** gemeldet.
 
 | Option | Bedeutung |
 |---|---|
-| `interval_minutes` | Wie oft gesucht wird (Minuten). |
+| `interval_minutes` | Ohne Wirkung (ab 1.7.0). Suchen starten nur per Knopf in der Weboberfläche. |
 | `deal_threshold` | Ab wie viel **Prozent** unter dem Marktpreis ein Inserat als Schnäppchen gilt (z. B. `15`). |
 | `min_comparables` | Mindestzahl vergleichbarer Inserate, damit der Marktpreis als verlässlich gilt. |
 | `request_delay` | Wartezeit zwischen Anfragen (Sekunden) – Portale schonen. |
@@ -165,15 +165,16 @@ nicht nötig – das Add-on ruft die Dienste direkt auf.
 ### Gelöschte Inserate
 
 Ein Suchlauf liest je Portal nur einen Ausschnitt der Ergebnisse. Ein Inserat,
-das im Lauf fehlt, kann deshalb noch existieren. Nach jedem Lauf ruft das Add-on
-solche Inserate einzeln auf (höchstens 10 je Portal und Lauf, dasselbe Inserat
-frühestens nach 12 Stunden erneut):
+das im Lauf fehlt, kann deshalb noch existieren. Nach jedem Klick ruft das Add-on
+deshalb **jedes** solche Inserat einzeln auf (die Portale parallel; dasselbe
+Inserat frühestens nach 30 Minuten erneut):
 
 | Portal | gilt als gelöscht bei |
 |---|---|
 | AutoScout24 | HTTP 404 oder 410 |
 | AutoUncle | HTTP 404 oder 410 |
 | Kleinanzeigen | Umleitung von der Anzeige auf eine Suchseite |
+| mobile.de | HTTP 404 (über den Chrome-Browser, höchstens 20 je Stunde) |
 
 Nachweislich gelöschte Inserate verschwinden aus allen Listen, auch aus der
 Ansicht mit veralteten Einträgen und aus den Verweisen „auch auf anderen
@@ -181,12 +182,13 @@ Portalen“. Taucht ein Inserat später wieder auf, erscheint es wieder.
 Seitentexte wie „verkauft“ werden bewusst nicht ausgewertet – sie stehen auch in
 lebenden Inseraten.
 
-mobile.de wird wegen des Bot-Schutzes nicht einzeln abgerufen. Dort erkennt der
-vollständige Durchgang verschwundene Inserate. Zusätzlich gilt ein
-Sicherheitsnetz: Wurde ein Inserat 72 Stunden nicht gesehen, obwohl das Portal
-seitdem Treffer lieferte, und hat es niemand als vorhanden bestätigt, wird es als
-veraltet ausgeblendet. Bei den einzeln prüfbaren Portalen greift das Netz erst,
-nachdem eine Prüfung kein eindeutiges Ergebnis brachte.
+mobile.de wird über den eigenen Chrome-Browser geprüft – wie ein Mensch mit
+Startseite, Referer und Pausen. Sperrt mobile.de dabei, pausiert das Add-on wie
+gewohnt, und die übrigen Inserate werden beim nächsten Klick geprüft.
+Zusätzlich gilt ein Sicherheitsnetz: Wurde ein Inserat 72 Stunden nicht gesehen,
+obwohl das Portal seitdem Treffer lieferte, brachte eine Prüfung kein eindeutiges
+Ergebnis und hat es niemand als vorhanden bestätigt, wird es als veraltet
+ausgeblendet.
 
 ### Grenzen der Quellen
 
@@ -210,9 +212,8 @@ nachdem eine Prüfung kein eindeutiges Ergebnis brachte.
 - **Verhalten im mobile.de-Browser (ab 1.6.0):** Im Chrome-GPU-Weg beginnt eine
   Sitzung nach mehr als 20 Minuten Pause auf der Startseite, lädt jede Seite mit
   Referer der vorigen und scrollt bzw. bewegt die Maus über echte
-  Eingabeereignisse. Zwischen zwei mobile.de-Suchen liegen zufällig 40 bis 100
-  Minuten; ein übersprungener Lauf ist kein Fehler. Eine Sperre schließt das
-  nicht aus – die Schutzpause greift weiterhin.
+  Eingabeereignisse. Wann gesucht wird, bestimmst du per Knopf (ab 1.7.0). Eine
+  Sperre schließt das nicht aus – die Schutzpause greift weiterhin.
 - **Browser-Modus (`use_browser`, #1):** Das Add-on-Image enthält Playwright
   sowie Chromium und Firefox. Eine AutoUncle-/mobile.de-Anmeldung aus einem
   anderen Browser wird nicht automatisch übernommen. Das mobile.de-Profil

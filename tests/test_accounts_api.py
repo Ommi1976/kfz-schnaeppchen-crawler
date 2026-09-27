@@ -1,4 +1,3 @@
-import asyncio
 from unittest.mock import Mock
 
 import pytest
@@ -9,9 +8,6 @@ from kfz_crawler.web import app
 @pytest.fixture
 def client(tmp_path, monkeypatch):
     monkeypatch.setenv("KFZ_DB_PATH", str(tmp_path / "test.db"))
-    async def idle(_app):
-        await asyncio.Future()
-    monkeypatch.setattr("kfz_crawler.web._scheduler", idle)
     with TestClient(app, client=("172.30.32.2", 1234), headers={"X-Ingress-Path":"/api/hassio_ingress/test"}) as c:
         yield c
 
