@@ -218,6 +218,14 @@ ausgeblendet.
   in `/data/chrome_profile`; eine bestehende mobile.de-Anmeldung aus dem
   Firefox-Profil wird nicht übernommen. Sitzungstiefe und Suchpausen gelten
   unverändert – eine Freigabe durch den Portalbetreiber ist damit nicht garantiert.
+- **Detailseiten und SoH (ab 1.9.0):** Der SoH steht fast nur in der
+  mobile.de-Beschreibung. Nach jedem Klick lädt das Add-on deshalb die
+  Detailseiten der mobile.de-Treffer (bis zu 20 je Klick, jede Seite nur einmal,
+  30 Tage gemerkt). AutoUncle-Treffer, die auf mobile.de weiterleiten, werden über
+  die in AutoUncles Weiterleitung enthaltene Adresse durch das echte
+  mobile.de-Inserat ersetzt. Beides nutzt das gemeinsame Stundenbudget für
+  Detailseiten (20); ist es erschöpft oder sperrt mobile.de, geht es beim
+  nächsten Klick weiter.
 - **Verhalten im mobile.de-Browser (ab 1.6.0):** Im Chrome-GPU-Weg beginnt eine
   Sitzung nach mehr als 20 Minuten Pause auf der Startseite, lädt jede Seite mit
   Referer der vorigen und scrollt bzw. bewegt die Maus über echte

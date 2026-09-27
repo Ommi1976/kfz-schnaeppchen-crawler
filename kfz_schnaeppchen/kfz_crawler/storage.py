@@ -841,6 +841,45 @@ class SeenStore:
             twins.setdefault(r["au"], set()).add(r["mo"])
         return twins
 
+    def autouncle_mobile_candidates(self, search_name: str) -> List[dict]:
+        """Sichtbare AutoUncle-Treffer, die auf mobile.de weiterleiten und noch keinen
+        sichtbaren mobile.de-Zwilling haben."""
+        twins = self.autouncle_twins_of_mobile()
+        with self._lock:
+            rows = [dict(r) for r in self.conn.execute(
+                "SELECT fingerprint, url, title, price, year, mileage, fuel, power_ps, location FROM deals "
+                "WHERE search_name = ? AND portal = 'AutoUncle' AND gone_at IS NULL "
+                "  AND COALESCE(is_stale, 0) = 0 AND url LIKE '%/das_wiedersehen/mobile/%' "
+                "ORDER BY first_seen DESC", (search_name,))]
+        return [r for r in rows if r["fingerprint"] not in twins]
+
+    def link_same_vehicle(self, first: str, second: str, evidence: str) -> None:
+        """Legt zwei Angebote als dasselbe Fahrzeug fest (belegt, nicht geschätzt)."""
+        now = time.time()
+        with self._lock:
+            try:
+                existing = self.conn.execute(
+                    "SELECT vehicle_id FROM vehicle_links WHERE offer_id IN (?, ?) LIMIT 1",
+                    (first, second)).fetchone()
+                vid = existing["vehicle_id"] if existing else "v_" + first[:24]
+                self.conn.execute("INSERT OR IGNORE INTO vehicles (vehicle_id, identity_confidence, created, updated) "
+                                  "VALUES (?, 1.0, ?, ?)", (vid, now, now))
+                for fp in (first, second):
+                    row = self.conn.execute("SELECT * FROM deals WHERE fingerprint = ?", (fp,)).fetchone()
+                    if not row:
+                        continue
+                    self.conn.execute(
+                        "INSERT OR REPLACE INTO offers (offer_id, vehicle_id, portal, title, price, location, url, "
+                        "image_urls, body, status, first_seen, last_seen) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'aktiv', ?, ?)",
+                        (fp, vid, row["portal"], row["title"], row["price"], row["location"], row["url"],
+                         row["image_urls"], row["body"], row["first_seen"], row["last_seen"]))
+                    self.conn.execute(
+                        "INSERT OR REPLACE INTO vehicle_links (offer_id, vehicle_id, confidence, evidence, manual, created) "
+                        "VALUES (?, ?, 1.0, ?, 0, ?)", (fp, vid, evidence, now))
+                self.conn.commit()
+            except sqlite3.Error:
+                logger.exception("Fahrzeugzuordnung %s/%s nicht speicherbar", first, second)
+
     def known_urls(self, fingerprints: list) -> dict:
         """Zuletzt gespeicherte URL je Fingerprint (z. B. nachgeladene Direktlinks)."""
         if not fingerprints:

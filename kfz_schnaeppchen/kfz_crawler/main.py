@@ -468,6 +468,16 @@ def _run_search(cfg, query, store, progress_runs, *, include_seen=False):
         except Exception:
             logger.exception("Verfügbarkeitsprüfung fehlgeschlagen")
 
+    # AutoUncle-Treffer mit Herkunft mobile.de durch das echte mobile.de-Inserat
+    # ergänzen (bessere Datenlage, häufiger SoH).
+    if (cfg.portals.get("autouncle") and cfg.portals.get("mobile_de")
+            and hasattr(store, "autouncle_mobile_candidates")):
+        from .mobile_bridge import bridge
+        try:
+            bridge(store, query.name, proxy=cfg.settings.proxy or None)
+        except Exception:
+            logger.exception("mobile.de-Ergänzung über AutoUncle fehlgeschlagen")
+
     return new_deals
 
 

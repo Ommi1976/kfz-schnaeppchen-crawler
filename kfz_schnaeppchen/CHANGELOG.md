@@ -1,3 +1,8 @@
+# 1.9.0
+
+- Mehr SoH-Werte: mobile.de-Detailseiten werden jetzt für alle sichtbaren mobile.de-Treffer geladen – bis zu 20 je Klick statt 3, und jede Seite nur einmal (30 Tage gemerkt statt 24 Stunden). Gemessen: Von 17 geladenen mobile.de-Detailseiten nannten 9 einen SoH; die meisten Treffer bekamen ihre Detailseite bisher nie. Stundenbudget für Detailseiten 20 statt 6.
+- AutoUncle-Treffer mit Herkunft mobile.de werden durch das echte mobile.de-Inserat ersetzt: Die mobile.de-Adresse steht in AutoUncles Weiterleitung (Trockenlauf: 29 von 29 ermittelt). Das Inserat wird über den Chrome-Browser geladen, als mobile.de-Zeile gespeichert (mit Beschreibung, Garantie und ggf. SoH) und mit dem AutoUncle-Treffer als dasselbe Fahrzeug verknüpft – die Liste zeigt dann die mobile.de-Zeile.
+
 # 1.8.0
 
 - Ein Klick auf den Fahrzeugtitel oder irgendwo in die Trefferzeile öffnet das Originalinserat in einem neuen Tab. Bei schmalen Fenstern lag die Spalte „öffnen ↗“ außerhalb des sichtbaren Bereichs.

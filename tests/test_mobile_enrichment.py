@@ -76,6 +76,7 @@ def test_unchecked_backlog_progresses_under_three_detail_limit(store, monkeypatc
         store.record_listing('EV', listing(lid))
     worker = Mock(); worker.fetch.return_value = DETAIL
     monkeypatch.setattr('kfz_crawler.mobile_runtime.mobile_browser', lambda: worker)
+    monkeypatch.setattr(MobileDe, 'DETAILS_PER_RUN', 3)  # Rückstand über mehrere Läufe
     p = MobileDe(); p.store = store
     for expected in (3, 6, 7):
         p.enrich([], SearchQuery(name='EV'))

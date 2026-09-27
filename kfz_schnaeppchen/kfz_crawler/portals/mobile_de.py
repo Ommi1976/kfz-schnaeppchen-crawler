@@ -260,6 +260,13 @@ class MobileDe(BasePortal):
         self._publish_progress()
         return results
 
+    # Der SoH steht fast nur auf der Detailseite (gemessen 27.09.2026: 9 von 17
+    # geladenen mobile.de-Inseraten). Bisher 3 Seiten je Lauf und 24 h Cache –
+    # die meisten Treffer bekamen ihre Detailseite nie. Beschreibung und SoH
+    # ändern sich kaum; jede Seite wird daher einmal gelesen und lange gemerkt.
+    DETAILS_PER_RUN = 20
+    DETAIL_CACHE = 30 * 24 * 3600
+
     def enrich(self, listings, query, force=False):
         """Priority details, shared browser and persistent positive/negative cache."""
         from ..mobile_runtime import mobile_browser, load_state, save_state, MobileDeferred
@@ -307,7 +314,7 @@ class MobileDe(BasePortal):
                     if id(listing) in backlog:
                         self.store.update_mobile_details(backlog[id(listing)], listing)
                 continue
-            if attempted >= 3:
+            if attempted >= self.DETAILS_PER_RUN:
                 continue  # later entries may have cached detail data
             attempted += 1
             try:
@@ -315,7 +322,7 @@ class MobileDe(BasePortal):
                     f"https://suchen.mobile.de/fahrzeuge/details.html?id={listing.raw_id}",
                     store=self.store, proxy=self.proxy, kind="detail")
             except (MobileDeferred, BrowserBlocked):
-                attempted = 3  # No further network; still apply cached details.
+                attempted = self.DETAILS_PER_RUN  # No further network; still apply cached details.
                 continue
             except Exception:
                 save_state(self.store, key, {"checked_at": time.time(), "until": time.time() + 6 * 3600})
@@ -323,7 +330,8 @@ class MobileDe(BasePortal):
             # Persistence failures must not turn a successful fetch into a
             # negative cache entry. Keep the valid snapshot for replay instead.
             cached_html = mobile_detail_snapshot(html)
-            save_state(self.store, key, {"checked_at": time.time(), "until": time.time() + 24 * 3600, "html": cached_html})
+            save_state(self.store, key, {"checked_at": time.time(), "until": time.time() + self.DETAIL_CACHE,
+                                         "html": cached_html})
             parse_mobile_de_detail_html(cached_html, listing)
             if id(listing) in backlog:
                 self.store.update_mobile_details(backlog[id(listing)], listing)

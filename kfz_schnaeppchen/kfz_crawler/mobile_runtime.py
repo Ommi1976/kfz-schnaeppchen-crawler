@@ -174,9 +174,9 @@ def retry_after_seconds(value: str, now=None) -> float:
 
 class RequestControl:
     """One persistent portal-wide gate; defaults are budgets, not safe-limit claims."""
-    # Detailseiten gesenkt (10 -> 6): weniger Aufrufe pro Tag, gleichmäßiger verteilt.
+    # "detail": Detailseiten für SoH/Beschreibung – jede nur einmal (30 Tage Cache).
     # "check": Verfügbarkeitsprüfung einzelner Inserate nach einem Suchlauf.
-    LIMITS = {"search": 30, "detail": 6, "image": 20, "check": 20}
+    LIMITS = {"search": 30, "detail": 20, "image": 20, "check": 20}
     PAUSES = (2 * 3600, 6 * 3600, 24 * 3600)
 
     def __init__(self, store=None, *, clock=time.time, interval=12.0):
