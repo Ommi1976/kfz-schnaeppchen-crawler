@@ -213,3 +213,16 @@ def test_safety_net_waits_for_check_on_checkable_portal(store):
     # Geprüft, aber unklar (z. B. gesperrt): jetzt greift das Netz.
     check_unseen(store, "E-Autos", now - 60, fetch=lambda u: (403, u), sleep=lambda s: None, now=now)
     assert visible(store) == set()
+
+
+def test_confirmed_mobile_listing_is_not_rechecked_on_every_click(store):
+    now = 10 * DAY
+    record(store, "mobile.de", MOBILE, seen=now - 2 * DAY)
+    calls = []
+    fetch = lambda u: calls.append(u) or (200, u)
+    check_unseen(store, "E-Autos", now - 60, browser_fetch=fetch, sleep=lambda s: None, now=now)
+    check_unseen(store, "E-Autos", now - 60, browser_fetch=fetch, sleep=lambda s: None, now=now + 3600)
+    assert len(calls) == 1
+    check_unseen(store, "E-Autos", now - 60, browser_fetch=fetch, sleep=lambda s: None,
+                 now=now + availability.RECHECK_AFTER_BROWSER + 1)
+    assert len(calls) == 2

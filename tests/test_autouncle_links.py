@@ -100,3 +100,15 @@ def test_404_on_first_page_is_still_an_error(monkeypatch):
 
     with pytest.raises(PortalPageMissing):
         portal._crawl_pages(SearchQuery(name="E-Autos"), fetch, max_pages=5)
+
+
+def test_only_cards_passing_the_search_get_a_link_fetch():
+    from kfz_crawler.models import SearchQuery
+    portal = AutoUncle()
+    cheap = listing("223462080"); cheap.price = 20000
+    pricey = listing("999"); pricey.price = 90000
+    calls = []
+    portal._resolve_direct_links([pricey, cheap], SearchQuery(name="E-Autos", price_to=27500),
+                                 fetch=lambda url: calls.append(url) or DETAIL, sleep=lambda s: None)
+    assert calls == [f"{BASE}/de/d/223462080"]
+    assert "/das_wiedersehen/" in cheap.url and "/de/d/999" in pricey.url

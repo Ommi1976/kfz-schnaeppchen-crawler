@@ -1,3 +1,8 @@
+# 1.7.1
+
+- AutoUncle-Direktlinks werden jetzt nur für Treffer nachgeladen, die deinen Filter bestehen – dafür alle in einem Lauf. Bisher ging das Budget von 15 Seiten an die rund 60 % Rohtreffer, die ohnehin aussortiert werden (gemessen: 185 von 460 Karten ohne Link, nur 15 nachgeladen). Deshalb änderte sich an der sichtbaren Liste kaum etwas.
+- mobile.de: Ein als vorhanden bestätigtes Inserat wird erst nach 12 Stunden erneut geprüft, nicht nach 30 Minuten. Sonst kostete jeder Klick 40–60 mobile.de-Seitenaufrufe.
+
 # 1.7.0
 
 - Keine automatische Suche mehr: Suchen starten nur per Knopf („Alle jetzt suchen“ oder „Suchen“ an einer einzelnen Suche), auch nicht beim Start des Add-ons. Die Option `interval_minutes` ist wirkungslos; die Kachel „Nächster Lauf“ zeigt „manuell“.

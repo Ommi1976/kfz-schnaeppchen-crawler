@@ -146,20 +146,22 @@ class AutoUncle(BasePortal):
             except MobileDeferred:
                 raise
             except PortalPartialError as exc:
-                self._resolve_direct_links(exc.listings)
+                self._resolve_direct_links(exc.listings, query)
                 raise
             except Exception as exc:
                 raise PortalError(f"AutoUncle: Browserabruf fehlgeschlagen – {exc}") from exc
         else:
             results = self._search_variants(query, lambda url: self._get(url).text)
-        self._resolve_direct_links(results)
+        self._resolve_direct_links(results, query)
         return results
 
-    # Rund ein Drittel der Ergebniskarten enthält keinen Link zum Händler, nur
+    # Rund 40 % der Ergebniskarten enthalten keinen Link zum Händler, nur
     # AutoUncles eigene Fahrzeugseite (/de/d/<id>). Dort steht er hinter
     # "Zum Angebot" als /de/das_wiedersehen/<quelle>/<id>/<n> – mit derselben
     # ID; andere Links dieser Art gehören zu "Ähnliche Fahrzeuge".
-    LINK_BUDGET = 15  # Fahrzeugseiten je Lauf; Bekanntes kommt aus der Datenbank
+    # Nur für Karten, die den Filter bestehen: Das Budget ging sonst an die
+    # ~60 % Rohtreffer, die ohnehin aussortiert werden (gemessen 27.09.2026).
+    LINK_BUDGET = 100  # Fahrzeugseiten je Lauf; Bekanntes kommt aus der Datenbank
 
     def _direct_link(self, raw_id: str, fetch) -> Optional[str]:
         html = fetch(f"{self.BASE}/de/d/{raw_id}")
@@ -173,10 +175,11 @@ class AutoUncle(BasePortal):
                                 headers={"Accept-Language": "de-DE,de;q=0.9"})
         return response.text if response.status_code == 200 else ""
 
-    def _resolve_direct_links(self, listings, fetch=None, sleep=time.sleep) -> None:
-        pending = [l for l in listings if "/de/d/" in (l.url or "") and (l.raw_id or "").isdigit()]
+    def _resolve_direct_links(self, listings, query=None, fetch=None, sleep=time.sleep) -> None:
+        pending = [l for l in listings if "/de/d/" in (l.url or "") and (l.raw_id or "").isdigit()
+                   and (query is None or evaluate_query(l, query).passed)]
         if not pending:
-            logger.info("AutoUncle-Direktlinks: alle %d Karten mit Link", len(listings))
+            logger.info("AutoUncle-Direktlinks: keine passende Karte ohne Link (%d Karten)", len(listings))
             return
         store = getattr(self, "store", None)
         try:
@@ -195,7 +198,7 @@ class AutoUncle(BasePortal):
             if budget <= 0:
                 continue
             if budget < self.LINK_BUDGET:
-                sleep(random.uniform(2, 4))
+                sleep(random.uniform(1, 2))
             budget -= 1
             try:
                 direct = self._direct_link(listing.raw_id, fetch)

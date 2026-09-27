@@ -34,6 +34,9 @@ CHECKABLE_PORTALS = HTTP_PORTALS + BROWSER_PORTALS
 GONE_STATUS = {404, 410}
 CHECKS_PER_PORTAL = 500         # nach einem Klick alle Kandidaten
 RECHECK_AFTER = 30 * 60         # Doppelklick prüft nicht alles erneut
+# mobile.de liest je Klick nur wenige Seiten neu; ohne längere Frist kostete jeder
+# Klick 40-60 Detailaufrufe (Sperrrisiko). Gelöschte fallen spätestens danach auf.
+RECHECK_AFTER_BROWSER = 12 * 3600
 SAFETY_NET_AGE = 72 * 3600      # nicht gesehen und nicht als vorhanden bestätigt
 ALIVE_VALID = 24 * 3600         # so lange schützt eine Bestätigung vor dem Netz
 HTTP_PAUSE = (1.5, 3.0)         # zwischen zwei Abrufen desselben Portals
@@ -89,8 +92,10 @@ def check_unseen(store, search_name: str, seen_before: float, *, proxy: Optional
     now = time.time() if now is None else now
     counts = {"gone": 0, "alive": 0, "unknown": 0, "stale": 0, "deferred": 0}
     lock = threading.Lock()
-    candidates = store.unseen_candidates(search_name, seen_before, now - RECHECK_AFTER,
-                                         CHECKABLE_PORTALS, CHECKS_PER_PORTAL)
+    candidates = (store.unseen_candidates(search_name, seen_before, now - RECHECK_AFTER,
+                                          HTTP_PORTALS, CHECKS_PER_PORTAL)
+                  + store.unseen_candidates(search_name, seen_before, now - RECHECK_AFTER_BROWSER,
+                                            BROWSER_PORTALS, CHECKS_PER_PORTAL))
     groups = defaultdict(list)
     for row in candidates:
         groups[row["portal"]].append(row)

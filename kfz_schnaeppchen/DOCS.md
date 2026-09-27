@@ -174,7 +174,7 @@ Inserat frühestens nach 30 Minuten erneut):
 | AutoScout24 | HTTP 404 oder 410 |
 | AutoUncle | HTTP 404 oder 410 |
 | Kleinanzeigen | Umleitung von der Anzeige auf eine Suchseite |
-| mobile.de | HTTP 404 (über den Chrome-Browser, höchstens 20 je Stunde) |
+| mobile.de | HTTP 404 (über den Chrome-Browser, höchstens 20 je Stunde; bestätigte Inserate erst nach 12 Stunden erneut) |
 
 Nachweislich gelöschte Inserate verschwinden aus allen Listen, auch aus der
 Ansicht mit veralteten Einträgen und aus den Verweisen „auch auf anderen
