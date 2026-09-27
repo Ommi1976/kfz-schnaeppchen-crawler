@@ -1,3 +1,8 @@
+# 1.8.0
+
+- Ein Klick auf den Fahrzeugtitel oder irgendwo in die Trefferzeile öffnet das Originalinserat in einem neuen Tab. Bei schmalen Fenstern lag die Spalte „öffnen ↗“ außerhalb des sichtbaren Bereichs.
+- Steht dasselbe Auto auf AutoUncle und mobile.de, zeigt die Liste nur noch die mobile.de-Zeile – dort sind Beschreibung, Garantie und SoH deutlich häufiger vorhanden. Grundlage ist der vorsichtige Fahrzeugabgleich (Kilometer auf 500 km genau plus weitere Merkmale). Der AutoUncle-Link bleibt unter „auch auf anderen Portalen“ erreichbar.
+
 # 1.7.1
 
 - AutoUncle-Direktlinks werden jetzt nur für Treffer nachgeladen, die deinen Filter bestehen – dafür alle in einem Lauf. Bisher ging das Budget von 15 Seiten an die rund 60 % Rohtreffer, die ohnehin aussortiert werden (gemessen: 185 von 460 Karten ohne Link, nur 15 nachgeladen). Deshalb änderte sich an der sichtbaren Liste kaum etwas.

@@ -504,12 +504,13 @@ function renderDealsRows(deals) {
       ? `<span class="data-badge stale" title="Das Portal konnte diesen Treffer im letzten Lauf nicht bestätigen">veraltet</span>`
       : "";
 
-    return `<tr class="${rowcls}${d.is_stale ? " row-stale" : ""}">
+    return `<tr class="${rowcls}${d.is_stale ? " row-stale" : ""} row-link" data-url="${escapeHtml(d.url || "")}">
       <td class="markcell">${mark}</td>
       <td><span class="portal-badge ${pcls}">${escapeHtml(d.portal || "")}</span>${d.portal === "AutoUncle" && d.origin_portal
         ? `<br><small class="muted" title="Herkunft laut AutoUncle; nicht direkt beim Ursprungsportal abgerufen">${escapeHtml(d.origin_portal)} via AutoUncle</small>` : ""}</td>
       <td class="title">
-        <div class="t-main">${escapeHtml(d.title || "")}</div>
+        <a class="t-main title-link" href="${escapeHtml(d.url || "")}" target="_blank" rel="noopener"
+           title="Originalinserat öffnen">${escapeHtml(d.title || "")}</a>
         ${subInfo}<div class="data-quality">${staleBadge}</div>
         ${d.is_suspicious ? `<div class="reason">${escapeHtml(d.reasons || "")}</div>` : ""}
       </td>
@@ -772,6 +773,15 @@ async function submitForm(ev) {
 }
 
 // ---------- Events ----------
+// Ein Klick auf einen Treffer öffnet das Originalinserat. Die Spalte „öffnen ↗“
+// liegt bei schmalen Fenstern außerhalb des sichtbaren Bereichs.
+document.getElementById("deals-body").addEventListener("click", (e) => {
+  if (e.target.closest("a, button, input, label")) return;  // eigene Links/Knöpfe
+  if (String(window.getSelection?.() || "").trim()) return;  // Text wird markiert
+  const url = e.target.closest("tr.row-link")?.dataset.url;
+  if (url && /^https:\/\//.test(url)) window.open(url, "_blank", "noopener");
+});
+
 document.getElementById("new-search").addEventListener("click", () => openForm(null));
 document.getElementById("modal-close").addEventListener("click", closeForm);
 document.getElementById("modal-cancel").addEventListener("click", closeForm);

@@ -820,6 +820,27 @@ class SeenStore:
                 self.conn.commit()
         return stale_count
 
+    def autouncle_twins_of_mobile(self) -> dict:
+        """AutoUncle-Fingerprint -> mobile.de-Fingerprints desselben Fahrzeugs.
+
+        Grundlage ist der vorsichtige Fahrzeugabgleich (vehicles.py): Kilometer
+        auf 500 km genau plus weitere Merkmale, harte Widersprüche schließen aus.
+        """
+        with self._lock:
+            try:
+                rows = self.conn.execute(
+                    "SELECT la.offer_id AS au, lm.offer_id AS mo FROM vehicle_links la "
+                    "JOIN vehicle_links lm ON lm.vehicle_id = la.vehicle_id AND lm.offer_id <> la.offer_id "
+                    "JOIN deals a ON a.fingerprint = la.offer_id AND a.portal = 'AutoUncle' "
+                    "JOIN deals m ON m.fingerprint = lm.offer_id AND m.portal = 'mobile.de' "
+                    "WHERE m.gone_at IS NULL AND COALESCE(m.is_stale, 0) = 0").fetchall()
+            except sqlite3.Error:
+                return {}  # alte Datenbank ohne Fahrzeugakte
+        twins: dict = {}
+        for r in rows:
+            twins.setdefault(r["au"], set()).add(r["mo"])
+        return twins
+
     def known_urls(self, fingerprints: list) -> dict:
         """Zuletzt gespeicherte URL je Fingerprint (z. B. nachgeladene Direktlinks)."""
         if not fingerprints:

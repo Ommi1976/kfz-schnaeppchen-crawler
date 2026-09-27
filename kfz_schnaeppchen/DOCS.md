@@ -162,6 +162,15 @@ nicht nötig – das Add-on ruft die Dienste direkt auf.
   der Hinweistext nennt den letzten Suchfortschritt. `/api/status` enthält
   zusätzlich `mobile_runtime` mit Budgetzählern und Pausenende.
 
+### Dasselbe Auto auf mehreren Portalen
+
+Steht ein Auto auf AutoUncle und direkt auf mobile.de, zeigt die Trefferliste
+nur die mobile.de-Zeile; der AutoUncle-Link erscheint dort unter „auch auf
+anderen Portalen“. Zugeordnet wird nur bei eindeutiger Übereinstimmung
+(Kilometerstand auf 500 km genau plus weitere Merkmale; Widersprüche bei
+Baujahr, Leistung oder Hersteller schließen aus). Ist die mobile.de-Zeile
+selbst nicht sichtbar, bleibt die AutoUncle-Zeile stehen.
+
 ### Gelöschte Inserate
 
 Ein Suchlauf liest je Portal nur einen Ausschnitt der Ergebnisse. Ein Inserat,

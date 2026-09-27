@@ -551,6 +551,18 @@ async def deals(search: str | None = None, limit: int = 400, deals_only: bool = 
         filtered.append(row)
     rows = filtered
 
+    # Dasselbe Auto auf AutoUncle und mobile.de: Die mobile.de-Zeile gewinnt –
+    # dort sind Beschreibung, Garantie und SoH deutlich häufiger vorhanden. Nur
+    # wenn die mobile.de-Zeile selbst sichtbar ist; der AutoUncle-Link bleibt
+    # über "auch auf anderen Portalen" erreichbar.
+    try:
+        zwillinge = app.state.store.autouncle_twins_of_mobile()
+    except Exception:
+        logger.exception("Dubletten AutoUncle/mobile.de nicht ermittelbar")
+        zwillinge = {}
+    sichtbar = {r.get("fingerprint") for r in rows}
+    rows = [r for r in rows if not (zwillinge.get(r.get("fingerprint")) or set()) & sichtbar]
+
     portal_counts = {}
     for row in rows:
         p = row.get("portal") or "Unbekannt"

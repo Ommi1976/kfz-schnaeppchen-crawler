@@ -190,3 +190,39 @@ def test_no_search_runs_without_a_click(tmp_path, monkeypatch):
         time.sleep(1.5)
         assert runs == []  # kein Lauf beim Start, kein Zeitplan
         assert client.get("/api/status").json()["next_run_at"] is None
+
+
+def test_mobile_row_wins_over_identical_autouncle_row(client, monkeypatch):
+    store = client.app.state.store
+    monkeypatch.setattr(store, "list_searches", lambda: [{"name": "EV"}])
+    rows = [
+        {"fingerprint": "mo1", "portal": "mobile.de", "url": "https://suchen.mobile.de/fahrzeuge/details.html?id=11"},
+        {"fingerprint": "au1", "portal": "AutoUncle", "url": "https://www.autouncle.de/de/d/1-x"},  # Zwilling
+        {"fingerprint": "au2", "portal": "AutoUncle", "url": "https://www.autouncle.de/de/d/2-y"},  # Zwilling einer unsichtbaren Zeile
+        {"fingerprint": "au3", "portal": "AutoUncle", "url": "https://www.autouncle.de/de/d/3-z"},  # kein Zwilling
+    ]
+    monkeypatch.setattr(store, "list_deals", lambda **kw: [
+        dict(r, title="Test EV", search_name="EV", price=25000, year=2023, mileage=40000) for r in rows])
+    monkeypatch.setattr(store, "autouncle_twins_of_mobile", lambda: {"au1": {"mo1"}, "au2": {"mo-weg"}})
+    shown = {r["fingerprint"] for r in client.get("/api/deals").json()["deals"]}
+    assert shown == {"mo1", "au2", "au3"}
+
+
+def test_autouncle_twins_come_from_vehicle_links(tmp_path):
+    from kfz_crawler.models import Listing
+    from kfz_crawler.storage import SeenStore
+    store = SeenStore(str(tmp_path / "twins.db"))
+    try:
+        mo = Listing(portal="mobile.de", title="ID.3", url="https://suchen.mobile.de/fahrzeuge/details.html?id=1")
+        au = Listing(portal="AutoUncle", title="ID.3", url="https://www.autouncle.de/de/d/1-x")
+        store.record_listings("EV", [mo, au])
+        store.conn.execute("INSERT INTO vehicles (vehicle_id) VALUES ('v1')")
+        for fp in (mo.fingerprint, au.fingerprint):
+            store.conn.execute("INSERT INTO vehicle_links (vehicle_id, offer_id) VALUES ('v1', ?)", (fp,))
+        store.conn.commit()
+        assert store.autouncle_twins_of_mobile() == {au.fingerprint: {mo.fingerprint}}
+        store.conn.execute("UPDATE deals SET gone_at = 1 WHERE fingerprint = ?", (mo.fingerprint,))
+        store.conn.commit()
+        assert store.autouncle_twins_of_mobile() == {}  # gelöschtes mobile.de-Inserat ersetzt nichts
+    finally:
+        store.close()
